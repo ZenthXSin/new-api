@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import i18next from 'i18next'
 import { Code2, Eye, ShieldAlert } from 'lucide-react'
 import * as React from 'react'
 import { useForm, type Resolver } from 'react-hook-form'
@@ -159,6 +160,34 @@ const paymentSchema = z.object({
       })
     }
   }),
+  WeChatPayEnabled: z.boolean(),
+  WeChatPayAppID: z.string(),
+  WeChatPayMerchantID: z.string(),
+  WeChatPayMerchantSerialNumber: z.string(),
+  WeChatPayPrivateKey: z.string(),
+  WeChatPayAPIV3Key: z.string().refine(
+    (value) => value.trim() === '' || value.trim().length === 32,
+    i18next.t('API v3 key must be exactly 32 characters')
+  ),
+  WeChatPayPlatformCertificate: z.string(),
+  WeChatPayPlatformCertificateSerialNumber: z.string(),
+  WeChatPayNotifyURL: z.string().refine((value) => {
+    const trimmed = value.trim()
+    if (!trimmed) return true
+    try {
+      const url = new URL(trimmed)
+      return (
+        url.protocol === 'https:' &&
+        url.pathname === '/api/wechatpay/webhook' &&
+        !url.search &&
+        !url.hash
+      )
+    } catch {
+      return false
+    }
+  }, i18next.t('Use an HTTPS callback URL ending in /api/wechatpay/webhook without query parameters or fragments')),
+  WeChatPayMinTopUp: z.coerce.number().int().min(1),
+  WeChatPayOrderExpireMinutes: z.coerce.number().int().min(1),
   WaffoEnabled: z.boolean(),
   WaffoApiKey: z.string(),
   WaffoPrivateKey: z.string(),
@@ -437,6 +466,20 @@ export function PaymentSettingsSection({
       CreemWebhookSecret: values.CreemWebhookSecret.trim(),
       CreemTestMode: values.CreemTestMode,
       CreemProducts: values.CreemProducts.trim(),
+      WeChatPayEnabled: values.WeChatPayEnabled,
+      WeChatPayAppID: values.WeChatPayAppID.trim(),
+      WeChatPayMerchantID: values.WeChatPayMerchantID.trim(),
+      WeChatPayMerchantSerialNumber:
+        values.WeChatPayMerchantSerialNumber.trim(),
+      WeChatPayPrivateKey: values.WeChatPayPrivateKey.trim(),
+      WeChatPayAPIV3Key: values.WeChatPayAPIV3Key.trim(),
+      WeChatPayPlatformCertificate:
+        values.WeChatPayPlatformCertificate.trim(),
+      WeChatPayPlatformCertificateSerialNumber:
+        values.WeChatPayPlatformCertificateSerialNumber.trim(),
+      WeChatPayNotifyURL: values.WeChatPayNotifyURL.trim(),
+      WeChatPayMinTopUp: values.WeChatPayMinTopUp,
+      WeChatPayOrderExpireMinutes: values.WeChatPayOrderExpireMinutes,
       WaffoEnabled: values.WaffoEnabled,
       WaffoSandbox: values.WaffoSandbox,
       WaffoMerchantId: values.WaffoMerchantId.trim(),
@@ -482,6 +525,21 @@ export function PaymentSettingsSection({
       CreemWebhookSecret: initialRef.current.CreemWebhookSecret.trim(),
       CreemTestMode: initialRef.current.CreemTestMode,
       CreemProducts: initialRef.current.CreemProducts.trim(),
+      WeChatPayEnabled: initialRef.current.WeChatPayEnabled,
+      WeChatPayAppID: initialRef.current.WeChatPayAppID.trim(),
+      WeChatPayMerchantID: initialRef.current.WeChatPayMerchantID.trim(),
+      WeChatPayMerchantSerialNumber:
+        initialRef.current.WeChatPayMerchantSerialNumber.trim(),
+      WeChatPayPrivateKey: initialRef.current.WeChatPayPrivateKey.trim(),
+      WeChatPayAPIV3Key: initialRef.current.WeChatPayAPIV3Key.trim(),
+      WeChatPayPlatformCertificate:
+        initialRef.current.WeChatPayPlatformCertificate.trim(),
+      WeChatPayPlatformCertificateSerialNumber:
+        initialRef.current.WeChatPayPlatformCertificateSerialNumber.trim(),
+      WeChatPayNotifyURL: initialRef.current.WeChatPayNotifyURL.trim(),
+      WeChatPayMinTopUp: initialRef.current.WeChatPayMinTopUp,
+      WeChatPayOrderExpireMinutes:
+        initialRef.current.WeChatPayOrderExpireMinutes,
       WaffoEnabled: initialRef.current.WaffoEnabled,
       WaffoSandbox: initialRef.current.WaffoSandbox,
       WaffoMerchantId: initialRef.current.WaffoMerchantId.trim(),
@@ -627,6 +685,79 @@ export function PaymentSettingsSection({
       normalizeJsonForComparison(initial.CreemProducts)
     ) {
       updates.push({ key: 'CreemProducts', value: sanitized.CreemProducts })
+    }
+
+    if (sanitized.WeChatPayEnabled !== initial.WeChatPayEnabled) {
+      updates.push({
+        key: 'WeChatPayEnabled',
+        value: sanitized.WeChatPayEnabled,
+      })
+    }
+    if (sanitized.WeChatPayAppID !== initial.WeChatPayAppID) {
+      updates.push({ key: 'WeChatPayAppID', value: sanitized.WeChatPayAppID })
+    }
+    if (sanitized.WeChatPayMerchantID !== initial.WeChatPayMerchantID) {
+      updates.push({
+        key: 'WeChatPayMerchantID',
+        value: sanitized.WeChatPayMerchantID,
+      })
+    }
+    if (
+      sanitized.WeChatPayMerchantSerialNumber !==
+      initial.WeChatPayMerchantSerialNumber
+    ) {
+      updates.push({
+        key: 'WeChatPayMerchantSerialNumber',
+        value: sanitized.WeChatPayMerchantSerialNumber,
+      })
+    }
+    if (sanitized.WeChatPayPrivateKey) {
+      updates.push({
+        key: 'WeChatPayPrivateKey',
+        value: sanitized.WeChatPayPrivateKey,
+      })
+    }
+    if (sanitized.WeChatPayAPIV3Key) {
+      updates.push({
+        key: 'WeChatPayAPIV3Key',
+        value: sanitized.WeChatPayAPIV3Key,
+      })
+    }
+    if (sanitized.WeChatPayPlatformCertificate) {
+      updates.push({
+        key: 'WeChatPayPlatformCertificate',
+        value: sanitized.WeChatPayPlatformCertificate,
+      })
+    }
+    if (
+      sanitized.WeChatPayPlatformCertificateSerialNumber !==
+      initial.WeChatPayPlatformCertificateSerialNumber
+    ) {
+      updates.push({
+        key: 'WeChatPayPlatformCertificateSerialNumber',
+        value: sanitized.WeChatPayPlatformCertificateSerialNumber,
+      })
+    }
+    if (sanitized.WeChatPayNotifyURL !== initial.WeChatPayNotifyURL) {
+      updates.push({
+        key: 'WeChatPayNotifyURL',
+        value: sanitized.WeChatPayNotifyURL,
+      })
+    }
+    if (sanitized.WeChatPayMinTopUp !== initial.WeChatPayMinTopUp) {
+      updates.push({
+        key: 'WeChatPayMinTopUp',
+        value: sanitized.WeChatPayMinTopUp,
+      })
+    }
+    if (
+      sanitized.WeChatPayOrderExpireMinutes !==
+      initial.WeChatPayOrderExpireMinutes
+    ) {
+      updates.push({
+        key: 'WeChatPayOrderExpireMinutes',
+        value: sanitized.WeChatPayOrderExpireMinutes,
+      })
     }
 
     if (sanitized.WaffoEnabled !== initial.WaffoEnabled) {
@@ -877,11 +1008,12 @@ export function PaymentSettingsSection({
           />
           <Tabs defaultValue='general' className='min-w-0'>
             <div className='overflow-x-auto pb-1'>
-              <TabsList className='grid min-w-[44rem] grid-cols-6'>
+              <TabsList className='grid min-w-[50rem] grid-cols-7'>
                 <TabsTrigger value='general'>{t('General')}</TabsTrigger>
                 <TabsTrigger value='epay'>Epay</TabsTrigger>
                 <TabsTrigger value='stripe'>{t('Stripe')}</TabsTrigger>
                 <TabsTrigger value='creem'>Creem</TabsTrigger>
+                <TabsTrigger value='wechatpay'>{t('WeChat Pay')}</TabsTrigger>
                 <TabsTrigger value='waffo-pancake'>Waffo Pancake</TabsTrigger>
                 <TabsTrigger value='waffo'>Waffo</TabsTrigger>
               </TabsList>
@@ -1601,6 +1733,223 @@ export function PaymentSettingsSection({
                     </FormItem>
                   )}
                 />
+              </div>
+            </TabsContent>
+
+            <TabsContent value='wechatpay' className={paymentTabContentClassName}>
+              <div className='space-y-6'>
+                <div>
+                  <h3 className='text-lg font-medium'>{t('WeChat Pay')}</h3>
+                  <p className='text-muted-foreground text-sm'>
+                    {t('Configuration for WeChat Pay Native QR payments')}
+                  </p>
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name='WeChatPayEnabled'
+                  render={({ field }) => (
+                    <SettingsSwitchItem>
+                      <SettingsSwitchContent>
+                        <FormLabel>{t('Enable WeChat Pay')}</FormLabel>
+                        <FormDescription>
+                          {t('Allow users to recharge by scanning a WeChat Pay QR code')}
+                        </FormDescription>
+                      </SettingsSwitchContent>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </SettingsSwitchItem>
+                  )}
+                />
+
+                <div className='grid gap-6 md:grid-cols-2'>
+                  <FormField
+                    control={form.control}
+                    name='WeChatPayAppID'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('App ID')}</FormLabel>
+                        <FormControl>
+                          <Input {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name='WeChatPayMerchantID'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Merchant ID')}</FormLabel>
+                        <FormControl>
+                          <Input {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name='WeChatPayMerchantSerialNumber'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Merchant certificate serial number')}</FormLabel>
+                        <FormControl>
+                          <Input {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name='WeChatPayPlatformCertificateSerialNumber'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Platform certificate serial number')}</FormLabel>
+                        <FormControl>
+                          <Input {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className='grid gap-6 md:grid-cols-2'>
+                  <FormField
+                    control={form.control}
+                    name='WeChatPayPrivateKey'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Merchant private key')}</FormLabel>
+                        <FormControl>
+                          <textarea
+                            className='border-input bg-background min-h-32 w-full rounded-md border px-3 py-2 font-mono text-xs'
+                            placeholder={t('Leave blank unless updating')}
+                            autoComplete='new-password'
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t('PEM-encoded PKCS#1 or PKCS#8 RSA private key')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name='WeChatPayPlatformCertificate'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Platform certificate')}</FormLabel>
+                        <FormControl>
+                          <textarea
+                            className='border-input bg-background min-h-32 w-full rounded-md border px-3 py-2 font-mono text-xs'
+                            placeholder={t('Leave blank unless updating')}
+                            autoComplete='new-password'
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t('PEM-encoded WeChat Pay platform certificate')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name='WeChatPayAPIV3Key'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('API v3 key')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='password'
+                          maxLength={32}
+                          placeholder={t('Leave blank unless updating')}
+                          autoComplete='new-password'
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t('Exactly 32 characters, used to decrypt payment notifications')}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='WeChatPayNotifyURL'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Notification URL')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='url'
+                          placeholder='https://api.example.com/api/wechatpay/webhook'
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Public HTTPS callback URL ending in /api/wechatpay/webhook without query parameters'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className='grid gap-6 md:grid-cols-2'>
+                  <FormField
+                    control={form.control}
+                    name='WeChatPayMinTopUp'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Minimum top-up')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            min={1}
+                            step={1}
+                            {...safeNumberFieldProps(field)}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name='WeChatPayOrderExpireMinutes'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Order expiration (minutes)')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            min={1}
+                            step={1}
+                            {...safeNumberFieldProps(field)}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
               </div>
             </TabsContent>
 

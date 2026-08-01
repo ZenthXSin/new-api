@@ -22,10 +22,23 @@ import { describe, test } from 'node:test'
 import { PAYMENT_TYPES } from '../constants'
 import {
   dispatchSelectedPayment,
+  getMinTopupAmount,
   isStripePayment,
   isWaffoPayment,
   isWaffoPancakePayment,
+  isWeChatPayPayment,
 } from './payment'
+
+describe('minimum topup amount', () => {
+  test('uses the configured minimum when WeChat Pay is the only provider', () => {
+    const topupInfo = {
+      enable_wechatpay_topup: true,
+      wechatpay_min_topup: 25,
+    } as Parameters<typeof getMinTopupAmount>[0]
+
+    assert.equal(getMinTopupAmount(topupInfo), 25)
+  })
+})
 
 describe('payment type classification', () => {
   test('keeps Waffo and Waffo Pancake on their dedicated flows', () => {
@@ -34,6 +47,7 @@ describe('payment type classification', () => {
     assert.equal(isWaffoPancakePayment(PAYMENT_TYPES.WAFFO_PANCAKE), true)
     assert.equal(isWaffoPancakePayment(PAYMENT_TYPES.WAFFO), false)
     assert.equal(isStripePayment(PAYMENT_TYPES.STRIPE), true)
+    assert.equal(isWeChatPayPayment(PAYMENT_TYPES.WECHAT), true)
   })
 })
 
@@ -57,11 +71,42 @@ describe('payment dispatch', () => {
           calls.push('pancake')
           return false
         },
+        wechatPay: async () => false,
       }
     )
 
     assert.equal(success, true)
     assert.deepEqual(calls, ['waffo:120:3'])
+  })
+
+  test('dispatches WeChat Pay only to the native payment processor', async () => {
+    const calls: string[] = []
+    const success = await dispatchSelectedPayment(
+      { name: 'WeChat Pay', type: PAYMENT_TYPES.WECHAT },
+      80,
+      null,
+      {
+        regular: async () => {
+          calls.push('regular')
+          return false
+        },
+        waffo: async () => {
+          calls.push('waffo')
+          return false
+        },
+        waffoPancake: async () => {
+          calls.push('pancake')
+          return false
+        },
+        wechatPay: async (amount) => {
+          calls.push(`wechat:${amount}`)
+          return true
+        },
+      }
+    )
+
+    assert.equal(success, true)
+    assert.deepEqual(calls, ['wechat:80'])
   })
 
   test('does not create a Waffo order without a selected method index', async () => {
@@ -77,6 +122,7 @@ describe('payment dispatch', () => {
           return true
         },
         waffoPancake: async () => false,
+        wechatPay: async () => false,
       }
     )
 

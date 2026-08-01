@@ -163,6 +163,9 @@ require (
 	modernc.org/sqlite v1.40.1 // indirect
 )
 
-require github.com/QuantumNous/new-api/relaykit v0.0.0
+require (
+	github.com/QuantumNous/new-api/relaykit v0.0.0
+	github.com/wechatpay-apiv3/wechatpay-go v0.2.21
+)
 
 replace github.com/QuantumNous/new-api/relaykit => ./relaykit

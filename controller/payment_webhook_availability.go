@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"net/url"
 	"strings"
 
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
@@ -44,6 +46,27 @@ func isCreemWebhookConfigured() bool {
 
 func isCreemWebhookEnabled() bool {
 	return isCreemTopUpEnabled() && isCreemWebhookConfigured()
+}
+
+func isWeChatPayTopUpEnabled() bool {
+	return isPaymentComplianceConfirmed() && setting.WeChatPayEnabled && isWeChatPayWebhookConfigured()
+}
+
+func isWeChatPayWebhookConfigured() bool {
+	notifyURL, err := url.Parse(strings.TrimSpace(setting.WeChatPayNotifyURL))
+	return err == nil && notifyURL.Scheme == "https" && notifyURL.Host != "" && notifyURL.Path == constant.WeChatPayWebhookPath && notifyURL.RawQuery == "" && notifyURL.Fragment == "" &&
+		strings.TrimSpace(setting.WeChatPayAppID) != "" &&
+		strings.TrimSpace(setting.WeChatPayMerchantID) != "" &&
+		strings.TrimSpace(setting.WeChatPayMerchantSerialNumber) != "" &&
+		strings.TrimSpace(setting.WeChatPayPrivateKey) != "" &&
+		len(setting.WeChatPayAPIV3Key) == 32 &&
+		strings.TrimSpace(setting.WeChatPayPlatformCertificate) != "" &&
+		strings.TrimSpace(setting.WeChatPayPlatformCertificateSerialNumber) != "" &&
+		setting.WeChatPayMinTopUp > 0 && setting.WeChatPayOrderExpireMinutes > 0
+}
+
+func isWeChatPayWebhookEnabled() bool {
+	return isWeChatPayTopUpEnabled()
 }
 
 func isWaffoTopUpEnabled() bool {

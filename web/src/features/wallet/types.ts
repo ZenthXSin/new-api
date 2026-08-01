@@ -59,6 +59,17 @@ export type WaffoPancakePaymentResponse = ApiResponse<
     }
   | string
 >
+export type WeChatPayPaymentResponse = ApiResponse<{
+  code_url: string
+  order_id: string
+  expire_at: number
+}>
+export type WeChatPayOrderStatus = 'pending' | 'success' | 'failed' | 'expired'
+export type WeChatPayOrderResponse = ApiResponse<{
+  order_id: string
+  status: WeChatPayOrderStatus
+  verification_error?: boolean
+}>
 
 /**
  * Creem product configuration
@@ -140,6 +151,10 @@ export interface TopupInfo {
   enable_creem_topup?: boolean
   /** Available Creem products */
   creem_products?: CreemProduct[]
+  /** Whether WeChat Pay topup is enabled */
+  enable_wechatpay_topup?: boolean
+  /** Minimum topup amount for WeChat Pay */
+  wechatpay_min_topup?: number
   /** Whether Waffo topup is enabled */
   enable_waffo_topup?: boolean
   /** Available Waffo payment methods */
@@ -204,6 +219,10 @@ export interface WaffoPancakePaymentRequest {
   amount: number
 }
 
+export interface WeChatPayPaymentRequest {
+  amount: number
+}
+
 /**
  * Amount calculation request
  */
@@ -247,7 +266,7 @@ export interface UserWalletData {
 /**
  * Topup record status
  */
-export type TopupStatus = 'success' | 'pending' | 'expired'
+export type TopupStatus = 'success' | 'pending' | 'failed' | 'expired'
 
 /**
  * Topup billing record

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -93,6 +94,17 @@ func InitOptionMap() {
 	common.OptionMap["CreemProducts"] = setting.CreemProducts
 	common.OptionMap["CreemTestMode"] = strconv.FormatBool(setting.CreemTestMode)
 	common.OptionMap["CreemWebhookSecret"] = setting.CreemWebhookSecret
+	common.OptionMap["WeChatPayEnabled"] = strconv.FormatBool(setting.WeChatPayEnabled)
+	common.OptionMap["WeChatPayAppID"] = setting.WeChatPayAppID
+	common.OptionMap["WeChatPayMerchantID"] = setting.WeChatPayMerchantID
+	common.OptionMap["WeChatPayMerchantSerialNumber"] = setting.WeChatPayMerchantSerialNumber
+	common.OptionMap["WeChatPayPrivateKey"] = setting.WeChatPayPrivateKey
+	common.OptionMap["WeChatPayAPIV3Key"] = setting.WeChatPayAPIV3Key
+	common.OptionMap["WeChatPayPlatformCertificate"] = setting.WeChatPayPlatformCertificate
+	common.OptionMap["WeChatPayPlatformCertificateSerialNumber"] = setting.WeChatPayPlatformCertificateSerialNumber
+	common.OptionMap["WeChatPayNotifyURL"] = setting.WeChatPayNotifyURL
+	common.OptionMap["WeChatPayMinTopUp"] = strconv.Itoa(setting.WeChatPayMinTopUp)
+	common.OptionMap["WeChatPayOrderExpireMinutes"] = strconv.Itoa(setting.WeChatPayOrderExpireMinutes)
 	common.OptionMap["WaffoEnabled"] = strconv.FormatBool(setting.WaffoEnabled)
 	common.OptionMap["WaffoApiKey"] = setting.WaffoApiKey
 	common.OptionMap["WaffoPrivateKey"] = setting.WaffoPrivateKey
@@ -208,6 +220,12 @@ func validateOptionValue(key string, value string) error {
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
 	}
+	if key == "WeChatPayMinTopUp" || key == "WeChatPayOrderExpireMinutes" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed <= 0 {
+			return fmt.Errorf("%s must be a positive integer", key)
+		}
+	}
 	return nil
 }
 
@@ -269,6 +287,9 @@ func UpdateOptionsBulk(values map[string]string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
+	if err := validateOptionValue(key, value); err != nil {
+		return err
+	}
 	if key == retiredThemeOptionKey {
 		common.OptionMapRWMutex.Lock()
 		delete(common.OptionMap, key)
@@ -371,6 +392,8 @@ func updateOptionMap(key string, value string) (err error) {
 			setting.ModelRequestRateLimitEnabled = boolValue
 		case "StopOnSensitiveEnabled":
 			setting.StopOnSensitiveEnabled = boolValue
+		case "WeChatPayEnabled":
+			setting.WeChatPayEnabled = boolValue
 		case "SMTPSSLEnabled":
 			common.SMTPSSLEnabled = boolValue
 		case "SMTPStartTLSEnabled":
@@ -445,6 +468,26 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.CreemTestMode = value == "true"
 	case "CreemWebhookSecret":
 		setting.CreemWebhookSecret = value
+	case "WeChatPayAppID":
+		setting.WeChatPayAppID = value
+	case "WeChatPayMerchantID":
+		setting.WeChatPayMerchantID = value
+	case "WeChatPayMerchantSerialNumber":
+		setting.WeChatPayMerchantSerialNumber = value
+	case "WeChatPayPrivateKey":
+		setting.WeChatPayPrivateKey = value
+	case "WeChatPayAPIV3Key":
+		setting.WeChatPayAPIV3Key = value
+	case "WeChatPayPlatformCertificate":
+		setting.WeChatPayPlatformCertificate = value
+	case "WeChatPayPlatformCertificateSerialNumber":
+		setting.WeChatPayPlatformCertificateSerialNumber = value
+	case "WeChatPayNotifyURL":
+		setting.WeChatPayNotifyURL = value
+	case "WeChatPayMinTopUp":
+		setting.WeChatPayMinTopUp, _ = strconv.Atoi(value)
+	case "WeChatPayOrderExpireMinutes":
+		setting.WeChatPayOrderExpireMinutes, _ = strconv.Atoi(value)
 	case "WaffoEnabled":
 		setting.WaffoEnabled = value == "true"
 	case "WaffoApiKey":

@@ -152,6 +152,20 @@ const BILLING_SECTIONS = [
           CreemWebhookSecret: settings.CreemWebhookSecret,
           CreemTestMode: settings.CreemTestMode,
           CreemProducts: settings.CreemProducts,
+          WeChatPayEnabled: settings.WeChatPayEnabled,
+          WeChatPayAppID: settings.WeChatPayAppID,
+          WeChatPayMerchantID: settings.WeChatPayMerchantID,
+          WeChatPayMerchantSerialNumber:
+            settings.WeChatPayMerchantSerialNumber,
+          WeChatPayPrivateKey: settings.WeChatPayPrivateKey,
+          WeChatPayAPIV3Key: settings.WeChatPayAPIV3Key,
+          WeChatPayPlatformCertificate:
+            settings.WeChatPayPlatformCertificate,
+          WeChatPayPlatformCertificateSerialNumber:
+            settings.WeChatPayPlatformCertificateSerialNumber,
+          WeChatPayNotifyURL: settings.WeChatPayNotifyURL,
+          WeChatPayMinTopUp: settings.WeChatPayMinTopUp,
+          WeChatPayOrderExpireMinutes: settings.WeChatPayOrderExpireMinutes,
         }}
         waffoDefaultValues={{
           WaffoEnabled: settings.WaffoEnabled ?? false,
