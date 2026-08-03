@@ -370,6 +370,12 @@ export type OperationsSettings = {
   'perf_metrics_setting.flush_interval': number
   'perf_metrics_setting.bucket_time': 'hour' | 'minute' | '5min'
   'perf_metrics_setting.retention_days': number
+  'telemetry_setting.enabled': boolean
+  'telemetry_setting.retention_days': number
+  'telemetry_setting.max_body_bytes': number
+  'telemetry_setting.max_events_per_batch': number
+  'telemetry_setting.timestamp_skew_seconds': number
+  'telemetry_setting.requests_per_minute': number
 }
 
 export type SecuritySettings = {

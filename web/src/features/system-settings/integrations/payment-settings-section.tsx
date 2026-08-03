@@ -165,10 +165,12 @@ const paymentSchema = z.object({
   WeChatPayMerchantID: z.string(),
   WeChatPayMerchantSerialNumber: z.string(),
   WeChatPayPrivateKey: z.string(),
-  WeChatPayAPIV3Key: z.string().refine(
-    (value) => value.trim() === '' || value.trim().length === 32,
-    i18next.t('API v3 key must be exactly 32 characters')
-  ),
+  WeChatPayAPIV3Key: z
+    .string()
+    .refine(
+      (value) => value.trim() === '' || value.trim().length === 32,
+      i18next.t('API v3 key must be exactly 32 characters')
+    ),
   WeChatPayPlatformCertificate: z.string(),
   WeChatPayPlatformCertificateSerialNumber: z.string(),
   WeChatPayNotifyURL: z.string().refine((value) => {
@@ -473,8 +475,7 @@ export function PaymentSettingsSection({
         values.WeChatPayMerchantSerialNumber.trim(),
       WeChatPayPrivateKey: values.WeChatPayPrivateKey.trim(),
       WeChatPayAPIV3Key: values.WeChatPayAPIV3Key.trim(),
-      WeChatPayPlatformCertificate:
-        values.WeChatPayPlatformCertificate.trim(),
+      WeChatPayPlatformCertificate: values.WeChatPayPlatformCertificate.trim(),
       WeChatPayPlatformCertificateSerialNumber:
         values.WeChatPayPlatformCertificateSerialNumber.trim(),
       WeChatPayNotifyURL: values.WeChatPayNotifyURL.trim(),
@@ -1736,7 +1737,10 @@ export function PaymentSettingsSection({
               </div>
             </TabsContent>
 
-            <TabsContent value='wechatpay' className={paymentTabContentClassName}>
+            <TabsContent
+              value='wechatpay'
+              className={paymentTabContentClassName}
+            >
               <div className='space-y-6'>
                 <div>
                   <h3 className='text-lg font-medium'>{t('WeChat Pay')}</h3>
@@ -1753,7 +1757,9 @@ export function PaymentSettingsSection({
                       <SettingsSwitchContent>
                         <FormLabel>{t('Enable WeChat Pay')}</FormLabel>
                         <FormDescription>
-                          {t('Allow users to recharge by scanning a WeChat Pay QR code')}
+                          {t(
+                            'Allow users to recharge by scanning a WeChat Pay QR code'
+                          )}
                         </FormDescription>
                       </SettingsSwitchContent>
                       <FormControl>
@@ -1798,7 +1804,9 @@ export function PaymentSettingsSection({
                     name='WeChatPayMerchantSerialNumber'
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{t('Merchant certificate serial number')}</FormLabel>
+                        <FormLabel>
+                          {t('Merchant certificate serial number')}
+                        </FormLabel>
                         <FormControl>
                           <Input {...field} />
                         </FormControl>
@@ -1811,7 +1819,9 @@ export function PaymentSettingsSection({
                     name='WeChatPayPlatformCertificateSerialNumber'
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{t('Platform certificate serial number')}</FormLabel>
+                        <FormLabel>
+                          {t('Platform certificate serial number')}
+                        </FormLabel>
                         <FormControl>
                           <Input {...field} />
                         </FormControl>
@@ -1882,7 +1892,9 @@ export function PaymentSettingsSection({
                         />
                       </FormControl>
                       <FormDescription>
-                        {t('Exactly 32 characters, used to decrypt payment notifications')}
+                        {t(
+                          'Exactly 32 characters, used to decrypt payment notifications'
+                        )}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

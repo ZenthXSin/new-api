@@ -16,11 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { AlertCircle, CheckCircle2, Clock3, Loader2, XCircle } from 'lucide-react'
+import {
+  AlertCircle,
+  CheckCircle2,
+  Clock3,
+  Loader2,
+  XCircle,
+} from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { CopyButton } from '@/components/copy-button'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -80,7 +87,8 @@ export function WeChatNativePaymentDialog(
         const response = await getWeChatPayOrder(orderID)
         if (cancelled) return
 
-        const responseSucceeded = isApiSuccess(response) && Boolean(response.data)
+        const responseSucceeded =
+          isApiSuccess(response) && Boolean(response.data)
         const nextState = getNextWeChatPayDialogState(
           consecutiveVerificationErrors,
           responseSucceeded,
@@ -90,10 +98,7 @@ export function WeChatNativePaymentDialog(
         consecutiveVerificationErrors = nextState.consecutiveErrors
         setStatus(nextState.status)
 
-        if (
-          nextState.status === 'success' &&
-          !successHandledRef.current
-        ) {
+        if (nextState.status === 'success' && !successHandledRef.current) {
           successHandledRef.current = true
           await onSuccess()
           return
@@ -196,13 +201,27 @@ export function WeChatNativePaymentDialog(
         </div>
 
         <DialogFooter>
-          <Button
-            type='button'
-            variant={terminal ? 'default' : 'outline'}
-            onClick={() => props.onOpenChange(false)}
-          >
-            {terminal ? t('Done') : t('Cancel')}
-          </Button>
+          <div className='flex w-full justify-end gap-2'>
+            {status === 'pending' && (
+              <CopyButton
+                value={props.codeURL}
+                variant='outline'
+                size='default'
+                tooltip={t('Copy payment link')}
+                successTooltip={t('Payment link copied')}
+                aria-label={t('Copy payment link')}
+              >
+                {t('Copy link')}
+              </CopyButton>
+            )}
+            <Button
+              type='button'
+              variant={terminal ? 'default' : 'outline'}
+              onClick={() => props.onOpenChange(false)}
+            >
+              {terminal ? t('Done') : t('Cancel')}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

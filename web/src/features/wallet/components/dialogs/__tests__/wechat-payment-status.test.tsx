@@ -30,16 +30,8 @@ describe('WeChat payment status dialog', () => {
       shouldStop: false,
     })
 
-    state = getNextWeChatPayDialogState(
-      state.consecutiveErrors,
-      false,
-      false
-    )
-    state = getNextWeChatPayDialogState(
-      state.consecutiveErrors,
-      true,
-      true
-    )
+    state = getNextWeChatPayDialogState(state.consecutiveErrors, false, false)
+    state = getNextWeChatPayDialogState(state.consecutiveErrors, true, true)
 
     assert.deepEqual(state, {
       status: 'verification_error',

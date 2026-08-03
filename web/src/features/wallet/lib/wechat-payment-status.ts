@@ -20,9 +20,7 @@ import type { WeChatPayOrderStatus } from '../types'
 
 const MAX_CONSECUTIVE_VERIFICATION_ERRORS = 3
 
-export type WeChatPayDialogStatus =
-  | WeChatPayOrderStatus
-  | 'verification_error'
+export type WeChatPayDialogStatus = WeChatPayOrderStatus | 'verification_error'
 
 export function getNextWeChatPayDialogState(
   currentErrors: number,

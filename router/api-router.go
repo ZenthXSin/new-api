@@ -62,6 +62,7 @@ func SetApiRouter(router *gin.Engine) {
 		// :env separates test vs prod URLs so the operator can register each
 		// in Pancake's matching webhook slot; handler enforces env match.
 		apiRouter.POST("/waffo-pancake/webhook/:env", anonymousRequestBodyLimit, controller.WaffoPancakeWebhook)
+		apiRouter.POST("/telemetry/ingest", controller.IngestTelemetry)
 
 		// Universal secure verification routes
 		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), middleware.DisableCache(), controller.UniversalVerify)
@@ -217,6 +218,20 @@ func SetApiRouter(router *gin.Engine) {
 			customOAuthRoute.POST("/", controller.CreateCustomOAuthProvider)
 			customOAuthRoute.PUT("/:id", controller.UpdateCustomOAuthProvider)
 			customOAuthRoute.DELETE("/:id", controller.DeleteCustomOAuthProvider)
+		}
+		telemetryRoute := apiRouter.Group("/telemetry")
+		telemetryRoute.Use(middleware.RootAuth())
+		{
+			telemetryRoute.GET("/projects", controller.ListTelemetryProjects)
+			telemetryRoute.POST("/projects", controller.CreateTelemetryProject)
+			telemetryRoute.GET("/apps", controller.ListTelemetryApps)
+			telemetryRoute.POST("/apps", controller.CreateTelemetryApp)
+			telemetryRoute.GET("/keys", controller.ListTelemetryWriteKeys)
+			telemetryRoute.POST("/keys", controller.CreateTelemetryWriteKey)
+			telemetryRoute.DELETE("/keys/:id", controller.DisableTelemetryWriteKey)
+			telemetryRoute.GET("/summary", controller.GetTelemetrySummary)
+			telemetryRoute.GET("/timeseries", controller.GetTelemetryTimeSeries)
+			telemetryRoute.DELETE("/data", controller.CleanupTelemetryData)
 		}
 		performanceRoute := apiRouter.Group("/performance")
 		performanceRoute.Use(middleware.RootAuth())

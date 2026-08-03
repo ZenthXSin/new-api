@@ -56,6 +56,12 @@ const defaultOperationsSettings: OperationsSettings = {
   'perf_metrics_setting.flush_interval': 5,
   'perf_metrics_setting.bucket_time': 'hour',
   'perf_metrics_setting.retention_days': 0,
+  'telemetry_setting.enabled': false,
+  'telemetry_setting.retention_days': 30,
+  'telemetry_setting.max_body_bytes': 65536,
+  'telemetry_setting.max_events_per_batch': 100,
+  'telemetry_setting.timestamp_skew_seconds': 300,
+  'telemetry_setting.requests_per_minute': 120,
 }
 
 export function OperationsSettings() {

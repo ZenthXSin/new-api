@@ -155,12 +155,10 @@ const BILLING_SECTIONS = [
           WeChatPayEnabled: settings.WeChatPayEnabled,
           WeChatPayAppID: settings.WeChatPayAppID,
           WeChatPayMerchantID: settings.WeChatPayMerchantID,
-          WeChatPayMerchantSerialNumber:
-            settings.WeChatPayMerchantSerialNumber,
+          WeChatPayMerchantSerialNumber: settings.WeChatPayMerchantSerialNumber,
           WeChatPayPrivateKey: settings.WeChatPayPrivateKey,
           WeChatPayAPIV3Key: settings.WeChatPayAPIV3Key,
-          WeChatPayPlatformCertificate:
-            settings.WeChatPayPlatformCertificate,
+          WeChatPayPlatformCertificate: settings.WeChatPayPlatformCertificate,
           WeChatPayPlatformCertificateSerialNumber:
             settings.WeChatPayPlatformCertificateSerialNumber,
           WeChatPayNotifyURL: settings.WeChatPayNotifyURL,
