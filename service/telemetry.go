@@ -90,13 +90,9 @@ func CreateTelemetryWriteKey(appID int64, name string) (*model.TelemetryWriteKey
 	return key, secret, nil
 }
 
-func VerifyTelemetryRequest(method, path, clientIP, keyID, timestamp, nonce, signature string, body []byte) (*model.TelemetryWriteKey, error) {
-	if !telemetryIDPattern.MatchString(keyID) || !telemetryIDPattern.MatchString(nonce) || len(signature) != 64 {
+func VerifyTelemetryRequest(clientIP, keyID, providedSecret string) (*model.TelemetryWriteKey, error) {
+	if !telemetryIDPattern.MatchString(keyID) || providedSecret == "" {
 		return nil, errors.New("遥测认证无效")
-	}
-	timestampValue, err := strconv.ParseInt(timestamp, 10, 64)
-	if err != nil || timestampValue <= 0 || absInt64(time.Now().Unix()-timestampValue) > telemetry_setting.GetTimestampSkewSeconds() {
-		return nil, errors.New("遥测时间戳无效")
 	}
 	if !takeTelemetryRateLimit("global", telemetry_setting.GetRequestsPerMinute()*10) || !takeTelemetryRateLimit("ip:"+clientIP, telemetry_setting.GetRequestsPerMinute()) || !takeTelemetryRateLimit("key:"+keyID, telemetry_setting.GetRequestsPerMinute()) {
 		return nil, errors.New("遥测请求过于频繁")
@@ -106,18 +102,8 @@ func VerifyTelemetryRequest(method, path, clientIP, keyID, timestamp, nonce, sig
 		return nil, errors.New("遥测认证无效")
 	}
 	secret, err := common.DecryptSecret(key.SecretCiphertext, "telemetry-write-key")
-	if err != nil {
+	if err != nil || !hmac.Equal([]byte(providedSecret), []byte(secret)) {
 		return nil, errors.New("遥测认证无效")
-	}
-	canonical := strings.Join([]string{method, path, timestamp, nonce, string(body)}, "\n")
-	expected := common.GenerateHMACWithKey([]byte(secret), canonical)
-	provided, decodeErr := hex.DecodeString(signature)
-	expectedBytes, expectedDecodeErr := hex.DecodeString(expected)
-	if decodeErr != nil || expectedDecodeErr != nil || !hmac.Equal(provided, expectedBytes) {
-		return nil, errors.New("遥测认证无效")
-	}
-	if err := model.StoreTelemetryNonce(keyID, nonce, time.Unix(timestampValue, 0).Add(time.Duration(telemetry_setting.GetTimestampSkewSeconds())*time.Second)); err != nil {
-		return nil, errors.New("遥测请求已处理")
 	}
 	return key, nil
 }
