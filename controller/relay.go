@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -67,6 +68,8 @@ func geminiRelayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewA
 	}
 	return err
 }
+
+const maxTextPollingDuration = 10 * time.Minute
 
 func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
@@ -191,51 +194,117 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
 
-	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
-		relayInfo.RetryIndex = retryParam.GetRetry()
-		channel, channelErr := getChannel(c, relayInfo, retryParam)
-		if channelErr != nil {
-			logger.LogError(c, channelErr.Error())
-			newAPIError = channelErr
-			break
+	initialChannel, textPolling, initialChannelErr := getTextPollingInitialChannel(c, relayFormat)
+	if initialChannelErr != nil {
+		newAPIError = initialChannelErr
+		return
+	}
+	pollingDeadline := time.Now().Add(maxTextPollingDuration)
+	if textPolling {
+		defer func() {
+			relayInfo.TextPollingTier = 0
+			relayInfo.TextPollingAttemptTimeout = 0
+		}()
+	}
+	if textPolling {
+		pollingContext, cancelPolling := context.WithDeadline(c.Request.Context(), pollingDeadline)
+		defer cancelPolling()
+		coordinator := textPollingCoordinator{
+			ctx:      pollingContext,
+			deadline: pollingDeadline,
+			now:      time.Now,
+			selectChannel: func(tier int, excluded map[int]struct{}) (*model.Channel, *types.NewAPIError) {
+				if len(excluded) == 0 {
+					resetTextPollingAutoGroup(c)
+				}
+				relayInfo.RetryIndex = len(excluded)
+				retryParam.SetRetry(0)
+				return getTextPollingChannel(c, relayInfo, retryParam, initialChannel, tier, excluded)
+			},
+			selected: func(channel *model.Channel, tier int, timeout time.Duration) {
+				addUsedChannel(c, channel.Id)
+				relayInfo.TextPollingTier = tier
+				relayInfo.TextPollingAttemptTimeout = timeout
+			},
+			attempt: func(channel *model.Channel, tier int, timeout time.Duration) *types.NewAPIError {
+				return executeRelayAttempt(c, relayFormat, relayInfo)
+			},
+			onFailure: func(channel *model.Channel, attemptErr *types.NewAPIError) *types.NewAPIError {
+				normalizedErr := service.NormalizeViolationFeeError(attemptErr)
+				relayInfo.LastError = normalizedErr
+				processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), normalizedErr)
+				return normalizedErr
+			},
+			shouldRetry: func(attemptErr *types.NewAPIError) bool {
+				return shouldRetry(c, attemptErr, 1)
+			},
+			committed: c.Writer.Written,
 		}
-
-		addUsedChannel(c, channel.Id)
-		bodyStorage, bodyErr := common.GetBodyStorage(c)
-		if bodyErr != nil {
-			// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
-			if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {
-				newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
-			} else {
-				newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-			}
-			break
-		}
-		c.Request.Body = io.NopCloser(bodyStorage)
-
-		switch relayFormat {
-		case types.RelayFormatOpenAIRealtime:
-			newAPIError = relay.WssHelper(c, relayInfo)
-		case types.RelayFormatClaude:
-			newAPIError = relay.ClaudeHelper(c, relayInfo)
-		case types.RelayFormatGemini:
-			newAPIError = geminiRelayHandler(c, relayInfo)
-		default:
-			newAPIError = relayHandler(c, relayInfo)
-		}
-
+		newAPIError = coordinator.run()
 		if newAPIError == nil {
 			relayInfo.LastError = nil
 			return
 		}
+		relayInfo.TextPollingTier = 0
+		relayInfo.TextPollingAttemptTimeout = 0
+	}
 
-		newAPIError = service.NormalizeViolationFeeError(newAPIError)
-		relayInfo.LastError = newAPIError
+	if !textPolling || (newAPIError != nil && time.Now().Before(pollingDeadline) && c.Request.Context().Err() == nil && !c.Writer.Written() && shouldRetry(c, newAPIError, 1)) {
+		retryParam.Excluded = nil
+		retryParam.SetRetry(0)
+		resetTextPollingAutoGroup(c)
+		if textPolling {
+			retryParam.Excluded = make(map[int]struct{})
+		}
+		for fallbackAttempt := 0; ; fallbackAttempt++ {
+			retryIndex := retryParam.GetRetry()
+			if textPolling {
+				if fallbackAttempt > common.RetryTimes {
+					break
+				}
+				retryIndex = fallbackAttempt
+			} else if retryIndex > common.RetryTimes {
+				break
+			}
+			relayInfo.RetryIndex = retryIndex
+			var channel *model.Channel
+			var channelErr *types.NewAPIError
+			if textPolling {
+				channel, channelErr = getTextPollingFallbackChannel(c, relayInfo, retryParam, retryParam.Excluded)
+			} else {
+				channel, channelErr = getChannel(c, relayInfo, retryParam)
+			}
+			if channelErr != nil {
+				logger.LogError(c, channelErr.Error())
+				newAPIError = channelErr
+				break
+			}
 
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+			if textPolling {
+				remaining, withinBudget := textPollingRemainingTimeout(pollingDeadline, time.Now())
+				if !withinBudget || c.Writer.Written() || c.Request.Context().Err() != nil {
+					break
+				}
+				// The legacy fallback remains available after tier 3, but its
+				// pre-commit attempt may only use the polling budget that remains.
+				relayInfo.TextPollingAttemptTimeout = remaining
+			}
+			addUsedChannel(c, channel.Id)
+			newAPIError = executeRelayAttempt(c, relayFormat, relayInfo)
+			if newAPIError == nil {
+				relayInfo.LastError = nil
+				return
+			}
 
-		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
-			break
+			newAPIError = service.NormalizeViolationFeeError(newAPIError)
+			relayInfo.LastError = newAPIError
+			processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+			if c.Request.Context().Err() != nil || c.Writer.Written() || !shouldRetry(c, newAPIError, common.RetryTimes-retryIndex) {
+				break
+			}
+			if !textPolling {
+				retryParam.IncreaseRetry()
+			}
 		}
 	}
 
@@ -293,7 +362,201 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 	return meta
 }
 
+func executeRelayAttempt(c *gin.Context, relayFormat types.RelayFormat, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+	bodyStorage, bodyErr := common.GetBodyStorage(c)
+	if bodyErr != nil {
+		if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {
+			return types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
+		}
+		return types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	c.Request.Body = io.NopCloser(bodyStorage)
+
+	switch relayFormat {
+	case types.RelayFormatOpenAIRealtime:
+		return relay.WssHelper(c, relayInfo)
+	case types.RelayFormatClaude:
+		return relay.ClaudeHelper(c, relayInfo)
+	case types.RelayFormatGemini:
+		return geminiRelayHandler(c, relayInfo)
+	default:
+		return relayHandler(c, relayInfo)
+	}
+}
+
+// textPollingCoordinator makes the three polling passes deterministic while the
+// selector continues to own channel priority, weight, auto-group, and path rules.
+// A selected channel is excluded before setup so a failed key/setup cannot be
+// selected again during the same pass.
+type textPollingCoordinator struct {
+	ctx           context.Context
+	deadline      time.Time
+	now           func() time.Time
+	selectChannel func(tier int, excluded map[int]struct{}) (*model.Channel, *types.NewAPIError)
+	selected      func(channel *model.Channel, tier int, timeout time.Duration)
+	attempt       func(channel *model.Channel, tier int, timeout time.Duration) *types.NewAPIError
+	onFailure     func(channel *model.Channel, attemptErr *types.NewAPIError) *types.NewAPIError
+	shouldRetry   func(attemptErr *types.NewAPIError) bool
+	committed     func() bool
+}
+
+func (p textPollingCoordinator) run() *types.NewAPIError {
+	var lastErr *types.NewAPIError
+	for tier := 1; tier <= 3; tier++ {
+		excluded := make(map[int]struct{})
+		for {
+			// A committed stream must continue under the original request context;
+			// the polling context only budgets pre-commit traversal.
+			if p.committed() {
+				return lastErr
+			}
+			if err := p.ctx.Err(); err != nil {
+				if lastErr != nil {
+					return lastErr
+				}
+				return types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+			if !p.now().Before(p.deadline) {
+				if lastErr != nil {
+					return lastErr
+				}
+				return types.NewError(context.DeadlineExceeded, types.ErrorCodeDoRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+
+			channel, channelErr := p.selectChannel(tier, excluded)
+			if channel == nil {
+				if channelErr != nil {
+					lastErr = channelErr
+					if len(excluded) == 0 || !types.IsSkipRetryError(channelErr) {
+						return lastErr
+					}
+				}
+				break
+			}
+			if _, alreadyTried := excluded[channel.Id]; alreadyTried {
+				return types.NewError(fmt.Errorf("text polling selector returned previously excluded channel %d", channel.Id), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+			}
+			if !isTextPollingChannelEnabled(channel) {
+				excluded[channel.Id] = struct{}{}
+				continue
+			}
+			excluded[channel.Id] = struct{}{}
+			attemptTimeout := time.Duration(channel.GetOtherSettings().TextPollingTimeoutSeconds(tier)) * time.Second
+			remaining, withinBudget := textPollingRemainingTimeout(p.deadline, p.now())
+			if !withinBudget {
+				return lastErr
+			}
+			if attemptTimeout > remaining {
+				attemptTimeout = remaining
+			}
+			if attemptTimeout <= 0 {
+				return lastErr
+			}
+			p.selected(channel, tier, attemptTimeout)
+			if channelErr == nil {
+				channelErr = p.attempt(channel, tier, attemptTimeout)
+			}
+			if channelErr == nil {
+				return nil
+			}
+
+			lastErr = p.onFailure(channel, channelErr)
+			if p.ctx.Err() != nil || p.committed() || !p.shouldRetry(lastErr) {
+				return lastErr
+			}
+		}
+	}
+	return lastErr
+}
+
+func textPollingRemainingTimeout(deadline time.Time, now time.Time) (time.Duration, bool) {
+	remaining := deadline.Sub(now)
+	return remaining, remaining > 0
+}
+
+func getTextPollingInitialChannel(c *gin.Context, relayFormat types.RelayFormat) (*model.Channel, bool, *types.NewAPIError) {
+	if relayFormat == types.RelayFormatOpenAIRealtime {
+		return nil, false, nil
+	}
+	if _, specificChannel := c.Get("specific_channel_id"); specificChannel {
+		return nil, false, nil
+	}
+	settings, ok := common.GetContextKeyType[dto.ChannelOtherSettings](c, constant.ContextKeyChannelOtherSetting)
+	if !ok || !settings.TextPollingEnabled {
+		return nil, false, nil
+	}
+	channel, err := model.CacheGetChannel(common.GetContextKeyInt(c, constant.ContextKeyChannelId))
+	if err != nil {
+		return nil, false, types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
+	return channel, true, nil
+}
+
+func isTextPollingChannelEnabled(channel *model.Channel) bool {
+	return channel != nil && channel.GetOtherSettings().TextPollingEnabled
+}
+
+func resetTextPollingAutoGroup(c *gin.Context) {
+	common.SetContextKey(c, constant.ContextKeyAutoGroupIndex, 0)
+	common.SetContextKey(c, constant.ContextKeyAutoGroupRetryIndex, 0)
+}
+
+func getTextPollingChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam, initialChannel *model.Channel, tier int, excluded map[int]struct{}) (*model.Channel, *types.NewAPIError) {
+	if excluded == nil {
+		excluded = make(map[int]struct{})
+	}
+	if tier == 1 && isTextPollingChannelEnabled(initialChannel) {
+		if _, tried := excluded[initialChannel.Id]; !tried {
+			return initialChannel, nil
+		}
+	}
+	for {
+		channel, channelErr := selectRelayChannel(c, info, retryParam, excluded)
+		if channelErr != nil || channel == nil {
+			return channel, channelErr
+		}
+		if _, alreadySelected := excluded[channel.Id]; alreadySelected {
+			return nil, types.NewError(fmt.Errorf("text polling selector returned previously excluded channel %d", channel.Id), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
+		if !isTextPollingChannelEnabled(channel) {
+			excluded[channel.Id] = struct{}{}
+			continue
+		}
+		return channel, middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
+	}
+}
+
+// getTextPollingFallbackChannel always selects the highest remaining priority.
+// It excludes the selected enabled channel before its relay attempt so the next
+// fallback attempt cannot skip an untried higher-priority candidate.
+func getTextPollingFallbackChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam, excluded map[int]struct{}) (*model.Channel, *types.NewAPIError) {
+	retryParam.SetRetry(0)
+	channel, channelErr := getTextPollingChannel(c, info, retryParam, nil, 0, excluded)
+	if channelErr != nil {
+		return nil, channelErr
+	}
+	if channel == nil {
+		return nil, types.NewError(errors.New("text polling fallback selected no channel"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
+	excluded[channel.Id] = struct{}{}
+	return channel, nil
+}
+
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
+	if info.ChannelMeta == nil {
+		return selectRelayChannel(c, info, retryParam, retryParam.Excluded)
+	}
+	channel, newAPIError := selectRelayChannel(c, info, retryParam, retryParam.Excluded)
+	if newAPIError != nil || channel == nil {
+		return channel, newAPIError
+	}
+	if newAPIError = middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName); newAPIError != nil {
+		return nil, newAPIError
+	}
+	return channel, nil
+}
+
+func selectRelayChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam, excluded map[int]struct{}) (*model.Channel, *types.NewAPIError) {
 	if info.ChannelMeta == nil {
 		autoBan := c.GetBool("auto_ban")
 		autoBanInt := 1
@@ -307,6 +570,7 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 			AutoBan: &autoBanInt,
 		}, nil
 	}
+	retryParam.Excluded = excluded
 	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
 
 	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
@@ -316,11 +580,6 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	}
 	if channel == nil {
 		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
-	}
-
-	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
-	if newAPIError != nil {
-		return nil, newAPIError
 	}
 	return channel, nil
 }

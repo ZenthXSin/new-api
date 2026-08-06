@@ -2,6 +2,15 @@
 
 DO NOT send optional commentary
 
+## Agent Delegation
+
+- Use `sol-advisor:orchestration` for delegated implementation work.
+- Use only Sol Advisor's native lane. Do not use `luna_worker` or the Luna task lane.
+- Keep requirements, architecture, decomposition, diff inspection, verification, and final acceptance in the primary Sol / High session.
+- Delegate implementation to `sol_advisor_terra_implementer` with `fork_turns: none`; its installed profile pins Terra / High.
+- After primary-session verification, require a fresh `sol_advisor_sol_reviewer` with `fork_turns: none` and accept completion only after a `ship` verdict.
+- Follow the installed Sol Advisor skill's preflight, ownership, verification, runtime-routing, sandbox-observation, correction, and no-fallback requirements exactly.
+
 ## Overview
 
 This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI providers (OpenAI, Claude, Gemini, Azure, AWS Bedrock, etc.) behind a unified API, with user management, billing, rate limiting, and an admin dashboard.

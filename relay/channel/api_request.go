@@ -474,6 +474,24 @@ func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
 func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	return doRequest(c, req, info)
 }
+
+type pollingTimeoutBody struct {
+	io.ReadCloser
+	timer  *time.Timer
+	cancel context.CancelFunc
+	once   sync.Once
+}
+
+func (b *pollingTimeoutBody) StopPollingTimeout() {
+	b.once.Do(func() { b.timer.Stop() })
+}
+
+func (b *pollingTimeoutBody) Close() error {
+	b.once.Do(func() { b.timer.Stop() })
+	b.cancel()
+	return b.ReadCloser.Close()
+}
+
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	var client *http.Client
 	var err error
@@ -488,7 +506,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 
 	var stopPinger context.CancelFunc
 	var pingerDone <-chan struct{}
-	if info.IsStream {
+	if info.IsStream && info.TextPollingAttemptTimeout == 0 {
 		helper.SetEventStreamHeaders(c)
 		// 处理流式请求的 ping 保活
 		generalSettings := operation_setting.GetGeneralSetting()
@@ -506,13 +524,39 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
+	var attemptCancel context.CancelFunc
+	var attemptTimer *time.Timer
+	if info.TextPollingAttemptTimeout > 0 {
+		attemptCtx, cancel := context.WithCancel(c.Request.Context())
+		attemptCancel = cancel
+		attemptTimer = time.AfterFunc(info.TextPollingAttemptTimeout, cancel)
+		req = req.WithContext(attemptCtx)
+	} else {
+		req = req.WithContext(c.Request.Context())
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
+		if attemptTimer != nil {
+			attemptTimer.Stop()
+		}
+		if attemptCancel != nil {
+			attemptCancel()
+		}
 		logger.LogError(c, "do request failed: "+err.Error())
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {
+		if attemptTimer != nil {
+			attemptTimer.Stop()
+		}
+		if attemptCancel != nil {
+			attemptCancel()
+		}
 		return nil, errors.New("resp is nil")
+	}
+	if attemptTimer != nil {
+		resp.Body = &pollingTimeoutBody{ReadCloser: resp.Body, timer: attemptTimer, cancel: attemptCancel}
 	}
 
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {

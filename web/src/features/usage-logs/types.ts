@@ -162,6 +162,8 @@ export interface LogOtherData {
   user_agent?: string
   request_path?: string
   request_conversion?: string[]
+  text_polling_tier?: number
+  text_polling_fallback?: boolean
   ws?: boolean
   audio?: boolean
   audio_input?: number

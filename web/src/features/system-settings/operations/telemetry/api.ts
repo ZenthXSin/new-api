@@ -28,6 +28,7 @@ export type TelemetryApp = {
   id: number
   project_id: number
   name: string
+  slug: string
   created_at: string
 }
 
@@ -104,7 +105,7 @@ export async function getTelemetryWriteKeys(appID: number) {
 
 export async function createTelemetryWriteKey(appID: number, name: string) {
   const response = await api.post<
-    ApiResponse<{ key: TelemetryWriteKey; secret: string }>
+    ApiResponse<{ key: TelemetryWriteKey; token: string }>
   >('/api/telemetry/keys', { app_id: appID, name })
   return response.data
 }

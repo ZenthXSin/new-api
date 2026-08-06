@@ -44,6 +44,7 @@ import { LOG_TYPE_ALL_VALUE } from '../../constants'
 import type { UsageLog } from '../../data/schema'
 import {
   formatModelName,
+  getTextPollingHit,
   getTieredBillingSummary,
   hasAnyCacheTokens,
   parseLogOther,
@@ -334,6 +335,13 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
           const other = parseLogOther(log.other)
           const affinity = other?.admin_info?.channel_affinity
+          const pollingHit = getTextPollingHit(other)
+          let pollingLabel: string | undefined
+          if (pollingHit?.kind === 'tier') {
+            pollingLabel = `${t('Polling')} #${pollingHit.tier}`
+          } else if (pollingHit) {
+            pollingLabel = `${t('Polling')} · ${t('Fallback')}`
+          }
           const rawUseChannel = other?.admin_info?.use_channel ?? []
           const useChannel = Array.isArray(rawUseChannel)
             ? rawUseChannel.map(String).filter(Boolean)
@@ -361,7 +369,12 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                     <div className='flex max-w-[160px] flex-col gap-0.5' />
                   }
                 >
-                  <div className='relative inline-flex w-fit items-center gap-1'>
+                  <div
+                    className={cn(
+                      'relative flex max-w-full flex-wrap items-center gap-1',
+                      affinity && 'pr-3'
+                    )}
+                  >
                     <StatusBadge
                       label={channelIdDisplay}
                       autoColor={String(log.channel)}
@@ -370,6 +383,16 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                       showDot={false}
                       className='font-mono'
                     />
+                    {pollingLabel && (
+                      <StatusBadge
+                        label={pollingLabel}
+                        size='sm'
+                        showDot={false}
+                        copyable={false}
+                        variant='info'
+                        className='shrink-0'
+                      />
+                    )}
                     {showMultiKeyIndex && (
                       <StatusBadge
                         label={String(multiKeyIndex)}
@@ -453,6 +476,11 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                     {showMultiKeyIndex && (
                       <p className='text-muted-foreground text-xs'>
                         {t('Key')}: {multiKeyIndex}
+                      </p>
+                    )}
+                    {pollingLabel && (
+                      <p className='text-muted-foreground text-xs'>
+                        {pollingLabel}
                       </p>
                     )}
                     {affinity && (
@@ -606,13 +634,31 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         if (!isDisplayableLogType(log.type)) return null
 
         const modelInfo = formatModelName(log)
+        const other = parseLogOther(log.other)
+        const pollingHit = getTextPollingHit(other)
+        let pollingLabel: string | undefined
+        if (pollingHit?.kind === 'tier') {
+          pollingLabel = `${t('Polling')} #${pollingHit.tier}`
+        } else if (pollingHit) {
+          pollingLabel = `${t('Polling')} · ${t('Fallback')}`
+        }
 
         return (
-          <div className='flex w-fit flex-col gap-0.5'>
+          <div className='flex max-w-full flex-col gap-0.5'>
             <ModelBadge
               modelName={modelInfo.name}
               actualModel={modelInfo.actualModel}
             />
+            {pollingLabel && (
+              <StatusBadge
+                label={pollingLabel}
+                size='sm'
+                showDot={false}
+                copyable={false}
+                variant='info'
+                className='shrink-0'
+              />
+            )}
           </div>
         )
       },

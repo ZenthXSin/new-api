@@ -1,13 +1,22 @@
 package dto
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
 	"strings"
 	"sync"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
+)
+
+const (
+	DefaultTextPollingTimeoutTier1Seconds = 3
+	DefaultTextPollingTimeoutTier2Seconds = 6
+	DefaultTextPollingTimeoutTier3Seconds = 12
+	MaxTextPollingTimeoutSeconds          = 120
 )
 
 type ChannelSettings struct {
@@ -34,6 +43,13 @@ const (
 )
 
 type ChannelOtherSettings struct {
+	TextPollingEnabled                    bool `json:"text_polling_enabled,omitempty"`
+	TextPollingTimeoutTier1Seconds        int  `json:"text_polling_timeout_tier1_seconds,omitempty"`
+	TextPollingTimeoutTier2Seconds        int  `json:"text_polling_timeout_tier2_seconds,omitempty"`
+	TextPollingTimeoutTier3Seconds        int  `json:"text_polling_timeout_tier3_seconds,omitempty"`
+	textPollingTimeoutTier1Set            bool
+	textPollingTimeoutTier2Set            bool
+	textPollingTimeoutTier3Set            bool
 	AzureResponsesVersion                 string                `json:"azure_responses_version,omitempty"`
 	VertexKeyType                         VertexKeyType         `json:"vertex_key_type,omitempty"` // "json" or "api_key"
 	OpenRouterEnterprise                  *bool                 `json:"openrouter_enterprise,omitempty"`
@@ -53,6 +69,74 @@ type ChannelOtherSettings struct {
 	UpstreamModelUpdateLastRemovedModels  []string              `json:"upstream_model_update_last_removed_models,omitempty"`  // 上次检测到的可删除模型
 	UpstreamModelUpdateIgnoredModels      []string              `json:"upstream_model_update_ignored_models,omitempty"`       // 手动忽略的模型
 	AdvancedCustom                        *AdvancedCustomConfig `json:"advanced_custom,omitempty"`
+}
+
+type channelOtherSettingsAlias ChannelOtherSettings
+
+// UnmarshalJSON tracks timeout field presence so legacy settings can retain
+// their defaults while an explicitly supplied zero remains invalid.
+func (s *ChannelOtherSettings) UnmarshalJSON(data []byte) error {
+	var settings channelOtherSettingsAlias
+	if err := common.Unmarshal(data, &settings); err != nil {
+		return err
+	}
+	*s = ChannelOtherSettings(settings)
+
+	var fields map[string]json.RawMessage
+	if err := common.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	_, s.textPollingTimeoutTier1Set = fields["text_polling_timeout_tier1_seconds"]
+	_, s.textPollingTimeoutTier2Set = fields["text_polling_timeout_tier2_seconds"]
+	_, s.textPollingTimeoutTier3Set = fields["text_polling_timeout_tier3_seconds"]
+	return nil
+}
+
+func (s *ChannelOtherSettings) NormalizeTextPollingTimeouts() {
+	if !s.textPollingTimeoutTier1Set && s.TextPollingTimeoutTier1Seconds == 0 {
+		s.TextPollingTimeoutTier1Seconds = DefaultTextPollingTimeoutTier1Seconds
+	}
+	if !s.textPollingTimeoutTier2Set && s.TextPollingTimeoutTier2Seconds == 0 {
+		s.TextPollingTimeoutTier2Seconds = DefaultTextPollingTimeoutTier2Seconds
+	}
+	if !s.textPollingTimeoutTier3Set && s.TextPollingTimeoutTier3Seconds == 0 {
+		s.TextPollingTimeoutTier3Seconds = DefaultTextPollingTimeoutTier3Seconds
+	}
+}
+
+func (s *ChannelOtherSettings) ValidateTextPollingTimeouts() error {
+	if (s.textPollingTimeoutTier1Set && s.TextPollingTimeoutTier1Seconds <= 0) ||
+		(s.textPollingTimeoutTier2Set && s.TextPollingTimeoutTier2Seconds <= 0) ||
+		(s.textPollingTimeoutTier3Set && s.TextPollingTimeoutTier3Seconds <= 0) {
+		return fmt.Errorf("text polling timeouts must be between 1 and %d seconds", MaxTextPollingTimeoutSeconds)
+	}
+
+	s.NormalizeTextPollingTimeouts()
+	firstTimeout := s.TextPollingTimeoutTier1Seconds
+	secondTimeout := s.TextPollingTimeoutTier2Seconds
+	thirdTimeout := s.TextPollingTimeoutTier3Seconds
+	if firstTimeout < 1 || secondTimeout < 1 || thirdTimeout < 1 ||
+		firstTimeout > MaxTextPollingTimeoutSeconds || secondTimeout > MaxTextPollingTimeoutSeconds || thirdTimeout > MaxTextPollingTimeoutSeconds {
+		return fmt.Errorf("text polling timeouts must be between 1 and %d seconds", MaxTextPollingTimeoutSeconds)
+	}
+	if firstTimeout >= secondTimeout || secondTimeout >= thirdTimeout {
+		return fmt.Errorf("text polling timeouts must be ordered from shortest to longest")
+	}
+	return nil
+}
+
+func (s ChannelOtherSettings) TextPollingTimeoutSeconds(tier int) int {
+	s.NormalizeTextPollingTimeouts()
+	switch tier {
+	case 1:
+		return s.TextPollingTimeoutTier1Seconds
+	case 2:
+		return s.TextPollingTimeoutTier2Seconds
+	case 3:
+		return s.TextPollingTimeoutTier3Seconds
+	default:
+		return 0
+	}
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {

@@ -1,7 +1,6 @@
 package aws
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -40,11 +39,12 @@ func getAwsErrorStatusCode(err error) int {
 	return http.StatusInternalServerError
 }
 
-func newAwsInvokeContext() (context.Context, context.CancelFunc) {
-	if common.RelayTimeout <= 0 {
-		return context.Background(), func() {}
+func newAwsInvokeContext(c *gin.Context, info *relaycommon.RelayInfo) *helper.TextPollingAttempt {
+	timeout := time.Duration(common.RelayTimeout) * time.Second
+	if info.TextPollingAttemptTimeout > 0 {
+		timeout = info.TextPollingAttemptTimeout
 	}
-	return context.WithTimeout(context.Background(), time.Duration(common.RelayTimeout)*time.Second)
+	return helper.NewTextPollingAttempt(c.Request.Context(), timeout)
 }
 
 func newAwsClient(c *gin.Context, info *relaycommon.RelayInfo) (*bedrockruntime.Client, error) {
@@ -223,10 +223,10 @@ func getAwsModelID(requestModel string) string {
 
 func awsHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
 
-	ctx, cancel := newAwsInvokeContext()
-	defer cancel()
+	attempt := newAwsInvokeContext(c, info)
+	defer attempt.Close()
 
-	awsResp, err := a.AwsClient.InvokeModel(ctx, a.AwsReq.(*bedrockruntime.InvokeModelInput))
+	awsResp, err := a.AwsClient.InvokeModel(attempt.Context(), a.AwsReq.(*bedrockruntime.InvokeModelInput))
 	if err != nil {
 		statusCode := getAwsErrorStatusCode(err)
 		return types.NewOpenAIError(errors.Wrap(err, "InvokeModel"), types.ErrorCodeAwsInvokeError, statusCode), nil
@@ -249,14 +249,17 @@ func awsHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types
 	if handlerErr != nil {
 		return handlerErr, nil
 	}
+	if c.Writer.Written() {
+		attempt.StopTimeout()
+	}
 	return nil, claudeInfo.Usage
 }
 
 func awsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
-	ctx, cancel := newAwsInvokeContext()
-	defer cancel()
+	attempt := newAwsInvokeContext(c, info)
+	defer attempt.Close()
 
-	awsResp, err := a.AwsClient.InvokeModelWithResponseStream(ctx, a.AwsReq.(*bedrockruntime.InvokeModelWithResponseStreamInput))
+	awsResp, err := a.AwsClient.InvokeModelWithResponseStream(attempt.Context(), a.AwsReq.(*bedrockruntime.InvokeModelWithResponseStreamInput))
 	if err != nil {
 		statusCode := getAwsErrorStatusCode(err)
 		return types.NewOpenAIError(errors.Wrap(err, "InvokeModelWithResponseStream"), types.ErrorCodeAwsInvokeError, statusCode), nil
@@ -278,15 +281,36 @@ func awsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (
 			info.SetFirstResponseTime()
 			respErr := claude.HandleStreamResponseData(c, info, claudeInfo, string(v.Value.Bytes))
 			if respErr != nil {
+				if c.Writer.Written() {
+					return nil, claudeInfo.Usage
+				}
 				return respErr, nil
+			}
+			if c.Writer.Written() {
+				attempt.StopTimeout()
 			}
 		case *bedrockruntimeTypes.UnknownUnionMember:
 			fmt.Println("unknown tag:", v.Tag)
+			if c.Writer.Written() {
+				return nil, claudeInfo.Usage
+			}
 			return types.NewError(errors.New("unknown response type"), types.ErrorCodeInvalidRequest), nil
 		default:
 			fmt.Println("union is nil or unknown type")
+			if c.Writer.Written() {
+				return nil, claudeInfo.Usage
+			}
 			return types.NewError(errors.New("nil or unknown response type"), types.ErrorCodeInvalidRequest), nil
 		}
+	}
+	if streamErr := stream.Err(); streamErr != nil {
+		if c.Writer.Written() {
+			return nil, claudeInfo.Usage
+		}
+		return types.NewError(streamErr, types.ErrorCodeReadResponseBodyFailed), nil
+	}
+	if info.TextPollingAttemptTimeout > 0 && !c.Writer.Written() {
+		return types.NewError(io.ErrUnexpectedEOF, types.ErrorCodeReadResponseBodyFailed), nil
 	}
 
 	claude.HandleStreamFinalResponse(c, info, claudeInfo)
@@ -296,10 +320,10 @@ func awsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (
 // Nova模型处理函数
 func handleNovaRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
 
-	ctx, cancel := newAwsInvokeContext()
-	defer cancel()
+	attempt := newAwsInvokeContext(c, info)
+	defer attempt.Close()
 
-	awsResp, err := a.AwsClient.InvokeModel(ctx, a.AwsReq.(*bedrockruntime.InvokeModelInput))
+	awsResp, err := a.AwsClient.InvokeModel(attempt.Context(), a.AwsReq.(*bedrockruntime.InvokeModelInput))
 	if err != nil {
 		statusCode := getAwsErrorStatusCode(err)
 		return types.NewOpenAIError(errors.Wrap(err, "InvokeModel"), types.ErrorCodeAwsInvokeError, statusCode), nil
@@ -347,5 +371,8 @@ func handleNovaRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) 
 	}
 
 	c.JSON(http.StatusOK, response)
+	if c.Writer.Written() {
+		attempt.StopTimeout()
+	}
 	return nil, &response.Usage
 }

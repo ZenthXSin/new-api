@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +22,7 @@ const telemetryBucketSeconds int64 = 3600
 
 var telemetryIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 var telemetryDimensionPattern = regexp.MustCompile(`^[A-Za-z0-9._:/-]{1,64}$`)
+var ErrTelemetryRateLimited = errors.New("遥测请求过于频繁")
 
 type TelemetryEvent struct {
 	EventID         string           `json:"event_id"`
@@ -95,7 +95,7 @@ func VerifyTelemetryRequest(clientIP, keyID, providedSecret string) (*model.Tele
 		return nil, errors.New("遥测认证无效")
 	}
 	if !takeTelemetryRateLimit("global", telemetry_setting.GetRequestsPerMinute()*10) || !takeTelemetryRateLimit("ip:"+clientIP, telemetry_setting.GetRequestsPerMinute()) || !takeTelemetryRateLimit("key:"+keyID, telemetry_setting.GetRequestsPerMinute()) {
-		return nil, errors.New("遥测请求过于频繁")
+		return nil, ErrTelemetryRateLimited
 	}
 	key, err := model.FindTelemetryWriteKey(keyID)
 	if err != nil {
@@ -106,6 +106,20 @@ func VerifyTelemetryRequest(clientIP, keyID, providedSecret string) (*model.Tele
 		return nil, errors.New("遥测认证无效")
 	}
 	return key, nil
+}
+
+// VerifyAppBearer authenticates external app traffic. The compact bearer format
+// deliberately has no method, timestamp, nonce, or secondary custom headers.
+func VerifyAppBearer(clientIP, authorization string) (*model.TelemetryWriteKey, error) {
+	const prefix = "Bearer app_v1."
+	if !strings.HasPrefix(authorization, prefix) {
+		return nil, errors.New("app authentication invalid")
+	}
+	parts := strings.Split(strings.TrimPrefix(authorization, prefix), ".")
+	if len(parts) != 2 || !telemetryIDPattern.MatchString(parts[0]) || parts[1] == "" || strings.ContainsAny(parts[1], " \t\r\n") {
+		return nil, errors.New("app authentication invalid")
+	}
+	return VerifyTelemetryRequest(clientIP, parts[0], parts[1])
 }
 
 func IngestTelemetry(key *model.TelemetryWriteKey, envelope *TelemetryEnvelope) (int, error) {

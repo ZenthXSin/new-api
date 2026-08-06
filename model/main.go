@@ -261,6 +261,15 @@ func InitLogDB() (err error) {
 }
 
 func migrateDB() error {
+	if err := MigrateTelemetryAppSlugs(); err != nil {
+		return err
+	}
+	if err := MigrateTelemetryActiveKeys(); err != nil {
+		return err
+	}
+	if err := MigrateDistributionAssetSHA256Index(); err != nil {
+		return err
+	}
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
 	// Migrate model_limits column from varchar to text for existing tables
@@ -307,6 +316,9 @@ func migrateDB() error {
 		&TelemetryNonce{},
 		&TelemetryBucket{},
 		&TelemetryReceiverMetric{},
+		&DistributionRelease{},
+		&DistributionAsset{},
+		&DistributionAnnouncement{},
 		&CasbinRule{},
 		&AuthzRole{},
 	)
@@ -332,6 +344,15 @@ func migrateDB() error {
 }
 
 func migrateDBFast() error {
+	if err := MigrateTelemetryAppSlugs(); err != nil {
+		return err
+	}
+	if err := MigrateTelemetryActiveKeys(); err != nil {
+		return err
+	}
+	if err := MigrateDistributionAssetSHA256Index(); err != nil {
+		return err
+	}
 
 	var wg sync.WaitGroup
 
@@ -377,6 +398,9 @@ func migrateDBFast() error {
 		{&TelemetryNonce{}, "TelemetryNonce"},
 		{&TelemetryBucket{}, "TelemetryBucket"},
 		{&TelemetryReceiverMetric{}, "TelemetryReceiverMetric"},
+		{&DistributionRelease{}, "DistributionRelease"},
+		{&DistributionAsset{}, "DistributionAsset"},
+		{&DistributionAnnouncement{}, "DistributionAnnouncement"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))

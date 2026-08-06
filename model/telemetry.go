@@ -1,6 +1,9 @@
 package model
 
 import (
+	"errors"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,19 +23,98 @@ type TelemetryApp struct {
 	ID        int64             `json:"id" gorm:"primaryKey"`
 	ProjectID int64             `json:"project_id" gorm:"uniqueIndex:idx_telemetry_app,priority:1;index"`
 	Name      string            `json:"name" gorm:"size:128;uniqueIndex:idx_telemetry_app,priority:2"`
+	Slug      string            `json:"slug" gorm:"size:128;uniqueIndex"`
 	CreatedAt time.Time         `json:"created_at"`
 	Project   *TelemetryProject `json:"project,omitempty" gorm:"-"`
 }
 
 type TelemetryWriteKey struct {
 	ID               int64      `json:"id" gorm:"primaryKey"`
-	AppID            int64      `json:"app_id" gorm:"index"`
+	AppID            int64      `json:"app_id" gorm:"index;uniqueIndex:idx_telemetry_active_key,priority:1"`
 	Name             string     `json:"name" gorm:"size:128"`
 	KeyID            string     `json:"key_id" gorm:"size:48;uniqueIndex"`
 	SecretCiphertext string     `json:"-" gorm:"type:text"`
 	KeyPrefix        string     `json:"key_prefix" gorm:"size:16"`
 	DisabledAt       *time.Time `json:"disabled_at,omitempty"`
+	ActiveSlot       *string    `json:"-" gorm:"size:16;uniqueIndex:idx_telemetry_active_key,priority:2"`
 	CreatedAt        time.Time  `json:"created_at"`
+}
+
+var telemetrySlugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,126}[a-z0-9]$|^[a-z0-9]$`)
+
+const telemetrySlugMaxLength = 64
+const telemetrySlugSuffixLength = 12
+const telemetrySlugCreateRetries = 4
+
+func NormalizeTelemetrySlug(slug string) string { return strings.ToLower(strings.TrimSpace(slug)) }
+func ValidTelemetrySlug(slug string) bool {
+	return telemetrySlugPattern.MatchString(NormalizeTelemetrySlug(slug))
+}
+func (a *TelemetryApp) BeforeUpdate(tx *gorm.DB) error {
+	if tx.Statement.Changed("Slug") {
+		return errors.New("telemetry app slug is immutable")
+	}
+	return nil
+}
+
+// MigrateTelemetryAppSlugs adds and fills slugs before AutoMigrate creates the
+// global unique index. Existing installations get stable, ID-derived slugs.
+func MigrateTelemetryAppSlugs() error {
+	if !DB.Migrator().HasTable(&TelemetryApp{}) {
+		return nil
+	}
+	if !DB.Migrator().HasColumn(&TelemetryApp{}, "slug") {
+		if err := DB.Migrator().AddColumn(&TelemetryApp{}, "Slug"); err != nil {
+			return err
+		}
+	}
+	var apps []TelemetryApp
+	if err := DB.Where("slug IS NULL OR slug = ?", "").Order("id ASC").Find(&apps).Error; err != nil {
+		return err
+	}
+	for _, app := range apps {
+		slug := "app-" + strconv.FormatInt(app.ID, 10)
+		if err := DB.Session(&gorm.Session{SkipHooks: true}).Model(&TelemetryApp{}).Where("id = ?", app.ID).Update("slug", slug).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func MigrateTelemetryActiveKeys() error {
+	if !DB.Migrator().HasTable(&TelemetryWriteKey{}) {
+		return nil
+	}
+	if !DB.Migrator().HasColumn(&TelemetryWriteKey{}, "active_slot") {
+		if err := DB.Migrator().AddColumn(&TelemetryWriteKey{}, "ActiveSlot"); err != nil {
+			return err
+		}
+	}
+	if err := DB.Model(&TelemetryWriteKey{}).Where("disabled_at IS NOT NULL AND active_slot IS NOT NULL").Update("active_slot", nil).Error; err != nil {
+		return err
+	}
+	var keys []TelemetryWriteKey
+	if err := DB.Where("disabled_at IS NULL").Order("app_id ASC, created_at DESC, id DESC").Find(&keys).Error; err != nil {
+		return err
+	}
+	seen := make(map[int64]struct{}, len(keys))
+	for _, key := range keys {
+		if _, exists := seen[key.AppID]; !exists {
+			seen[key.AppID] = struct{}{}
+			if err := DB.Model(&TelemetryWriteKey{}).Where("id = ?", key.ID).Update("active_slot", "active").Error; err != nil {
+				return err
+			}
+			continue
+		}
+		now := time.Now()
+		if err := DB.Model(&TelemetryWriteKey{}).Where("id = ?", key.ID).Updates(map[string]interface{}{
+			"disabled_at": &now,
+			"active_slot": nil,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type TelemetryNonce struct {
@@ -78,14 +160,22 @@ func CreateTelemetryWriteKey(appID int64, name, keyID, secretCiphertext string) 
 	if err := DB.First(&app, appID).Error; err != nil {
 		return nil, err
 	}
+	active := "active"
 	key := &TelemetryWriteKey{
 		AppID:            appID,
 		Name:             strings.TrimSpace(name),
 		KeyID:            keyID,
 		SecretCiphertext: secretCiphertext,
 		KeyPrefix:        keyID[:min(12, len(keyID))],
+		ActiveSlot:       &active,
 	}
-	if err := DB.Create(key).Error; err != nil {
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		if err := tx.Model(&TelemetryWriteKey{}).Where("app_id = ? AND disabled_at IS NULL", appID).Updates(map[string]interface{}{"disabled_at": &now, "active_slot": nil}).Error; err != nil {
+			return err
+		}
+		return tx.Create(key).Error
+	}); err != nil {
 		return nil, err
 	}
 	return key, nil
@@ -100,6 +190,63 @@ func FindTelemetryWriteKey(keyID string) (*TelemetryWriteKey, error) {
 		return nil, gorm.ErrRecordNotFound
 	}
 	return &key, nil
+}
+
+func FindTelemetryAppBySlug(slug string) (*TelemetryApp, error) {
+	var app TelemetryApp
+	if err := DB.Where("slug = ?", NormalizeTelemetrySlug(slug)).First(&app).Error; err != nil {
+		return nil, err
+	}
+	return &app, nil
+}
+
+func telemetrySlugFromName(name string) (string, bool) {
+	slug := NormalizeTelemetrySlug(name)
+	if len(slug) > telemetrySlugMaxLength {
+		slug = strings.TrimRight(slug[:telemetrySlugMaxLength], "-")
+	}
+	return slug, ValidTelemetrySlug(slug)
+}
+
+func randomTelemetrySlug() string {
+	value := strings.ToLower(strings.ReplaceAll(common.GetUUID(), "-", ""))
+	return "app-" + value[:telemetrySlugSuffixLength]
+}
+
+func telemetrySlugFallback(base string) string {
+	value := strings.ToLower(strings.ReplaceAll(common.GetUUID(), "-", ""))[:telemetrySlugSuffixLength]
+	maxBaseLength := telemetrySlugMaxLength - len(value) - 1
+	base = strings.TrimRight(base[:min(len(base), maxBaseLength)], "-")
+	if base == "" {
+		return "app-" + value
+	}
+	return base + "-" + value
+}
+
+func isTelemetryAppSlugUniqueError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	if !strings.Contains(message, "unique") && !strings.Contains(message, "duplicate") {
+		return false
+	}
+	return strings.Contains(message, "idx_telemetry_apps_slug") ||
+		strings.Contains(message, "telemetry_apps.slug")
+}
+
+func telemetryAppSlugConflict(projectID int64, name string, err error) bool {
+	if isTelemetryAppSlugUniqueError(err) {
+		return true
+	}
+	if !errors.Is(err, gorm.ErrDuplicatedKey) {
+		return false
+	}
+	var count int64
+	if DB.Model(&TelemetryApp{}).Where("project_id = ? AND name = ?", projectID, name).Count(&count).Error != nil {
+		return false
+	}
+	return count == 0
 }
 
 func StoreTelemetryNonce(keyID, nonce string, expiresAt time.Time) error {
@@ -183,11 +330,28 @@ func CreateTelemetryApp(projectID int64, name string) (*TelemetryApp, error) {
 	if err := DB.First(&project, projectID).Error; err != nil {
 		return nil, err
 	}
-	app := &TelemetryApp{ProjectID: projectID, Name: strings.TrimSpace(name)}
-	if err := DB.Create(app).Error; err != nil {
-		return nil, err
+	cleanName := strings.TrimSpace(name)
+	baseSlug, nameProvidesSlug := telemetrySlugFromName(cleanName)
+	var lastErr error
+	for attempt := 0; attempt < telemetrySlugCreateRetries; attempt++ {
+		slug := randomTelemetrySlug()
+		if nameProvidesSlug {
+			if attempt == 0 {
+				slug = baseSlug
+			} else {
+				slug = telemetrySlugFallback(baseSlug)
+			}
+		}
+		app := &TelemetryApp{ProjectID: projectID, Name: cleanName, Slug: slug}
+		if err := DB.Create(app).Error; err == nil {
+			return app, nil
+		} else if !telemetryAppSlugConflict(projectID, cleanName, err) {
+			return nil, err
+		} else {
+			lastErr = err
+		}
 	}
-	return app, nil
+	return nil, lastErr
 }
 
 func ListTelemetryProjects() ([]TelemetryProject, error) {
@@ -220,7 +384,7 @@ func ListTelemetryWriteKeys(appID int64) ([]TelemetryWriteKey, error) {
 
 func DisableTelemetryWriteKey(id int64) error {
 	now := time.Now()
-	return DB.Model(&TelemetryWriteKey{}).Where("id = ? AND disabled_at IS NULL", id).Update("disabled_at", &now).Error
+	return DB.Model(&TelemetryWriteKey{}).Where("id = ? AND disabled_at IS NULL", id).Updates(map[string]interface{}{"disabled_at": &now, "active_slot": nil}).Error
 }
 
 type TelemetrySummaryRow struct {

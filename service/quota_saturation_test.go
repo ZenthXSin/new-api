@@ -12,6 +12,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type recordingBillingFunding struct {
+	preConsumes []int
+	settles     []int
+	refunds     int
+}
+
+func (f *recordingBillingFunding) Source() string { return BillingSourceWallet }
+
+func (f *recordingBillingFunding) PreConsume(amount int) error {
+	f.preConsumes = append(f.preConsumes, amount)
+	return nil
+}
+
+func (f *recordingBillingFunding) Settle(delta int) error {
+	f.settles = append(f.settles, delta)
+	return nil
+}
+
+func (f *recordingBillingFunding) Refund() error {
+	f.refunds++
+	return nil
+}
+
 // TestAttachQuotaSaturationNestsUnderAdminInfo verifies the saturation marker
 // is nested under other.admin_info.quota_saturation so it is admin-only (the
 // log formatter strips admin_info for non-admin viewers).
@@ -110,4 +133,26 @@ func TestPreConsumeBillingRejectsNegativeQuotaBeforeDeduction(t *testing.T) {
 	require.Equal(t, types.ErrorCodeModelPriceError, apiErr.GetErrorCode())
 	require.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
 	require.Nil(t, info.Billing)
+}
+
+func TestBillingSessionPollingLifecycleSettlesOnceAfterRetry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	info := &relaycommon.RelayInfo{IsPlayground: true}
+	funding := &recordingBillingFunding{}
+	session := &BillingSession{relayInfo: info, funding: funding}
+
+	// The first polling attempt fails before settlement. Its pre-consume session
+	// must be reused by the successful retry rather than charged again.
+	require.Nil(t, session.preConsume(c, 100))
+	info.Billing = session
+	require.Equal(t, []int{100}, funding.preConsumes)
+
+	require.NoError(t, SettleBilling(c, info, 70))
+	require.NoError(t, SettleBilling(c, info, 70))
+	session.Refund(c)
+
+	require.Equal(t, []int{100}, funding.preConsumes)
+	require.Equal(t, []int{-30}, funding.settles)
+	require.Zero(t, funding.refunds)
 }

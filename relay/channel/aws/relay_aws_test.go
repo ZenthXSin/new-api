@@ -2,9 +2,11 @@ package aws
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -12,6 +14,31 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNewAwsInvokeContextHonorsPollingTimeoutAndRequestCancellation(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	requestCtx, requestCancel := context.WithCancel(context.Background())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil).WithContext(requestCtx)
+
+	attempt := newAwsInvokeContext(c, &relaycommon.RelayInfo{TextPollingAttemptTimeout: time.Millisecond})
+	defer attempt.Close()
+	select {
+	case <-attempt.Context().Done():
+	case <-time.After(time.Second):
+		t.Fatal("AWS invocation did not honor the polling attempt timeout")
+	}
+
+	attempt = newAwsInvokeContext(c, &relaycommon.RelayInfo{TextPollingAttemptTimeout: time.Hour})
+	defer attempt.Close()
+	requestCancel()
+	select {
+	case <-attempt.Context().Done():
+		require.ErrorIs(t, attempt.Context().Err(), context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("AWS invocation did not inherit the request context")
+	}
+}
 
 func TestDoAwsClientRequest_AppliesRuntimeHeaderOverrideToAnthropicBeta(t *testing.T) {
 	t.Parallel()

@@ -41,19 +41,11 @@ func IngestTelemetry(c *gin.Context) {
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"success": false, "message": "遥测请求过大"})
 		return
 	}
-	key, err := service.VerifyTelemetryRequest(
-		c.Request.Method,
-		c.Request.URL.Path,
-		c.ClientIP(),
-		strings.TrimSpace(c.GetHeader("X-Telemetry-Key-Id")),
-		strings.TrimSpace(c.GetHeader("X-Telemetry-Timestamp")),
-		strings.TrimSpace(c.GetHeader("X-Telemetry-Nonce")),
-		strings.TrimSpace(c.GetHeader("X-Telemetry-Signature")),
-		body,
-	)
+	c.Header("Cache-Control", "no-store")
+	key, err := service.VerifyAppBearer(c.ClientIP(), c.GetHeader("Authorization"))
 	if err != nil {
 		status := http.StatusUnauthorized
-		if err.Error() == "遥测请求过于频繁" {
+		if errors.Is(err, service.ErrTelemetryRateLimited) {
 			status = http.StatusTooManyRequests
 		}
 		c.JSON(status, gin.H{"success": false, "message": "遥测认证失败"})
@@ -150,7 +142,11 @@ func CreateTelemetryWriteKey(c *gin.Context) {
 		telemetryServerError(c)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"success": true, "data": gin.H{"key": key, "secret": secret}})
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusCreated, gin.H{"success": true, "data": gin.H{
+		"key":   key,
+		"token": "app_v1." + key.KeyID + "." + secret,
+	}})
 }
 
 func DisableTelemetryWriteKey(c *gin.Context) {

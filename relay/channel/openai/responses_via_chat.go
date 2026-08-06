@@ -88,7 +88,7 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		return true
 	}
 
-	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+	streamReadErr := helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		if streamErr != nil {
 			sr.Stop(streamErr)
 			return
@@ -129,8 +129,11 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			}
 		}
 	})
+	if streamReadErr != nil && !c.Writer.Written() {
+		return nil, types.NewOpenAIError(streamReadErr, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
+	}
 
-	if streamErr != nil {
+	if streamErr != nil && !c.Writer.Written() {
 		return nil, streamErr
 	}
 

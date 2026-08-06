@@ -156,7 +156,6 @@ const telemetryFields = [
   ['retention_days', 'Retention days'],
   ['max_body_bytes', 'Maximum request bytes'],
   ['max_events_per_batch', 'Maximum events per batch'],
-  ['timestamp_skew_seconds', 'Timestamp tolerance (seconds)'],
   ['requests_per_minute', 'Requests per minute'],
 ] as const
 
@@ -174,10 +173,7 @@ export function TelemetrySettingsSection({
   const [selectedProjectID, setSelectedProjectID] = useState(0)
   const [selectedAppID, setSelectedAppID] = useState(0)
   const [hours, setHours] = useState(24)
-  const [createdSecret, setCreatedSecret] = useState<{
-    keyID: string
-    secret: string
-  } | null>(null)
+  const [createdToken, setCreatedToken] = useState<string | null>(null)
   const [disableTarget, setDisableTarget] = useState<TelemetryWriteKey | null>(
     null
   )
@@ -229,12 +225,7 @@ export function TelemetrySettingsSection({
     enabled: selectedAppID > 0,
   })
   const timeSeriesQuery = useQuery({
-    queryKey: [
-      'telemetry-timeseries',
-      'hourly-v1',
-      selectedAppID,
-      hours,
-    ],
+    queryKey: ['telemetry-timeseries', 'hourly-v1', selectedAppID, hours],
     queryFn: () => getTelemetryTimeSeries(selectedAppID, hours),
     enabled: selectedAppID > 0,
     refetchOnMount: 'always',
@@ -301,9 +292,7 @@ export function TelemetrySettingsSection({
                 <SettingsSwitchContent>
                   <FormLabel>{t('Enable telemetry receiver')}</FormLabel>
                   <FormDescription>
-                    {t(
-                      'Accept signed aggregate diagnostics sent by external applications. This service does not send telemetry itself.'
-                    )}
+                    {t('Accepts aggregated diagnostic data submitted by external apps with a single Bearer key. This service never sends telemetry externally.')}
                   </FormDescription>
                 </SettingsSwitchContent>
                 <FormControl>
@@ -345,9 +334,7 @@ export function TelemetrySettingsSection({
           <div>
             <h4 className='font-medium'>{t('Telemetry applications')}</h4>
             <p className='text-muted-foreground text-sm'>
-              {t(
-                'Manage receiver projects, applications, and write keys. Write-key secrets are shown once only.'
-              )}
+              {t('Manage projects, applications, and write keys. Full keys are shown only once, when created.')}
             </p>
           </div>
           <Button size='sm' onClick={() => setProjectDialogOpen(true)}>
@@ -415,6 +402,18 @@ export function TelemetrySettingsSection({
                 <Plus className='size-4' />
               </Button>
             </div>
+            {selectedAppID > 0 && (
+              <p className='text-muted-foreground text-xs'>
+                {t('App identifier:')}
+                <code className='text-foreground'>
+                  {
+                    (appsQuery.data?.data ?? []).find(
+                      (app) => app.id === selectedAppID
+                    )?.slug
+                  }
+                </code>
+              </p>
+            )}
           </div>
         </div>
 
@@ -578,42 +577,25 @@ export function TelemetrySettingsSection({
         onSubmit={async (name) => {
           const result = await createTelemetryWriteKey(selectedAppID, name)
           await queryClient.invalidateQueries({ queryKey: ['telemetry-keys'] })
-          setCreatedSecret({
-            keyID: result.data.key.key_id,
-            secret: result.data.secret,
-          })
+          setCreatedToken(result.data.token)
         }}
       />
       <Dialog
-        open={!!createdSecret}
-        onOpenChange={(open) => !open && setCreatedSecret(null)}
+        open={!!createdToken}
+        onOpenChange={(open) => !open && setCreatedToken(null)}
         title={t('Telemetry write key created')}
-        description={t('Copy this secret now. It cannot be retrieved again.')}
+        description={t('Copy the full key now. It cannot be viewed again after closing.')}
         footer={
-          <Button onClick={() => setCreatedSecret(null)}>{t('Done')}</Button>
+          <Button onClick={() => setCreatedToken(null)}>{t('Done')}</Button>
         }
       >
         <div className='space-y-3'>
           <div className='grid gap-2'>
-            <Label>{t('Key ID')}</Label>
+            <Label>{t('App Bearer key')}</Label>
             <div className='flex gap-2'>
-              <Input readOnly value={createdSecret?.keyID ?? ''} />
+              <Input readOnly value={createdToken ?? ''} />
               <CopyButton
-                value={createdSecret?.keyID ?? ''}
-                size='icon'
-                tooltip={t('Copy')}
-                aria-label={t('Copy')}
-              >
-                <Copy className='size-4' />
-              </CopyButton>
-            </div>
-          </div>
-          <div className='grid gap-2'>
-            <Label>{t('Secret')}</Label>
-            <div className='flex gap-2'>
-              <Input readOnly value={createdSecret?.secret ?? ''} />
-              <CopyButton
-                value={createdSecret?.secret ?? ''}
+                value={createdToken ?? ''}
                 size='icon'
                 tooltip={t('Copy')}
                 aria-label={t('Copy')}

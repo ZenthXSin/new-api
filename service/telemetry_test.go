@@ -2,7 +2,6 @@ package service
 
 import (
 	"bytes"
-	"strconv"
 	"testing"
 	"time"
 
@@ -61,43 +60,28 @@ func setupTelemetryTestDB(t *testing.T) *model.TelemetryApp {
 	return app
 }
 
-func TestTelemetryRequestVerificationPreventsReplay(t *testing.T) {
+func TestTelemetryRequestVerificationAcceptsMatchingSecret(t *testing.T) {
 	app := setupTelemetryTestDB(t)
 	key, secret, err := CreateTelemetryWriteKey(app.ID, "test-key")
 	require.NoError(t, err)
 
-	body := []byte(`{"schema_version":1,"events":[]}`)
-	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-	nonce := "request-nonce-1"
-	signature := TelemetryRequestSignature("POST", "/api/telemetry/ingest", timestamp, nonce, secret, body)
-
-	verifiedKey, err := VerifyTelemetryRequest("POST", "/api/telemetry/ingest", "127.0.0.1", key.KeyID, timestamp, nonce, signature, body)
+	verifiedKey, err := VerifyTelemetryRequest("127.0.0.1", key.KeyID, secret)
 	require.NoError(t, err)
 	assert.Equal(t, key.ID, verifiedKey.ID)
 
-	_, err = VerifyTelemetryRequest("POST", "/api/telemetry/ingest", "127.0.0.1", key.KeyID, timestamp, nonce, signature, body)
-	require.Error(t, err)
-	assert.Equal(t, "遥测请求已处理", err.Error())
-}
-
-func TestTelemetryRequestVerificationRejectsInvalidSignatureAndTimestamp(t *testing.T) {
-	app := setupTelemetryTestDB(t)
-	key, secret, err := CreateTelemetryWriteKey(app.ID, "test-key")
-	require.NoError(t, err)
-
-	body := []byte(`{"schema_version":1,"events":[]}`)
-	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-	signature := TelemetryRequestSignature("POST", "/api/telemetry/ingest", timestamp, "valid-nonce", secret, body)
-
-	_, err = VerifyTelemetryRequest("POST", "/api/telemetry/ingest", "127.0.0.1", key.KeyID, timestamp, "valid-nonce", "00"+signature[2:], body)
+	_, err = VerifyTelemetryRequest("127.0.0.1", key.KeyID, "wrong-secret")
 	require.Error(t, err)
 	assert.Equal(t, "遥测认证无效", err.Error())
+}
 
-	expiredTimestamp := strconv.FormatInt(time.Now().Add(-2*time.Hour).Unix(), 10)
-	expiredSignature := TelemetryRequestSignature("POST", "/api/telemetry/ingest", expiredTimestamp, "expired-nonce", secret, body)
-	_, err = VerifyTelemetryRequest("POST", "/api/telemetry/ingest", "127.0.0.1", key.KeyID, expiredTimestamp, "expired-nonce", expiredSignature, body)
+func TestTelemetryRequestVerificationRejectsInvalidKey(t *testing.T) {
+	app := setupTelemetryTestDB(t)
+	_, secret, err := CreateTelemetryWriteKey(app.ID, "test-key")
+	require.NoError(t, err)
+
+	_, err = VerifyTelemetryRequest("127.0.0.1", "missing-key", secret)
 	require.Error(t, err)
-	assert.Equal(t, "遥测时间戳无效", err.Error())
+	assert.Equal(t, "遥测认证无效", err.Error())
 }
 
 func TestIngestTelemetryAggregatesValidatedEvents(t *testing.T) {

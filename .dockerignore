@@ -9,4 +9,5 @@ docs
 .gocache
 /web/node_modules
 /web/dist
+certificate.pem
 !THIRD-PARTY-LICENSES.md

@@ -3,12 +3,16 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math/big"
+	"math/rand"
+	"sort"
 	"strings"
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -60,100 +64,172 @@ func GetAllEnableAbilities() []Ability {
 	return abilities
 }
 
-func getPriority(group string, model string, retry int) (int, error) {
-
-	var priorities []int
-	err := DB.Model(&Ability{}).
-		Select("DISTINCT(priority)").
-		Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).
-		Order("priority DESC").              // 按优先级降序排序
-		Pluck("priority", &priorities).Error // Pluck用于将查询的结果直接扫描到一个切片中
-
-	if err != nil {
-		// 处理错误
-		return 0, err
-	}
-
-	if len(priorities) == 0 {
-		// 如果没有查询到优先级，则返回错误
-		return 0, errors.New("数据库一致性被破坏")
-	}
-
-	// 确定要使用的优先级
-	var priorityToUse int
-	if retry >= len(priorities) {
-		// 如果重试次数大于优先级数，则使用最小的优先级
-		priorityToUse = priorities[len(priorities)-1]
-	} else {
-		priorityToUse = priorities[retry]
-	}
-	return priorityToUse, nil
-}
-
-func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
-	maxPrioritySubQuery := DB.Model(&Ability{}).Select("MAX(priority)").Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true)
-	channelQuery := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = (?)", group, model, true, maxPrioritySubQuery)
-	if retry != 0 {
-		priority, err := getPriority(group, model, retry)
-		if err != nil {
-			return nil, err
-		} else {
-			channelQuery = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = ?", group, model, true, priority)
-		}
-	}
-
-	return channelQuery, nil
-}
-
 func GetChannel(group string, model string, retry int, requestPath string) (*Channel, error) {
-	var abilities []Ability
+	abilities, err := getEligibleAbilitiesForPolling(group, model, requestPath)
+	if err != nil {
+		return nil, err
+	}
+	abilities = abilitiesAtRetryPriority(abilities, retry)
+	return selectChannelFromAbilities(abilities)
+}
 
-	var err error = nil
-	channelQuery, err := getChannelQuery(group, model, retry)
+func GetChannelExcluding(group string, model string, retry int, requestPath string, excluded map[int]struct{}) (*Channel, error) {
+	abilities, err := getEligibleAbilitiesForPolling(group, model, requestPath)
 	if err != nil {
 		return nil, err
 	}
-	if common.UsingMainDatabase(common.DatabaseTypeSQLite) || common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
-		err = channelQuery.Order("weight DESC").Find(&abilities).Error
-	} else {
-		err = channelQuery.Order("weight DESC").Find(&abilities).Error
-	}
-	if err != nil {
-		return nil, err
-	}
-	abilities = filterAbilitiesByRequestPathAndModel(abilities, requestPath, model)
-	channel := Channel{}
-	if len(abilities) > 0 {
-		// Randomly choose one
-		weightSum := uint(0)
-		for _, ability_ := range abilities {
-			weightSum += ability_.Weight + 10
-		}
-		// Randomly choose one
-		weight := common.GetRandomInt(int(weightSum))
-		for _, ability_ := range abilities {
-			weight -= int(ability_.Weight) + 10
-			//log.Printf("weight: %d, ability weight: %d", weight, *ability_.Weight)
-			if weight <= 0 {
-				channel.Id = ability_.ChannelId
-				break
+	if len(excluded) > 0 {
+		filtered := abilities[:0]
+		for _, ability := range abilities {
+			if _, skip := excluded[ability.ChannelId]; !skip {
+				filtered = append(filtered, ability)
 			}
 		}
-	} else {
+		abilities = filtered
+	}
+	abilities = abilitiesAtRetryPriority(abilities, retry)
+	return selectChannelFromAbilities(abilities)
+}
+
+func getEligibleAbilitiesForPolling(group string, model string, requestPath string) ([]Ability, error) {
+	abilities, err := getFilteredAbilitiesForPolling(group, model, requestPath, model)
+	if err != nil || len(abilities) > 0 {
+		return abilities, err
+	}
+
+	normalizedModel := ratio_setting.FormatMatchingModelName(model)
+	if normalizedModel == model {
+		return abilities, nil
+	}
+	return getFilteredAbilitiesForPolling(group, normalizedModel, requestPath, model)
+}
+
+func getFilteredAbilitiesForPolling(group string, abilityModel string, requestPath string, requestModel string) ([]Ability, error) {
+	var abilities []Ability
+	if err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, abilityModel, true).Order("weight DESC").Find(&abilities).Error; err != nil {
+		return nil, err
+	}
+	return filterAbilitiesByRequestPathAndModel(abilities, requestPath, requestModel)
+}
+
+func abilitiesAtRetryPriority(abilities []Ability, retry int) []Ability {
+	if len(abilities) == 0 {
+		return abilities
+	}
+
+	priorities := make(map[int64]struct{}, len(abilities))
+	for _, ability := range abilities {
+		priority := int64(0)
+		if ability.Priority != nil {
+			priority = *ability.Priority
+		}
+		priorities[priority] = struct{}{}
+	}
+	sortedPriorities := make([]int64, 0, len(priorities))
+	for priority := range priorities {
+		sortedPriorities = append(sortedPriorities, priority)
+	}
+	sort.Slice(sortedPriorities, func(i, j int) bool {
+		return sortedPriorities[i] > sortedPriorities[j]
+	})
+	if retry < 0 {
+		retry = 0
+	}
+	if retry >= len(sortedPriorities) {
+		retry = len(sortedPriorities) - 1
+	}
+	targetPriority := sortedPriorities[retry]
+
+	filtered := abilities[:0]
+	for _, ability := range abilities {
+		priority := int64(0)
+		if ability.Priority != nil {
+			priority = *ability.Priority
+		}
+		if priority == targetPriority {
+			filtered = append(filtered, ability)
+		}
+	}
+	return filtered
+}
+
+// selectWeightedChannelIndex selects from explicit linear effective weights.
+// big.Int keeps the full uint domain safe even when many channel weights are added.
+func selectWeightedChannelIndex(weights []uint, multiplier uint64, adjustment uint64) (int, error) {
+	if len(weights) == 0 {
+		return -1, nil
+	}
+
+	var total big.Int
+	var weight big.Int
+	var multiplierValue big.Int
+	var adjustmentValue big.Int
+	multiplierValue.SetUint64(multiplier)
+	adjustmentValue.SetUint64(adjustment)
+	for _, value := range weights {
+		weight.SetUint64(uint64(value))
+		weight.Mul(&weight, &multiplierValue)
+		weight.Add(&weight, &adjustmentValue)
+		total.Add(&total, &weight)
+	}
+
+	bytes := make([]byte, (total.BitLen()+7)/8)
+	var selected big.Int
+	for {
+		if _, err := rand.Read(bytes); err != nil {
+			return -1, err
+		}
+		if excessBits := len(bytes)*8 - total.BitLen(); excessBits > 0 {
+			bytes[0] &= byte(0xff >> excessBits)
+		}
+		selected.SetBytes(bytes)
+		if selected.Cmp(&total) < 0 {
+			break
+		}
+	}
+
+	var cumulative big.Int
+	for index, value := range weights {
+		weight.SetUint64(uint64(value))
+		weight.Mul(&weight, &multiplierValue)
+		weight.Add(&weight, &adjustmentValue)
+		cumulative.Add(&cumulative, &weight)
+		if selected.Cmp(&cumulative) < 0 {
+			return index, nil
+		}
+	}
+	return -1, fmt.Errorf("weighted channel selection did not select a candidate")
+}
+
+func selectChannelFromAbilities(abilities []Ability) (*Channel, error) {
+	if len(abilities) == 0 {
 		return nil, nil
 	}
-	err = DB.First(&channel, "id = ?", channel.Id).Error
-	return &channel, err
+	weights := make([]uint, len(abilities))
+	for index, ability := range abilities {
+		weights[index] = ability.Weight
+	}
+	// Non-cache selection has always used a minimum effective weight of ten.
+	selected, err := selectWeightedChannelIndex(weights, 1, 10)
+	if err != nil {
+		return nil, err
+	}
+	var channel Channel
+	if err := DB.First(&channel, "id = ?", abilities[selected].ChannelId).Error; err != nil {
+		return nil, err
+	}
+	return &channel, nil
 }
 
 // filterAbilitiesByRequestPathAndModel restricts candidates by request path and
 // model for the DB (non-memory-cache) selection path. Only Advanced Custom
 // (type 58) channels are path-checked: kept only when one of their routes matches
 // requestPath and model; all other channel types always pass. When requestPath is
-// empty, filtering is skipped.
-func filterAbilitiesByRequestPathAndModel(abilities []Ability, requestPath string, model string) []Ability {
+// empty, filtering is skipped. Channel lookup errors are returned so Advanced
+// Custom candidates cannot be selected without path and model verification.
+func filterAbilitiesByRequestPathAndModel(abilities []Ability, requestPath string, model string) ([]Ability, error) {
 	if requestPath == "" || len(abilities) == 0 {
-		return abilities
+		return abilities, nil
 	}
 
 	channelIds := make([]int, 0, len(abilities))
@@ -168,8 +244,7 @@ func filterAbilitiesByRequestPathAndModel(abilities []Ability, requestPath strin
 
 	var channels []*Channel
 	if err := DB.Where("id IN ?", channelIds).Find(&channels).Error; err != nil {
-		// On error, fall back to unfiltered candidates to avoid blocking selection
-		return abilities
+		return nil, err
 	}
 
 	advancedConfigs := make(map[int]*dto.AdvancedCustomConfig)
@@ -190,7 +265,7 @@ func filterAbilitiesByRequestPathAndModel(abilities []Ability, requestPath strin
 			filtered = append(filtered, ability)
 		}
 	}
-	return filtered
+	return filtered, nil
 }
 
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
@@ -67,12 +68,20 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *common.RelayInfo, requestBody 
 	if info.IsStream {
 		return channel.DoApiRequest(a, c, info, requestBody)
 	}
+	attempt := helper.NewTextPollingAttempt(c.Request.Context(), info.TextPollingAttemptTimeout)
+	keepAttempt := false
+	defer func() {
+		if !keepAttempt {
+			attempt.Close()
+		}
+	}()
 	// 首先发送创建消息请求，成功后再发送获取消息请求
 	// 发送创建消息请求
 	resp, err := channel.DoApiRequest(a, c, info, requestBody)
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 	// 解析 resp
 	var cozeResponse CozeChatResponse
 	respBody, err := io.ReadAll(resp.Body)
@@ -87,7 +96,7 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *common.RelayInfo, requestBody 
 	c.Set("coze_chat_id", cozeResponse.Data.Id)
 	// 轮询检查消息是否完成
 	for {
-		err, isComplete := checkIfChatComplete(a, c, info)
+		err, isComplete := checkIfChatComplete(attempt.Context(), a, c, info)
 		if err != nil {
 			return nil, err
 		} else {
@@ -95,10 +104,32 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *common.RelayInfo, requestBody 
 				break
 			}
 		}
-		time.Sleep(time.Second * 1)
+		pollTimer := time.NewTimer(time.Second)
+		select {
+		case <-attempt.Context().Done():
+			pollTimer.Stop()
+			return nil, attempt.Context().Err()
+		case <-pollTimer.C:
+		}
 	}
 	// 发送获取消息请求
-	return getChatDetail(a, c, info)
+	resp, err = getChatDetail(attempt.Context(), a, c, info)
+	if err != nil {
+		return nil, err
+	}
+	resp.Body = &cozePollingBody{ReadCloser: resp.Body, attempt: attempt}
+	keepAttempt = true
+	return resp, nil
+}
+
+type cozePollingBody struct {
+	io.ReadCloser
+	attempt *helper.TextPollingAttempt
+}
+
+func (b *cozePollingBody) Close() error {
+	b.attempt.Close()
+	return b.ReadCloser.Close()
 }
 
 // DoResponse implements channel.Adaptor.

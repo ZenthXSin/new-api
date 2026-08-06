@@ -101,6 +101,10 @@ export interface ChannelOtherSettings {
   allow_speed?: boolean
   claude_beta_query?: boolean
   disable_task_polling_sleep?: boolean
+  text_polling_enabled?: boolean
+  text_polling_timeout_tier1_seconds?: number
+  text_polling_timeout_tier2_seconds?: number
+  text_polling_timeout_tier3_seconds?: number
   upstream_model_update_check_enabled?: boolean
   upstream_model_update_auto_sync_enabled?: boolean
   upstream_model_update_ignored_models?: string[]

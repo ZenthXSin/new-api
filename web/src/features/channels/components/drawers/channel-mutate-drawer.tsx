@@ -295,6 +295,10 @@ const SENSITIVE_FORM_FIELDS = [
   'allow_speed',
   'claude_beta_query',
   'disable_task_polling_sleep',
+  'text_polling_enabled',
+  'text_polling_timeout_tier1_seconds',
+  'text_polling_timeout_tier2_seconds',
+  'text_polling_timeout_tier3_seconds',
   'upstream_model_update_check_enabled',
   'upstream_model_update_auto_sync_enabled',
   'upstream_model_update_ignored_models',
@@ -744,6 +748,16 @@ export function ChannelMutateDrawer({
   const currentDisableTaskPollingSleep = form.watch(
     'disable_task_polling_sleep'
   )
+  const currentTextPollingEnabled = form.watch('text_polling_enabled')
+  const currentTextPollingTimeoutTier1Seconds = form.watch(
+    'text_polling_timeout_tier1_seconds'
+  )
+  const currentTextPollingTimeoutTier2Seconds = form.watch(
+    'text_polling_timeout_tier2_seconds'
+  )
+  const currentTextPollingTimeoutTier3Seconds = form.watch(
+    'text_polling_timeout_tier3_seconds'
+  )
   const currentProxy = form.watch('proxy')
   const currentSystemPrompt = form.watch('system_prompt')
   const currentSystemPromptOverride = form.watch('system_prompt_override')
@@ -1012,6 +1026,10 @@ export function ChannelMutateDrawer({
     currentThinkingToContent ||
     currentPassThroughBodyEnabled ||
     currentDisableTaskPollingSleep ||
+    currentTextPollingEnabled ||
+    currentTextPollingTimeoutTier1Seconds !== 3 ||
+    currentTextPollingTimeoutTier2Seconds !== 6 ||
+    currentTextPollingTimeoutTier3Seconds !== 12 ||
     currentProxy?.trim() ||
     currentSystemPrompt?.trim() ||
     currentSystemPromptOverride
@@ -4159,7 +4177,130 @@ export function ChannelMutateDrawer({
                                   </FormItem>
                                 )}
                               />
+
+                              <FormField
+                                control={form.control}
+                                name='text_polling_enabled'
+                                render={({ field }) => (
+                                  <FormItem className='flex items-center justify-between px-4 py-3'>
+                                    <div className='space-y-0.5'>
+                                      <FormLabel>
+                                        {t('Enable Automatic Polling')}
+                                      </FormLabel>
+                                      <FormDescription>
+                                        {t(
+                                          'This channel joins the tiered polling whitelist'
+                                        )}
+                                      </FormDescription>
+                                    </div>
+                                    <FormControl>
+                                      <Switch
+                                        checked={field.value}
+                                        onCheckedChange={field.onChange}
+                                      />
+                                    </FormControl>
+                                  </FormItem>
+                                )}
+                              />
                             </div>
+
+                            <div className='grid gap-4 sm:grid-cols-3'>
+                              <FormField
+                                control={form.control}
+                                name='text_polling_timeout_tier1_seconds'
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>
+                                      {t('Text polling timeout tier 1')}
+                                    </FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        type='number'
+                                        min={1}
+                                        max={120}
+                                        step={1}
+                                        disabled={!currentTextPollingEnabled}
+                                        {...field}
+                                        onChange={(event) =>
+                                          field.onChange(
+                                            Number(event.target.value)
+                                          )
+                                        }
+                                      />
+                                    </FormControl>
+                                    <FormDescription>
+                                      {t('Upstream wait time in seconds')}
+                                    </FormDescription>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+                              <FormField
+                                control={form.control}
+                                name='text_polling_timeout_tier2_seconds'
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>
+                                      {t('Text polling timeout tier 2')}
+                                    </FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        type='number'
+                                        min={1}
+                                        max={120}
+                                        step={1}
+                                        disabled={!currentTextPollingEnabled}
+                                        {...field}
+                                        onChange={(event) =>
+                                          field.onChange(
+                                            Number(event.target.value)
+                                          )
+                                        }
+                                      />
+                                    </FormControl>
+                                    <FormDescription>
+                                      {t('Upstream wait time in seconds')}
+                                    </FormDescription>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+                              <FormField
+                                control={form.control}
+                                name='text_polling_timeout_tier3_seconds'
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>
+                                      {t('Text polling timeout tier 3')}
+                                    </FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        type='number'
+                                        min={1}
+                                        max={120}
+                                        step={1}
+                                        disabled={!currentTextPollingEnabled}
+                                        {...field}
+                                        onChange={(event) =>
+                                          field.onChange(
+                                            Number(event.target.value)
+                                          )
+                                        }
+                                      />
+                                    </FormControl>
+                                    <FormDescription>
+                                      {t('Upstream wait time in seconds')}
+                                    </FormDescription>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+                            </div>
+                            <p className='text-muted-foreground text-xs'>
+                              {t(
+                                'Automatic polling tries each enabled channel once per tier before moving to the next timeout'
+                              )}
+                            </p>
 
                             <FormField
                               control={form.control}

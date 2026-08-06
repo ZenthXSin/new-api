@@ -45,6 +45,18 @@ const SUPPORTED_PROXY_PROTOCOLS = new Set([
   'socks5h:',
 ])
 
+export const TEXT_POLLING_TIMEOUT_DEFAULTS = [3, 6, 12] as const
+const MAX_TEXT_POLLING_TIMEOUT_SECONDS = 120
+
+const textPollingTimeoutSchema = z
+  .number()
+  .int('Text polling timeout must be a whole number of seconds')
+  .min(1, 'Text polling timeout must be at least 1 second')
+  .max(
+    MAX_TEXT_POLLING_TIMEOUT_SECONDS,
+    `Text polling timeout must not exceed ${MAX_TEXT_POLLING_TIMEOUT_SECONDS} seconds`
+  )
+
 function isOptionalProxyURL(value: string | undefined): boolean {
   const trimmedValue = value?.trim() || ''
   if (!trimmedValue) return true
@@ -242,12 +254,37 @@ export const channelFormSchema = z
     allow_speed: z.boolean().optional(), // Anthropic: speed mode control
     claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
     disable_task_polling_sleep: z.boolean().optional(),
+    text_polling_enabled: z.boolean().optional(),
+    text_polling_timeout_tier1_seconds: textPollingTimeoutSchema,
+    text_polling_timeout_tier2_seconds: textPollingTimeoutSchema,
+    text_polling_timeout_tier3_seconds: textPollingTimeoutSchema,
     // Upstream model update settings (stored in settings JSON)
     upstream_model_update_check_enabled: z.boolean().optional(),
     upstream_model_update_auto_sync_enabled: z.boolean().optional(),
     upstream_model_update_ignored_models: z.string().optional(),
   })
   .superRefine((data, ctx) => {
+    if (
+      data.text_polling_timeout_tier1_seconds >=
+      data.text_polling_timeout_tier2_seconds
+    ) {
+      addRequiredIssue(
+        ctx,
+        'text_polling_timeout_tier2_seconds',
+        'Text polling timeout tier 2 must be greater than tier 1'
+      )
+    }
+    if (
+      data.text_polling_timeout_tier2_seconds >=
+      data.text_polling_timeout_tier3_seconds
+    ) {
+      addRequiredIssue(
+        ctx,
+        'text_polling_timeout_tier3_seconds',
+        'Text polling timeout tier 3 must be greater than tier 2'
+      )
+    }
+
     if (
       [3, 8, 36, 45, CHANNEL_TYPE_NEW_API].includes(data.type) &&
       !data.base_url?.trim()
@@ -395,6 +432,10 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_speed: false,
   claude_beta_query: false,
   disable_task_polling_sleep: false,
+  text_polling_enabled: false,
+  text_polling_timeout_tier1_seconds: TEXT_POLLING_TIMEOUT_DEFAULTS[0],
+  text_polling_timeout_tier2_seconds: TEXT_POLLING_TIMEOUT_DEFAULTS[1],
+  text_polling_timeout_tier3_seconds: TEXT_POLLING_TIMEOUT_DEFAULTS[2],
   upstream_model_update_check_enabled: false,
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
@@ -451,6 +492,10 @@ export function transformChannelToFormDefaults(
   let allowSpeed = false
   let claudeBetaQuery = false
   let disableTaskPollingSleep = false
+  let textPollingEnabled = false
+  let textPollingTimeoutTier1Seconds = TEXT_POLLING_TIMEOUT_DEFAULTS[0]
+  let textPollingTimeoutTier2Seconds = TEXT_POLLING_TIMEOUT_DEFAULTS[1]
+  let textPollingTimeoutTier3Seconds = TEXT_POLLING_TIMEOUT_DEFAULTS[2]
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
@@ -471,6 +516,16 @@ export function transformChannelToFormDefaults(
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
       disableTaskPollingSleep = parsed.disable_task_polling_sleep === true
+      textPollingEnabled = parsed.text_polling_enabled === true
+      textPollingTimeoutTier1Seconds =
+        parsed.text_polling_timeout_tier1_seconds ||
+        TEXT_POLLING_TIMEOUT_DEFAULTS[0]
+      textPollingTimeoutTier2Seconds =
+        parsed.text_polling_timeout_tier2_seconds ||
+        TEXT_POLLING_TIMEOUT_DEFAULTS[1]
+      textPollingTimeoutTier3Seconds =
+        parsed.text_polling_timeout_tier3_seconds ||
+        TEXT_POLLING_TIMEOUT_DEFAULTS[2]
       upstreamModelUpdateCheckEnabled =
         parsed.upstream_model_update_check_enabled === true
       upstreamModelUpdateAutoSyncEnabled =
@@ -529,6 +584,10 @@ export function transformChannelToFormDefaults(
     allow_speed: allowSpeed,
     claude_beta_query: claudeBetaQuery,
     disable_task_polling_sleep: disableTaskPollingSleep,
+    text_polling_enabled: textPollingEnabled,
+    text_polling_timeout_tier1_seconds: textPollingTimeoutTier1Seconds,
+    text_polling_timeout_tier2_seconds: textPollingTimeoutTier2Seconds,
+    text_polling_timeout_tier3_seconds: textPollingTimeoutTier3Seconds,
     allow_safety_identifier: allowSafetyIdentifier,
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
@@ -643,6 +702,13 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
 
   settingsObj.disable_task_polling_sleep =
     formData.disable_task_polling_sleep === true
+  settingsObj.text_polling_enabled = formData.text_polling_enabled === true
+  settingsObj.text_polling_timeout_tier1_seconds =
+    formData.text_polling_timeout_tier1_seconds
+  settingsObj.text_polling_timeout_tier2_seconds =
+    formData.text_polling_timeout_tier2_seconds
+  settingsObj.text_polling_timeout_tier3_seconds =
+    formData.text_polling_timeout_tier3_seconds
 
   // Upstream model update settings (for model-fetchable channel types)
   if (MODEL_FETCHABLE_TYPES.has(formData.type)) {

@@ -29,6 +29,30 @@ import type { LogOtherData } from '../types'
 
 export { normalizeTierLabel }
 
+export type TextPollingHit =
+  | { kind: 'tier'; tier: 1 | 2 | 3 }
+  | { kind: 'fallback' }
+
+/**
+ * Returns a text-polling result only for the exact metadata emitted by the
+ * backend. Invalid or contradictory values stay hidden rather than being
+ * presented as a successful polling tier.
+ */
+export function getTextPollingHit(
+  other: LogOtherData | null | undefined
+): TextPollingHit | null {
+  if (!other) return null
+
+  const tier = other.text_polling_tier
+  if (tier !== undefined) {
+    if (tier !== 1 && tier !== 2 && tier !== 3) return null
+    if (other.text_polling_fallback !== undefined) return null
+    return { kind: 'tier', tier }
+  }
+
+  return other.text_polling_fallback === true ? { kind: 'fallback' } : null
+}
+
 const PARAM_OVERRIDE_ACTION_MAP: Record<string, string> = {
   set: 'Set',
   delete: 'Delete',

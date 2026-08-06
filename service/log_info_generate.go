@@ -105,6 +105,11 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	if isLocalCountTokens {
 		adminInfo["local_count_tokens"] = isLocalCountTokens
 	}
+	if relayInfo.TextPollingTier >= 1 && relayInfo.TextPollingTier <= 3 {
+		other["text_polling_tier"] = relayInfo.TextPollingTier
+	} else if relayInfo.TextPollingTier == 0 && relayInfo.TextPollingAttemptTimeout > 0 {
+		other["text_polling_fallback"] = true
+	}
 
 	AppendChannelAffinityAdminInfo(ctx, adminInfo)
 

@@ -1,11 +1,13 @@
 package ollama
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -16,6 +18,34 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type failingPollingBody struct {
+	err     error
+	stopped bool
+}
+
+func (b *failingPollingBody) Read([]byte) (int, error) { return 0, b.err }
+func (b *failingPollingBody) Close() error             { return nil }
+func (b *failingPollingBody) StopPollingTimeout()      { b.stopped = true }
+
+func TestOllamaPollingDoesNotCommitBeforeFirstUpstreamEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	body := &failingPollingBody{err: errors.New("attempt timeout")}
+
+	usage, apiErr := ollamaStreamHandler(c, &relaycommon.RelayInfo{
+		ChannelMeta:               &relaycommon.ChannelMeta{UpstreamModelName: "llama"},
+		TextPollingAttemptTimeout: time.Second,
+	}, &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body})
+
+	require.NotNil(t, usage)
+	require.NotNil(t, apiErr)
+	assert.False(t, c.Writer.Written())
+	assert.Empty(t, w.Body.String())
+	assert.False(t, body.stopped)
+}
 
 func TestOllamaChatHandlerNonStreamToolCalls(t *testing.T) {
 	gin.SetMode(gin.TestMode)

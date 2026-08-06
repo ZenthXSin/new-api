@@ -2,6 +2,7 @@ package coze
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -100,7 +101,9 @@ func cozeChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Res
 func cozeChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	scanner := helper.NewStreamScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
-	helper.SetEventStreamHeaders(c)
+	if info.TextPollingAttemptTimeout == 0 {
+		helper.SetEventStreamHeaders(c)
+	}
 	id := helper.GetResponseID(c)
 	var responseText string
 
@@ -114,7 +117,9 @@ func cozeChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *ht
 		if line == "" {
 			if currentEvent != "" && currentData != "" {
 				// handle last event
+				helper.PreparePollingStreamOutput(c, resp, info)
 				handleCozeEvent(c, currentEvent, currentData, &responseText, usage, id, info)
+				helper.CommitPollingStreamOutput(c, resp, info)
 				currentEvent = ""
 				currentData = ""
 			}
@@ -134,11 +139,18 @@ func cozeChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *ht
 
 	// Last event
 	if currentEvent != "" && currentData != "" {
+		helper.PreparePollingStreamOutput(c, resp, info)
 		handleCozeEvent(c, currentEvent, currentData, &responseText, usage, id, info)
+		helper.CommitPollingStreamOutput(c, resp, info)
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
+		if err = helper.PollingStreamReadError(c, info, err); err != nil {
+			return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
+		}
+	}
+	if info.TextPollingAttemptTimeout > 0 && !c.Writer.Written() {
+		return nil, types.NewError(io.ErrUnexpectedEOF, types.ErrorCodeBadResponseBody)
 	}
 	helper.Done(c)
 
@@ -213,12 +225,12 @@ func handleCozeEvent(c *gin.Context, event string, data string, responseText *st
 	}
 }
 
-func checkIfChatComplete(a *Adaptor, c *gin.Context, info *relaycommon.RelayInfo) (error, bool) {
+func checkIfChatComplete(ctx context.Context, a *Adaptor, c *gin.Context, info *relaycommon.RelayInfo) (error, bool) {
 	requestURL := fmt.Sprintf("%s/v3/chat/retrieve", info.ChannelBaseUrl)
 
 	requestURL = requestURL + "?conversation_id=" + c.GetString("coze_conversation_id") + "&chat_id=" + c.GetString("coze_chat_id")
 	// 将 conversationId和chatId作为参数发送get请求
-	req, err := http.NewRequest("GET", requestURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return err, false
 	}
@@ -259,11 +271,11 @@ func checkIfChatComplete(a *Adaptor, c *gin.Context, info *relaycommon.RelayInfo
 	}
 }
 
-func getChatDetail(a *Adaptor, c *gin.Context, info *relaycommon.RelayInfo) (*http.Response, error) {
+func getChatDetail(ctx context.Context, a *Adaptor, c *gin.Context, info *relaycommon.RelayInfo) (*http.Response, error) {
 	requestURL := fmt.Sprintf("%s/v3/chat/message/list", info.ChannelBaseUrl)
 
 	requestURL = requestURL + "?conversation_id=" + c.GetString("coze_conversation_id") + "&chat_id=" + c.GetString("coze_chat_id")
-	req, err := http.NewRequest("GET", requestURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}

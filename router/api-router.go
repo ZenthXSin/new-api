@@ -14,7 +14,7 @@ import (
 func SetApiRouter(router *gin.Engine) {
 	apiRouter := router.Group("/api")
 	apiRouter.Use(middleware.RouteTag("api"))
-	apiRouter.Use(gzip.Gzip(gzip.DefaultCompression))
+	apiRouter.Use(gzip.Gzip(gzip.DefaultCompression, gzip.WithExcludedPathsRegexs([]string{`^/api/distribution/apps/.*/assets/`})))
 	apiRouter.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
 	apiRouter.Use(middleware.GlobalAPIRateLimit())
 	anonymousRequestBodyLimit := middleware.AnonymousRequestBodyLimit()
@@ -63,6 +63,29 @@ func SetApiRouter(router *gin.Engine) {
 		// in Pancake's matching webhook slot; handler enforces env match.
 		apiRouter.POST("/waffo-pancake/webhook/:env", anonymousRequestBodyLimit, controller.WaffoPancakeWebhook)
 		apiRouter.POST("/telemetry/ingest", controller.IngestTelemetry)
+
+		distributionRoute := apiRouter.Group("/distribution/apps/:slug")
+		{
+			distributionRoute.GET("", controller.GetDistributionApp)
+			distributionRoute.GET("/releases", controller.GetDistributionReleases)
+			distributionRoute.GET("/releases/latest", controller.GetLatestDistributionRelease)
+			distributionRoute.GET("/announcements", controller.GetDistributionAnnouncements)
+			distributionRoute.GET("/announcements/:id", controller.GetDistributionAnnouncement)
+			distributionRoute.GET("/assets/:id/download", controller.DownloadDistributionAsset)
+			distributionRoute.HEAD("/assets/:id/download", controller.DownloadDistributionAsset)
+			distributionRoute.GET("/manage/releases", controller.GetManagedDistributionReleases)
+			distributionRoute.GET("/manage/announcements", controller.GetManagedDistributionAnnouncements)
+			distributionRoute.POST("/releases", controller.CreateDistributionRelease)
+			distributionRoute.PUT("/releases/:id", controller.UpdateDistributionRelease)
+			distributionRoute.PATCH("/releases/:id", controller.UpdateDistributionRelease)
+			distributionRoute.POST("/releases/:id/publish", controller.PublishDistributionRelease)
+			distributionRoute.POST("/releases/:id/assets", controller.UploadDistributionAsset)
+			distributionRoute.POST("/announcements", controller.CreateDistributionAnnouncement)
+			distributionRoute.PUT("/announcements/:id", controller.UpdateDistributionAnnouncement)
+			distributionRoute.PATCH("/announcements/:id", controller.UpdateDistributionAnnouncement)
+			distributionRoute.POST("/announcements/:id/publish", controller.PublishDistributionAnnouncement)
+			distributionRoute.POST("/announcements/:id/archive", controller.ArchiveDistributionAnnouncement)
+		}
 
 		// Universal secure verification routes
 		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), middleware.DisableCache(), controller.UniversalVerify)

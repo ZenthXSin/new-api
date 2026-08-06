@@ -33,7 +33,9 @@ declare module 'axios' {
     skipBusinessError?: boolean
     skipErrorHandler?: boolean
     disableDuplicate?: boolean
+    skipRequestDedup?: boolean
     skipAuthRefresh?: boolean
+    skipPanelAuth?: boolean
     authRetry?: boolean
     acceptAuthRotation?: boolean
   }
@@ -53,7 +55,9 @@ const inFlightGet = new Map<string, Promise<unknown>>()
 const originalGet = api.get.bind(api)
 
 api.get = ((url: string, config: ApiRequestConfig = {}) => {
-  if (config.disableDuplicate) return originalGet(url, config)
+  if (config.disableDuplicate || config.skipRequestDedup) {
+    return originalGet(url, config)
+  }
 
   const params = config.params ? JSON.stringify(config.params) : '{}'
   const sessionSID = useAuthStore.getState().auth.session?.sid || 'anonymous'
@@ -143,7 +147,7 @@ api.interceptors.response.use(
 
 api.interceptors.request.use((config) => {
   const accessToken = useAuthStore.getState().auth.accessToken
-  if (accessToken) {
+  if (accessToken && !config.skipPanelAuth) {
     config.headers.Authorization = `Bearer ${accessToken}`
   }
   return config

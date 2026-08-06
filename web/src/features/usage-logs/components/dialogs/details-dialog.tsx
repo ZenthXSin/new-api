@@ -66,6 +66,7 @@ import { cn } from '@/lib/utils'
 import type { UsageLog } from '../../data/schema'
 import {
   parseLogOther,
+  getTextPollingHit,
   getParamOverrideActionLabel,
   parseAuditLine,
   decodeBillingExprB64,
@@ -604,6 +605,13 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const useChannel = other?.admin_info?.use_channel
   const channelChain =
     useChannel && useChannel.length > 0 ? useChannel.join(' → ') : undefined
+  const pollingHit = getTextPollingHit(other)
+  let pollingLabel: string | null = null
+  if (pollingHit?.kind === 'tier') {
+    pollingLabel = `${t('Tier')} ${pollingHit.tier}`
+  } else if (pollingHit) {
+    pollingLabel = t('Fallback')
+  }
   let reasoningEffortVariant: StatusBadgeProps['variant'] = 'green'
   if (other?.reasoning_effort === 'high') {
     reasoningEffortVariant = 'orange'
@@ -676,6 +684,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
 
           {channelChain && props.isAdmin && (
             <DetailRow label={t('Retry Chain')} value={channelChain} mono />
+          )}
+
+          {pollingLabel && (
+            <DetailRow label={t('Polling')} value={pollingLabel} />
           )}
 
           {props.log.token_name && (
