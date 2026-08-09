@@ -150,6 +150,9 @@ import { useChannelMutateForm } from '../../hooks/use-channel-mutate-form'
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
   CHANNEL_TYPE_ADVANCED_CUSTOM,
+  COST_MULTIPLIER_MAX,
+  COST_MULTIPLIER_MIN,
+  COST_MULTIPLIER_STEP,
   channelFormSchema,
   channelsQueryKeys,
   getAdvancedCustomStats,
@@ -3690,6 +3693,35 @@ export function ChannelMutateDrawer({
                                     </FormControl>
                                     <FormDescription>
                                       {t(FIELD_DESCRIPTIONS.WEIGHT)}
+                                    </FormDescription>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+
+                              <FormField
+                                control={form.control}
+                                name='cost_multiplier'
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>
+                                      {t('Cost Multiplier')}
+                                    </FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        type='number'
+                                        min={COST_MULTIPLIER_MIN}
+                                        max={COST_MULTIPLIER_MAX}
+                                        step={COST_MULTIPLIER_STEP}
+                                        placeholder='1.00'
+                                        {...field}
+                                        onChange={(e) =>
+                                          field.onChange(Number(e.target.value))
+                                        }
+                                      />
+                                    </FormControl>
+                                    <FormDescription>
+                                      {t('Internal channel cost multiplier')}
                                     </FormDescription>
                                     <FormMessage />
                                   </FormItem>

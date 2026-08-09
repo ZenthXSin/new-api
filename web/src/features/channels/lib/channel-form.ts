@@ -47,6 +47,9 @@ const SUPPORTED_PROXY_PROTOCOLS = new Set([
 
 export const TEXT_POLLING_TIMEOUT_DEFAULTS = [3, 6, 12] as const
 const MAX_TEXT_POLLING_TIMEOUT_SECONDS = 120
+export const COST_MULTIPLIER_MIN = 0.0001
+export const COST_MULTIPLIER_MAX = 1000
+export const COST_MULTIPLIER_STEP = 0.0001
 
 const textPollingTimeoutSchema = z
   .number()
@@ -207,6 +210,11 @@ export const channelFormSchema = z
       .string()
       .max(255, 'Remark must be less than 255 characters')
       .optional(),
+    cost_multiplier: z
+      .number()
+      .finite('Cost multiplier must be finite')
+      .min(COST_MULTIPLIER_MIN, 'Cost multiplier must be at least 0.0001x')
+      .max(COST_MULTIPLIER_MAX, 'Cost multiplier must not exceed 1000x'),
     setting: z
       .string()
       .optional()
@@ -402,6 +410,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   status_code_mapping: '',
   tag: '',
   remark: '',
+  cost_multiplier: 1,
   setting: '',
   param_override: '',
   header_override: '',
@@ -561,6 +570,7 @@ export function transformChannelToFormDefaults(
     status_code_mapping: channel.status_code_mapping || '',
     tag: channel.tag || '',
     remark: channel.remark || '',
+    cost_multiplier: channel.cost_multiplier || 1,
     setting: channel.setting || '',
     param_override: channel.param_override || '',
     header_override: channel.header_override || '',
@@ -784,6 +794,7 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
     status_code_mapping: formData.status_code_mapping || null,
     tag: formData.tag || null,
     remark: formData.remark || '',
+    cost_multiplier: formData.cost_multiplier,
     setting: buildSettingJSON(formData),
     param_override: formData.param_override || null,
     header_override: formData.header_override || null,
@@ -831,6 +842,7 @@ export function transformFormDataToUpdatePayload(
     status_code_mapping: formData.status_code_mapping || null,
     tag: formData.tag || null,
     remark: formData.remark || '',
+    cost_multiplier: formData.cost_multiplier,
     setting: buildSettingJSON(formData),
     param_override: formData.param_override || null,
     header_override: formData.header_override || null,

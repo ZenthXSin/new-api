@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { toIntlLocale } from '@/i18n/languages'
 
 export function formatDistributionDate(
   value: string | null | undefined,
@@ -23,5 +24,7 @@ export function formatDistributionDate(
   dateStyle: Intl.DateTimeFormatOptions['dateStyle']
 ): string {
   if (!value) return ''
-  return new Intl.DateTimeFormat(language, { dateStyle }).format(new Date(value))
+  return new Intl.DateTimeFormat(toIntlLocale(language), { dateStyle }).format(
+    new Date(value)
+  )
 }

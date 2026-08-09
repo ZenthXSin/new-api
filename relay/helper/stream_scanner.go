@@ -352,6 +352,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				SetEventStreamHeaders(c)
 			}
 			ExtendWriteDeadline(c)
+			validEventAt := time.Now()
 			dataHandler(data, sr)
 			writeMutex.Unlock()
 
@@ -364,8 +365,8 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 					pollingPending = false
 				}
 			}
-			if !sr.IsStopped() && info.StreamStatus.TotalErrorCount() == errorCountBefore {
-				info.SetFirstResponseTime()
+			if !sr.IsStopped() && info.StreamStatus.TotalErrorCount() == errorCountBefore && (info.Timing == nil || !info.Timing.HasWriteError()) {
+				info.SetFirstResponseTimeAt(validEventAt)
 				info.ReceivedResponseCount++
 			}
 			if sr.IsStopped() {

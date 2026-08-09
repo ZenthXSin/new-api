@@ -846,13 +846,20 @@ func RelayTask(c *gin.Context) {
 		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 		task.PrivateData.TokenId = relayInfo.TokenId
 		task.PrivateData.NodeName = common.NodeName
+		costSnapshot := service.CalculateTaskCost(relayInfo)
 		task.PrivateData.BillingContext = &model.TaskBillingContext{
-			ModelPrice:      relayInfo.PriceData.ModelPrice,
-			GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-			ModelRatio:      relayInfo.PriceData.ModelRatio,
-			OtherRatios:     relayInfo.PriceData.OtherRatios(),
-			OriginModelName: relayInfo.OriginModelName,
-			PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+			ModelPrice:           relayInfo.PriceData.ModelPrice,
+			GroupRatio:           relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+			ModelRatio:           relayInfo.PriceData.ModelRatio,
+			OtherRatios:          relayInfo.PriceData.OtherRatios(),
+			OriginModelName:      relayInfo.OriginModelName,
+			PerCallBilling:       common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+			RevenueQuota:         result.Quota,
+			BaseCostQuota:        costSnapshot.BaseCostQuota,
+			CostQuota:            costSnapshot.CostQuota,
+			CostMultiplier:       costSnapshot.Multiplier,
+			SettledBaseCostQuota: costSnapshot.BaseCostQuota,
+			SettledCostQuota:     costSnapshot.CostQuota,
 		}
 		task.Quota = result.Quota
 		task.Data = result.TaskData

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"regexp"
 	"strings"
 	"sync"
@@ -534,6 +535,10 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	} else {
 		req = req.WithContext(c.Request.Context())
 	}
+	if info.Timing != nil {
+		attempt := info.Timing.BeginAttempt(time.Now())
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), info.Timing.Trace(attempt)))
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -554,6 +559,9 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 			attemptCancel()
 		}
 		return nil, errors.New("resp is nil")
+	}
+	if info.Timing != nil && !info.IsStream {
+		info.Timing.CommitValidEvent(time.Now())
 	}
 	if attemptTimer != nil {
 		resp.Body = &pollingTimeoutBody{ReadCloser: resp.Body, timer: attemptTimer, cancel: attemptCancel}

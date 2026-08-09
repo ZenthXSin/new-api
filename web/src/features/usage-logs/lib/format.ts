@@ -25,7 +25,7 @@ import {
 } from '@/features/pricing/lib/billing-expr'
 
 import type { UsageLog } from '../data/schema'
-import type { LogOtherData } from '../types'
+import type { DetailedTimingMetrics, LogOtherData } from '../types'
 
 export { normalizeTierLabel }
 
@@ -233,6 +233,62 @@ export function getResponseTimeColor(
 ): 'success' | 'warning' | 'danger' {
   if (completionTokens < 100 || seconds <= 0) return getTimeColor(seconds)
   return getThroughputColor(completionTokens / seconds)
+}
+
+/** Format a non-negative relay timing value without losing explicit zeroes. */
+export function formatTimingMilliseconds(
+  value: number | null | undefined
+): string {
+  if (value == null || !Number.isFinite(value) || value < 0) return '—'
+  const formatted = Number.isInteger(value) ? String(value) : value.toFixed(1)
+  return `${formatted} ms`
+}
+
+/** Format a non-negative byte count for the detailed timing popover. */
+export function formatTimingBytes(
+  value: number | null | undefined,
+  locale?: string
+): string {
+  if (value == null || !Number.isFinite(value) || value < 0) return '—'
+  return Math.round(value).toLocaleString(locale)
+}
+
+/** Format the backend's terminal timing status, including named statuses. */
+export function formatTimingEndStatus(
+  value: string | number | null | undefined,
+  t?: (key: string) => string
+): string {
+  if (value == null) return '—'
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value >= 0 ? String(value) : '—'
+  }
+  const key = value.trim()
+  if (!key) return '—'
+  const labels: Record<string, string> = {
+    normal: 'Success',
+    timeout: 'Timeout',
+    client_disconnect: 'Client disconnected',
+    upstream_disconnect: 'Upstream disconnected',
+    handler_error: 'Error',
+  }
+  return t ? t(labels[key] ?? key) : key
+}
+
+/** Return the connection phases present in a detailed timing payload. */
+export function getTimingConnectionPhases(
+  timing: DetailedTimingMetrics
+): Array<{ label: 'DNS' | 'TCP' | 'TLS'; value: number }> {
+  const phases: Array<{ label: 'DNS' | 'TCP' | 'TLS'; value: number }> = []
+  for (const [label, value] of [
+    ['DNS', timing.upstream_connection?.dns_ms ?? timing.upstream_dns_ms],
+    ['TCP', timing.upstream_connection?.tcp_ms ?? timing.upstream_tcp_ms],
+    ['TLS', timing.upstream_connection?.tls_ms ?? timing.upstream_tls_ms],
+  ] as const) {
+    if (value != null && Number.isFinite(value) && value >= 0) {
+      phases.push({ label, value })
+    }
+  }
+  return phases
 }
 
 /**

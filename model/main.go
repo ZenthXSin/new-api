@@ -261,13 +261,10 @@ func InitLogDB() (err error) {
 }
 
 func migrateDB() error {
-	if err := MigrateTelemetryAppSlugs(); err != nil {
+	if err := DB.AutoMigrate(&AppCenterSchemaState{}, &AppCenterApp{}, &AppCenterRelease{}, &AppCenterAsset{}, &AppCenterAnnouncement{}, &AppCenterUsageSession{}, &AppCenterUsageBucket{}, &AppCenterCustomEventBucket{}, &AppCenterEventReceipt{}, &AppCenterEventIPReceipt{}); err != nil {
 		return err
 	}
-	if err := MigrateTelemetryActiveKeys(); err != nil {
-		return err
-	}
-	if err := MigrateDistributionAssetSHA256Index(); err != nil {
+	if err := EnsureAppCenterSchemaState(); err != nil {
 		return err
 	}
 	// Migrate price_amount column from float/double to decimal for existing tables
@@ -310,15 +307,6 @@ func migrateDB() error {
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
-		&TelemetryProject{},
-		&TelemetryApp{},
-		&TelemetryWriteKey{},
-		&TelemetryNonce{},
-		&TelemetryBucket{},
-		&TelemetryReceiverMetric{},
-		&DistributionRelease{},
-		&DistributionAsset{},
-		&DistributionAnnouncement{},
 		&CasbinRule{},
 		&AuthzRole{},
 	)
@@ -344,13 +332,10 @@ func migrateDB() error {
 }
 
 func migrateDBFast() error {
-	if err := MigrateTelemetryAppSlugs(); err != nil {
+	if err := DB.AutoMigrate(&AppCenterSchemaState{}, &AppCenterApp{}, &AppCenterRelease{}, &AppCenterAsset{}, &AppCenterAnnouncement{}, &AppCenterUsageSession{}, &AppCenterUsageBucket{}, &AppCenterCustomEventBucket{}, &AppCenterEventReceipt{}, &AppCenterEventIPReceipt{}); err != nil {
 		return err
 	}
-	if err := MigrateTelemetryActiveKeys(); err != nil {
-		return err
-	}
-	if err := MigrateDistributionAssetSHA256Index(); err != nil {
+	if err := EnsureAppCenterSchemaState(); err != nil {
 		return err
 	}
 
@@ -392,15 +377,6 @@ func migrateDBFast() error {
 		{&SystemInstance{}, "SystemInstance"},
 		{&SystemTask{}, "SystemTask"},
 		{&SystemTaskLock{}, "SystemTaskLock"},
-		{&TelemetryProject{}, "TelemetryProject"},
-		{&TelemetryApp{}, "TelemetryApp"},
-		{&TelemetryWriteKey{}, "TelemetryWriteKey"},
-		{&TelemetryNonce{}, "TelemetryNonce"},
-		{&TelemetryBucket{}, "TelemetryBucket"},
-		{&TelemetryReceiverMetric{}, "TelemetryReceiverMetric"},
-		{&DistributionRelease{}, "DistributionRelease"},
-		{&DistributionAsset{}, "DistributionAsset"},
-		{&DistributionAnnouncement{}, "DistributionAnnouncement"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))
@@ -456,7 +432,20 @@ func migrateClickHouseLogDB() error {
 	if err := LOG_DB.Exec(clickHouseLogCreateTableSQL(ttlDays)).Error; err != nil {
 		return err
 	}
+	for _, statement := range clickHouseLogCostColumnMigrationSQL() {
+		if err := LOG_DB.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
 	return syncClickHouseLogTTL(ttlDays)
+}
+
+func clickHouseLogCostColumnMigrationSQL() []string {
+	return []string{
+		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS base_cost_quota Int32 DEFAULT 0",
+		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS cost_quota Int32 DEFAULT 0",
+		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS cost_multiplier_snapshot Float64 DEFAULT 0",
+	}
 }
 
 func clickHouseLogTTLDays() int {
@@ -504,7 +493,10 @@ CREATE TABLE IF NOT EXISTS logs (
 	ip String DEFAULT '',
 	request_id String DEFAULT '',
 	upstream_request_id String DEFAULT '',
-	other String DEFAULT ''
+	other String DEFAULT '',
+	base_cost_quota Int32 DEFAULT 0,
+	cost_quota Int32 DEFAULT 0,
+	cost_multiplier_snapshot Float64 DEFAULT 0
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime(created_at))

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -80,6 +81,29 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	other["model_price"] = modelPrice
 	other["user_group_ratio"] = userGroupRatio
 	other["frt"] = float64(relayInfo.FirstResponseTime.UnixMilli() - relayInfo.StartTime.UnixMilli())
+	if relayInfo.Timing != nil && relayInfo.Timing.HasAttempt() {
+		if relayInfo.Timing.HasWriteError() {
+			relayInfo.Timing.SetEndStatus("client_disconnect")
+		} else if ctx != nil && ctx.Request != nil && ctx.Request.Context().Err() != nil {
+			relayInfo.Timing.SetEndStatus("client_disconnect")
+		} else if relayInfo.LastError != nil {
+			relayInfo.Timing.SetEndStatus("upstream_disconnect")
+		} else if relayInfo.StreamStatus != nil {
+			switch relayInfo.StreamStatus.EndReason {
+			case relaycommon.StreamEndReasonTimeout:
+				relayInfo.Timing.SetEndStatus("timeout")
+			case relaycommon.StreamEndReasonClientGone:
+				relayInfo.Timing.SetEndStatus("client_disconnect")
+			case relaycommon.StreamEndReasonScannerErr, relaycommon.StreamEndReasonPingFail:
+				relayInfo.Timing.SetEndStatus("upstream_disconnect")
+			case relaycommon.StreamEndReasonPanic, relaycommon.StreamEndReasonHandlerStop:
+				relayInfo.Timing.SetEndStatus("handler_error")
+			case relaycommon.StreamEndReasonDone, relaycommon.StreamEndReasonEOF:
+				relayInfo.Timing.SetEndStatus("normal")
+			}
+		}
+		other["timing"] = relayInfo.Timing.Snapshot(time.Now())
+	}
 	if relayInfo.ReasoningEffort != "" {
 		other["reasoning_effort"] = relayInfo.ReasoningEffort
 	}
@@ -252,6 +276,11 @@ func appendFinalRequestFormat(relayInfo *relaycommon.RelayInfo, other map[string
 
 func GenerateWssOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.RealtimeUsage, modelRatio, groupRatio, completionRatio, audioRatio, audioCompletionRatio, modelPrice, userGroupRatio float64) map[string]interface{} {
 	info := GenerateTextOtherInfo(ctx, relayInfo, modelRatio, groupRatio, completionRatio, 0, 0.0, modelPrice, userGroupRatio)
+	// WebSocket relay writes bypass gin's instrumented response writer and
+	// upstream dialing does not use the HTTP trace path, so a tracker attached
+	// by the shared /v1 middleware would produce misleading partial data. Keep
+	// the legacy summary fields for WSS logs, but omit detailed timing.
+	delete(info, "timing")
 	info["ws"] = true
 	info["audio_input"] = usage.InputTokenDetails.AudioTokens
 	info["audio_output"] = usage.OutputTokenDetails.AudioTokens

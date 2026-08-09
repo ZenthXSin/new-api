@@ -10,9 +10,9 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 // LogTaskConsumption 记录任务消费日志和统计信息（仅记录，不涉及实际扣费）。
@@ -51,16 +51,21 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = info.UpstreamModelName
 	}
+	costSnapshot := CalculateTaskCost(info)
+	AppendCostSnapshotAdminInfo(other, costSnapshot, info.PriceData.Quota, "task_submission")
 	attachQuotaSaturation(c, info, other)
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
-		ChannelId: info.ChannelId,
-		ModelName: info.OriginModelName,
-		TokenName: tokenName,
-		Quota:     info.PriceData.Quota,
-		Content:   logContent,
-		TokenId:   info.TokenId,
-		Group:     info.UsingGroup,
-		Other:     other,
+		ChannelId:              info.ChannelId,
+		ModelName:              info.OriginModelName,
+		TokenName:              tokenName,
+		Quota:                  info.PriceData.Quota,
+		Content:                logContent,
+		TokenId:                info.TokenId,
+		Group:                  info.UsingGroup,
+		Other:                  other,
+		BaseCostQuota:          costSnapshot.BaseCostQuota,
+		CostQuota:              costSnapshot.CostQuota,
+		CostMultiplierSnapshot: costSnapshot.Multiplier,
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
@@ -152,6 +157,73 @@ func taskBillingContextPriceData(bc *model.TaskBillingContext) *types.PriceData 
 	return priceData
 }
 
+func taskCostDelta(task *model.Task, revenueDelta int) (CostSnapshot, []*common.QuotaClamp) {
+	if task == nil || task.PrivateData.BillingContext == nil || revenueDelta == 0 {
+		return CostSnapshot{}, nil
+	}
+	bc := task.PrivateData.BillingContext
+	if bc.CostMultiplier <= 0 || bc.RevenueQuota == 0 {
+		return CostSnapshot{}, nil
+	}
+	base := decimal.NewFromInt(int64(bc.BaseCostQuota)).Mul(decimal.NewFromInt(int64(revenueDelta))).Div(decimal.NewFromInt(int64(bc.RevenueQuota)))
+	cost := decimal.NewFromInt(int64(bc.CostQuota)).Mul(decimal.NewFromInt(int64(revenueDelta))).Div(decimal.NewFromInt(int64(bc.RevenueQuota)))
+	baseQuota, baseClamp := common.QuotaFromDecimalChecked(base)
+	costQuota, costClamp := common.QuotaFromDecimalChecked(cost)
+	clamps := make([]*common.QuotaClamp, 0, 2)
+	if baseClamp != nil {
+		clamps = append(clamps, baseClamp)
+	}
+	if costClamp != nil {
+		clamps = append(clamps, costClamp)
+	}
+	return CostSnapshot{BaseCostQuota: baseQuota, CostQuota: costQuota, Multiplier: bc.CostMultiplier}, clamps
+}
+
+func frozenTaskCostForTokens(task *model.Task, totalTokens int) (CostSnapshot, bool, []*common.QuotaClamp) {
+	if task == nil || totalTokens <= 0 || task.PrivateData.BillingContext == nil {
+		return CostSnapshot{}, false, nil
+	}
+	bc := task.PrivateData.BillingContext
+	if bc.CostMultiplier <= 0 || !validInternalCostRate(bc.ModelRatio) {
+		return CostSnapshot{}, false, nil
+	}
+	base := decimal.NewFromInt(int64(totalTokens)).Mul(decimal.NewFromFloat(bc.ModelRatio))
+	if priceData := taskBillingContextPriceData(bc); priceData != nil {
+		base = priceData.ApplyOtherRatiosToDecimal(base)
+	}
+	baseQuota, baseClamp := common.QuotaFromDecimalChecked(base)
+	costQuota, costClamp := common.QuotaFromDecimalChecked(base.Mul(decimal.NewFromFloat(bc.CostMultiplier)))
+	clamps := make([]*common.QuotaClamp, 0, 2)
+	if baseClamp != nil {
+		clamps = append(clamps, baseClamp)
+	}
+	if costClamp != nil {
+		clamps = append(clamps, costClamp)
+	}
+	return CostSnapshot{BaseCostQuota: baseQuota, CostQuota: costQuota, Multiplier: bc.CostMultiplier}, true, clamps
+}
+
+func frozenTaskCostDeltaForTokens(task *model.Task, totalTokens int) (CostSnapshot, bool, []*common.QuotaClamp) {
+	actual, available, clamps := frozenTaskCostForTokens(task, totalTokens)
+	if !available {
+		return CostSnapshot{}, false, clamps
+	}
+	bc := task.PrivateData.BillingContext
+	settledBase := bc.SettledBaseCostQuota
+	settledCost := bc.SettledCostQuota
+	if settledBase == 0 && settledCost == 0 {
+		// Contexts written before settled totals existed still preserve their
+		// submission snapshot as the previous cost basis.
+		settledBase = bc.BaseCostQuota
+		settledCost = bc.CostQuota
+	}
+	return CostSnapshot{
+		BaseCostQuota: actual.BaseCostQuota - settledBase,
+		CostQuota:     actual.CostQuota - settledCost,
+		Multiplier:    actual.Multiplier,
+	}, true, clamps
+}
+
 // taskModelName 从 BillingContext 或 Properties 中获取模型名称。
 func taskModelName(task *model.Task) string {
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.OriginModelName != "" {
@@ -182,16 +254,24 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 	other := taskBillingOther(task)
 	other["task_id"] = task.TaskID
 	other["reason"] = reason
+	// A failed task returns its user charge, but the initial consume log keeps
+	// the upstream cost that may already have been incurred. Do not manufacture
+	// a negative cost adjustment simply because the revenue was refunded.
+	costSnapshot := CostSnapshot{}
+	AppendCostSnapshotAdminInfo(other, costSnapshot, -quota, "retained_upstream_cost")
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-		UserId:    task.UserId,
-		LogType:   model.LogTypeRefund,
-		Content:   "",
-		ChannelId: task.ChannelId,
-		ModelName: taskModelName(task),
-		Quota:     quota,
-		TokenId:   task.PrivateData.TokenId,
-		Group:     task.Group,
-		Other:     other,
+		UserId:                 task.UserId,
+		LogType:                model.LogTypeRefund,
+		Content:                "",
+		ChannelId:              task.ChannelId,
+		ModelName:              taskModelName(task),
+		Quota:                  quota,
+		TokenId:                task.PrivateData.TokenId,
+		Group:                  task.Group,
+		Other:                  other,
+		BaseCostQuota:          costSnapshot.BaseCostQuota,
+		CostQuota:              costSnapshot.CostQuota,
+		CostMultiplierSnapshot: costSnapshot.Multiplier,
 	})
 
 	// 4. 资金退款完成后再清除持久化标记。
@@ -208,13 +288,23 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 // reason 用于日志记录（例如 "token重算" 或 "adaptor调整"）。
 // clamps 可选：若计算 actualQuota 时发生额度饱和，将其记入日志 admin_info（仅管理员可见）。
 func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string, clamps ...*common.QuotaClamp) {
+	// Keep the historical behaviour for generic settlement: an upstream result
+	// of zero does not imply a refund. Token-based settlement uses the internal
+	// helper below when it has an explicit frozen upstream-cost delta to record.
 	if actualQuota <= 0 {
+		return
+	}
+	recalculateTaskQuota(ctx, task, actualQuota, reason, nil, clamps...)
+}
+
+func recalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string, providedCost *CostSnapshot, clamps ...*common.QuotaClamp) {
+	if actualQuota < 0 {
 		return
 	}
 	preConsumedQuota := task.Quota
 	quotaDelta := actualQuota - preConsumedQuota
 
-	if quotaDelta == 0 {
+	if quotaDelta == 0 && (providedCost == nil || (providedCost.BaseCostQuota == 0 && providedCost.CostQuota == 0)) {
 		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 预扣费准确（%s，%s）",
 			task.TaskID, logger.LogQuota(actualQuota), reason))
 		return
@@ -229,26 +319,30 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	))
 
 	// 调整资金来源
-	if err := taskAdjustFunding(task, quotaDelta); err != nil {
-		logger.LogError(ctx, fmt.Sprintf("差额结算资金调整失败 task %s: %s", task.TaskID, err.Error()))
-		return
-	}
+	if quotaDelta != 0 {
+		if err := taskAdjustFunding(task, quotaDelta); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("差额结算资金调整失败 task %s: %s", task.TaskID, err.Error()))
+			return
+		}
 
-	// 调整令牌额度
-	taskAdjustTokenQuota(ctx, task, quotaDelta)
+		// 调整令牌额度
+		taskAdjustTokenQuota(ctx, task, quotaDelta)
 
-	task.Quota = actualQuota
-	if err := task.UpdateQuota(); err != nil {
-		logger.LogError(ctx, fmt.Sprintf("差额结算回写 quota 失败 task %s: %s", task.TaskID, err.Error()))
+		task.Quota = actualQuota
+		if err := task.UpdateQuota(); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("差额结算回写 quota 失败 task %s: %s", task.TaskID, err.Error()))
+		}
 	}
 
 	var logType int
 	var logQuota int
-	if quotaDelta > 0 {
+	if quotaDelta >= 0 {
 		logType = model.LogTypeConsume
 		logQuota = quotaDelta
-		model.UpdateUserUsedQuotaAndRequestCount(task.UserId, quotaDelta)
-		model.UpdateChannelUsedQuota(task.ChannelId, quotaDelta)
+		if quotaDelta > 0 {
+			model.UpdateUserUsedQuotaAndRequestCount(task.UserId, quotaDelta)
+			model.UpdateChannelUsedQuota(task.ChannelId, quotaDelta)
+		}
 	} else {
 		logType = model.LogTypeRefund
 		logQuota = -quotaDelta
@@ -257,20 +351,38 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	other["task_id"] = task.TaskID
 	other["pre_consumed_quota"] = preConsumedQuota
 	other["actual_quota"] = actualQuota
+	costSnapshot, costClamps := taskCostDelta(task, quotaDelta)
+	if providedCost != nil {
+		costSnapshot = *providedCost
+		if bc := task.PrivateData.BillingContext; bc != nil {
+			bc.SettledBaseCostQuota += costSnapshot.BaseCostQuota
+			bc.SettledCostQuota += costSnapshot.CostQuota
+			if err := task.UpdateBillingContext(); err != nil {
+				logger.LogError(ctx, fmt.Sprintf("差额结算回写成本快照失败 task %s: %s", task.TaskID, err.Error()))
+			}
+		}
+	}
+	AppendCostSnapshotAdminInfo(other, costSnapshot, quotaDelta, "task_settlement")
 	for _, clamp := range clamps {
 		attachQuotaSaturationToOther(other, clamp)
 	}
+	for _, clamp := range costClamps {
+		attachQuotaSaturationToOther(other, clamp)
+	}
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-		UserId:    task.UserId,
-		LogType:   logType,
-		Content:   reason,
-		ChannelId: task.ChannelId,
-		ModelName: taskModelName(task),
-		Quota:     logQuota,
-		TokenId:   task.PrivateData.TokenId,
-		Group:     task.Group,
-		Other:     other,
-		NodeName:  task.PrivateData.NodeName,
+		UserId:                 task.UserId,
+		LogType:                logType,
+		Content:                reason,
+		ChannelId:              task.ChannelId,
+		ModelName:              taskModelName(task),
+		Quota:                  logQuota,
+		TokenId:                task.PrivateData.TokenId,
+		Group:                  task.Group,
+		Other:                  other,
+		NodeName:               task.PrivateData.NodeName,
+		BaseCostQuota:          costSnapshot.BaseCostQuota,
+		CostQuota:              costSnapshot.CostQuota,
+		CostMultiplierSnapshot: costSnapshot.Multiplier,
 	})
 }
 
@@ -282,46 +394,29 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		return
 	}
 
-	modelName := taskModelName(task)
-
-	// 获取模型价格和倍率
-	modelRatio, hasRatioSetting, _ := ratio_setting.GetModelRatio(modelName)
-	// 只有配置了倍率(非固定价格)时才按 token 重新计费
-	if !hasRatioSetting || modelRatio <= 0 {
+	bc := task.PrivateData.BillingContext
+	if bc == nil || !validInternalCostRate(bc.ModelRatio) {
 		return
 	}
 
-	// 获取用户和组的倍率信息
-	group := task.Group
-	if group == "" {
-		user, err := model.GetUserById(task.UserId, false)
-		if err == nil {
-			group = user.Group
-		}
-	}
-	if group == "" {
-		return
-	}
-
-	groupRatio := ratio_setting.GetGroupRatio(group)
-	userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group)
-
-	var finalGroupRatio float64
-	if hasUserGroupRatio {
-		finalGroupRatio = userGroupRatio
-	} else {
-		finalGroupRatio = groupRatio
-	}
-
-	// 计算 OtherRatios 乘积（视频折扣、时长等）
+	// All values below were frozen when the channel was selected. Group ratio
+	// remains part of the user charge only; internal cost calculation omits it.
+	modelRatio := bc.ModelRatio
+	finalGroupRatio := bc.GroupRatio
 	otherMultiplier := 1.0
-	if priceData := taskBillingContextPriceData(task.PrivateData.BillingContext); priceData != nil {
+	if priceData := taskBillingContextPriceData(bc); priceData != nil {
 		otherMultiplier = priceData.OtherRatioMultiplier()
 	}
 
 	// 计算实际应扣费额度: totalTokens * modelRatio * groupRatio * otherMultiplier（饱和转换，防止溢出成负数）
 	actualQuota, clamp := common.QuotaFromFloatChecked(float64(totalTokens) * modelRatio * finalGroupRatio * otherMultiplier)
 
+	costDelta, costAvailable, costClamps := frozenTaskCostDeltaForTokens(task, totalTokens)
 	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f, otherMultiplier=%.4f", totalTokens, modelRatio, finalGroupRatio, otherMultiplier)
+	if costAvailable {
+		clamps := append([]*common.QuotaClamp{clamp}, costClamps...)
+		recalculateTaskQuota(ctx, task, actualQuota, reason, &costDelta, clamps...)
+		return
+	}
 	RecalculateTaskQuota(ctx, task, actualQuota, reason, clamp)
 }

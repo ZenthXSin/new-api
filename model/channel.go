@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"sync"
@@ -19,6 +20,33 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+const (
+	DefaultChannelCostMultiplier = 1.0
+	MinChannelCostMultiplier     = 0.0001
+	MaxChannelCostMultiplier     = 1000.0
+)
+
+func NormalizeChannelCostMultiplier(multiplier float64) float64 {
+	if multiplier == 0 {
+		return DefaultChannelCostMultiplier
+	}
+	if math.IsNaN(multiplier) || math.IsInf(multiplier, 0) || multiplier < MinChannelCostMultiplier || multiplier > MaxChannelCostMultiplier {
+		return 0
+	}
+	return multiplier
+}
+
+func (channel *Channel) GetCostMultiplier() float64 {
+	if channel == nil {
+		return DefaultChannelCostMultiplier
+	}
+	normalized := NormalizeChannelCostMultiplier(channel.CostMultiplier)
+	if normalized == 0 {
+		return DefaultChannelCostMultiplier
+	}
+	return normalized
+}
 
 type Channel struct {
 	Id                 int     `json:"id"`
@@ -50,6 +78,7 @@ type Channel struct {
 	ParamOverride     *string `json:"param_override" gorm:"type:text"`
 	HeaderOverride    *string `json:"header_override" gorm:"type:text"`
 	Remark            *string `json:"remark" gorm:"type:varchar(255)" validate:"max=255"`
+	CostMultiplier    float64 `json:"cost_multiplier" gorm:"default:1"`
 	// add after v0.8.5
 	ChannelInfo ChannelInfo `json:"channel_info" gorm:"type:json"`
 
@@ -57,6 +86,13 @@ type Channel struct {
 
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
+}
+
+func (channel *Channel) AfterFind(_ *gorm.DB) error {
+	if channel.CostMultiplier == 0 {
+		channel.CostMultiplier = DefaultChannelCostMultiplier
+	}
+	return nil
 }
 
 type ChannelInfo struct {

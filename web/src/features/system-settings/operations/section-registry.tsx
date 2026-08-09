@@ -25,7 +25,6 @@ import { PerformanceSection } from '../maintenance/performance-section'
 import { UpdateCheckerSection } from '../maintenance/update-checker-section'
 import type { OperationsSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
-import { TelemetrySettingsSection } from './telemetry/telemetry-settings-section'
 
 const OPERATIONS_SECTIONS = [
   {
@@ -124,28 +123,6 @@ const OPERATIONS_SECTIONS = [
             settings['performance_setting.monitor_memory_threshold'] ?? 90,
           'performance_setting.monitor_disk_threshold':
             settings['performance_setting.monitor_disk_threshold'] ?? 95,
-        }}
-      />
-    ),
-  },
-  {
-    id: 'telemetry',
-    titleKey: 'Telemetry',
-    build: (settings: OperationsSettings) => (
-      <TelemetrySettingsSection
-        defaultValues={{
-          'telemetry_setting.enabled':
-            settings['telemetry_setting.enabled'] ?? false,
-          'telemetry_setting.retention_days':
-            settings['telemetry_setting.retention_days'] ?? 30,
-          'telemetry_setting.max_body_bytes':
-            settings['telemetry_setting.max_body_bytes'] ?? 65536,
-          'telemetry_setting.max_events_per_batch':
-            settings['telemetry_setting.max_events_per_batch'] ?? 100,
-          'telemetry_setting.timestamp_skew_seconds':
-            settings['telemetry_setting.timestamp_skew_seconds'] ?? 300,
-          'telemetry_setting.requests_per_minute':
-            settings['telemetry_setting.requests_per_minute'] ?? 120,
         }}
       />
     ),

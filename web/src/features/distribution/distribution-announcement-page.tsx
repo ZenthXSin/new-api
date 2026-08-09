@@ -54,14 +54,14 @@ export function DistributionAnnouncementPage() {
     return (
       <PublicLayout>
         <div className='mx-auto max-w-3xl py-24 text-center'>
-          <h1 className='text-2xl font-semibold'>{t('Announcement not found')}</h1>
+          <h1 className='text-2xl font-semibold'>{t('找不到公告')}</h1>
           <Link
             to='/distribution/$slug'
             params={{ slug }}
             className='text-primary mt-4 inline-flex items-center gap-2 text-sm hover:underline'
           >
             <ArrowLeft className='size-4' />
-            {t('Back to distribution home')}
+            {t('返回应用下载页')}
           </Link>
         </div>
       </PublicLayout>
@@ -76,11 +76,11 @@ export function DistributionAnnouncementPage() {
           className='text-muted-foreground hover:text-foreground mb-8 inline-flex items-center gap-2 text-sm'
         >
           <ArrowLeft className='size-4' />
-          {t('Back to distribution home')}
+          {t('返回应用下载页')}
         </Link>
         <header className='border-border space-y-3 border-b pb-6'>
           <div className='flex flex-wrap gap-2'>
-            {item.pinned && <Badge variant='secondary'>{t('Pinned')}</Badge>}
+            {item.pinned && <Badge variant='secondary'>{t('置顶')}</Badge>}
             {item.platform && <Badge variant='outline'>{item.platform}</Badge>}
           </div>
           <h1 className='text-3xl font-bold tracking-tight'>{item.title}</h1>

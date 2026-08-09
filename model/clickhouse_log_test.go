@@ -83,11 +83,22 @@ func TestClickHouseLogCreateTableSQL(t *testing.T) {
 	assert.Contains(t, withoutTTL, "ENGINE = MergeTree()")
 	assert.Contains(t, withoutTTL, "PARTITION BY toYYYYMM(toDateTime(created_at))")
 	assert.Contains(t, withoutTTL, "ORDER BY (created_at, request_id)")
+	assert.Contains(t, withoutTTL, "base_cost_quota Int32 DEFAULT 0")
+	assert.Contains(t, withoutTTL, "cost_quota Int32 DEFAULT 0")
+	assert.Contains(t, withoutTTL, "cost_multiplier_snapshot Float64 DEFAULT 0")
 	assert.NotContains(t, withoutTTL, "TTL ")
 
 	withTTL := clickHouseLogCreateTableSQL(30)
 	assert.Contains(t, withTTL, "ORDER BY (created_at, request_id)")
 	assert.Contains(t, withTTL, "TTL toDateTime(created_at) + INTERVAL 30 DAY DELETE")
+}
+
+func TestClickHouseLogCostColumnMigrationSQL(t *testing.T) {
+	statements := clickHouseLogCostColumnMigrationSQL()
+	require.Len(t, statements, 3)
+	for _, statement := range statements {
+		assert.Contains(t, statement, "ALTER TABLE logs ADD COLUMN IF NOT EXISTS")
+	}
 }
 
 func TestClickHouseCreateTableHasTTL(t *testing.T) {

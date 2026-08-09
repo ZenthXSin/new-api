@@ -25,7 +25,7 @@ import { useAuthStore } from '@/stores/auth-store'
 export const Route = createFileRoute('/_authenticated/distribution/')({
   beforeLoad: () => {
     const { auth } = useAuthStore.getState()
-    if (!auth.user || auth.user.role !== ROLE.SUPER_ADMIN) {
+    if (!auth.user || auth.user.role < ROLE.ADMIN) {
       throw redirect({ to: '/403' })
     }
   },

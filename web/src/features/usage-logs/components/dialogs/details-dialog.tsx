@@ -827,6 +827,50 @@ export function DetailsDialog(props: DetailsDialogProps) {
           </DetailSection>
         )}
 
+        {props.isAdmin && other?.admin_info?.cost_coverage && (
+          <DetailSection
+            icon={<Settings2 className='size-3.5' aria-hidden='true' />}
+            label={t('Cost')}
+          >
+            <DetailRow
+              label={t('Cost Coverage')}
+              value={other.admin_info.cost_coverage}
+            />
+            {other.admin_info.cost_source && (
+              <DetailRow
+                label={t('Source')}
+                value={other.admin_info.cost_source}
+                mono
+              />
+            )}
+            {other.admin_info.base_cost_quota !== undefined && (
+              <DetailRow
+                label={t('Base Cost')}
+                value={formatLogQuota(other.admin_info.base_cost_quota)}
+              />
+            )}
+            {other.admin_info.cost_quota !== undefined && (
+              <DetailRow
+                label={t('Cost')}
+                value={formatLogQuota(other.admin_info.cost_quota)}
+              />
+            )}
+            {other.admin_info.gross_profit_quota !== undefined && (
+              <DetailRow
+                label={t('Gross Profit')}
+                value={formatLogQuota(other.admin_info.gross_profit_quota)}
+              />
+            )}
+            {other.admin_info.cost_multiplier_snapshot !== undefined && (
+              <DetailRow
+                label={t('Multiplier')}
+                value={`${other.admin_info.cost_multiplier_snapshot}x`}
+                mono
+              />
+            )}
+          </DetailSection>
+        )}
+
         {/* Reject reason (admin only) */}
         {props.isAdmin && other?.reject_reason && (
           <DetailSection

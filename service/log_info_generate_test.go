@@ -22,11 +22,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGenerateWssOtherInfoOmitsUninstrumentedTiming(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(nil)
+	start := time.Unix(100, 0)
+	relayInfo := &relaycommon.RelayInfo{
+		Timing:            common.NewRelayTiming(start),
+		StartTime:         start,
+		FirstResponseTime: start.Add(time.Second),
+		ChannelMeta:       &relaycommon.ChannelMeta{},
+	}
+	other := GenerateWssOtherInfo(ctx, relayInfo, &dto.RealtimeUsage{}, 0, 0, 0, 0, 0, 0, 0)
+	assert.NotContains(t, other, "timing")
+	assert.Equal(t, float64(1000), other["frt"])
+}
 
 func TestGenerateTextOtherInfoPollingTier(t *testing.T) {
 	cases := []struct {

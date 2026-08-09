@@ -34,6 +34,7 @@ import {
   User,
   Users,
   Wallet,
+  Download,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -98,6 +99,11 @@ export function useSidebarData(): SidebarData {
             configUrls: ['/usage-logs/drawing', '/usage-logs/task'],
             icon: ListTodo,
           },
+          {
+            title: t('下载与公告'),
+            url: '/downloads',
+            icon: Download,
+          },
         ],
       },
       {
@@ -155,7 +161,7 @@ export function useSidebarData(): SidebarData {
             title: t('Application distribution'),
             url: '/distribution',
             icon: PackageOpen,
-            requiredRole: ROLE.SUPER_ADMIN,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('System Settings'),

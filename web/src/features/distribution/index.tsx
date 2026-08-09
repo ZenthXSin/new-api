@@ -19,3 +19,4 @@ For commercial licensing, please contact support@quantumnous.com
 export { DistributionAdmin } from './distribution-admin'
 export { DistributionAnnouncementPage } from './distribution-announcement-page'
 export { DistributionPublicPage } from './distribution-public-page'
+export { DistributionPublicHub } from './distribution-public-hub'

@@ -24,7 +24,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { formatLogQuota } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import { getLogStats, getUserLogStats } from '../api'
+import { getCostBillingReport, getLogStats, getUserLogStats } from '../api'
 import { DEFAULT_LOG_STATS } from '../constants'
 import { buildApiParams } from '../lib/utils'
 import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
@@ -75,7 +75,24 @@ export function CommonLogsStats() {
     placeholderData: (previousData) => previousData,
   })
 
-  if (isLoading) {
+  const { data: costReport, isLoading: isCostLoading } = useQuery({
+    queryKey: ['usage-logs-cost-report', searchParams],
+    enabled: isAdmin,
+    queryFn: async () => {
+      const params = buildApiParams({
+        page: 1,
+        pageSize: 1,
+        searchParams,
+        columnFilters: [],
+        isAdmin: true,
+      })
+      const result = await getCostBillingReport(params)
+      return result.success ? result.data : undefined
+    },
+    placeholderData: (previousData) => previousData,
+  })
+
+  if (isLoading || (isAdmin && isCostLoading && !costReport)) {
     return (
       <div className='flex items-center gap-2'>
         <Skeleton className='h-7 w-[150px] rounded-md' />
@@ -92,6 +109,44 @@ export function CommonLogsStats() {
         value={sensitiveVisible ? formatLogQuota(stats?.quota || 0) : '••••'}
         accent='bg-sky-500/70'
       />
+      {isAdmin && costReport && (
+        <>
+          <StatBadge
+            label={t('Revenue')}
+            value={formatLogQuota(costReport.revenue_quota)}
+            accent='bg-emerald-500/70'
+          />
+          <StatBadge
+            label={t('Cost')}
+            value={formatLogQuota(costReport.cost_quota)}
+            accent='bg-amber-500/70'
+          />
+          <StatBadge
+            label={t('Gross Profit')}
+            value={formatLogQuota(costReport.gross_profit_quota)}
+            accent='bg-violet-500/70'
+          />
+          <StatBadge
+            label={t('Margin')}
+            value={
+              costReport.revenue_quota > 0
+                ? `${(costReport.margin * 100).toFixed(1)}%`
+                : '-'
+            }
+            accent='bg-cyan-500/70'
+          />
+          <StatBadge
+            label={t('Requests')}
+            value={costReport.request_count}
+            accent='bg-slate-500/70'
+          />
+          <StatBadge
+            label={t('Cost Coverage')}
+            value={`${(costReport.cost_coverage * 100).toFixed(0)}%`}
+            accent='bg-pink-500/70'
+          />
+        </>
+      )}
       <StatBadge
         label={t('RPM')}
         value={stats?.rpm || 0}

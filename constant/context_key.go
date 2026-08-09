@@ -9,6 +9,8 @@ const (
 
 	ContextKeyOriginalModel    ContextKey = "original_model"
 	ContextKeyRequestStartTime ContextKey = "request_start_time"
+	ContextKeyRelayTiming      ContextKey = "relay_timing"
+	ContextKeyTiming           ContextKey = ContextKeyRelayTiming
 
 	/* token related keys */
 	ContextKeyTokenUnlimited         ContextKey = "token_unlimited_quota"

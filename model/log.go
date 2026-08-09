@@ -57,27 +57,30 @@ func sanitizeClickHouseLikePattern(input string) (string, error) {
 }
 
 type Log struct {
-	Id                int    `json:"id" gorm:"index:idx_created_at_id,priority:2;index:idx_user_id_id,priority:2"`
-	UserId            int    `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1"`
-	CreatedAt         int64  `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:1;index:idx_created_at_type"`
-	Type              int    `json:"type" gorm:"index:idx_created_at_type"`
-	Content           string `json:"content"`
-	Username          string `json:"username" gorm:"index;index:index_username_model_name,priority:2;default:''"`
-	TokenName         string `json:"token_name" gorm:"index;default:''"`
-	ModelName         string `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;default:''"`
-	Quota             int    `json:"quota" gorm:"default:0"`
-	PromptTokens      int    `json:"prompt_tokens" gorm:"default:0"`
-	CompletionTokens  int    `json:"completion_tokens" gorm:"default:0"`
-	UseTime           int    `json:"use_time" gorm:"default:0"`
-	IsStream          bool   `json:"is_stream"`
-	ChannelId         int    `json:"channel" gorm:"index"`
-	ChannelName       string `json:"channel_name" gorm:"->"`
-	TokenId           int    `json:"token_id" gorm:"default:0;index"`
-	Group             string `json:"group" gorm:"index"`
-	Ip                string `json:"ip" gorm:"index;default:''"`
-	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
-	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
-	Other             string `json:"other"`
+	Id                     int     `json:"id" gorm:"index:idx_created_at_id,priority:2;index:idx_user_id_id,priority:2"`
+	UserId                 int     `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1"`
+	CreatedAt              int64   `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:1;index:idx_created_at_type"`
+	Type                   int     `json:"type" gorm:"index:idx_created_at_type"`
+	Content                string  `json:"content"`
+	Username               string  `json:"username" gorm:"index;index:index_username_model_name,priority:2;default:''"`
+	TokenName              string  `json:"token_name" gorm:"index;default:''"`
+	ModelName              string  `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;default:''"`
+	Quota                  int     `json:"quota" gorm:"default:0"`
+	PromptTokens           int     `json:"prompt_tokens" gorm:"default:0"`
+	CompletionTokens       int     `json:"completion_tokens" gorm:"default:0"`
+	UseTime                int     `json:"use_time" gorm:"default:0"`
+	IsStream               bool    `json:"is_stream"`
+	ChannelId              int     `json:"channel" gorm:"index"`
+	ChannelName            string  `json:"channel_name" gorm:"->"`
+	TokenId                int     `json:"token_id" gorm:"default:0;index"`
+	Group                  string  `json:"group" gorm:"index"`
+	Ip                     string  `json:"ip" gorm:"index;default:''"`
+	RequestId              string  `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
+	UpstreamRequestId      string  `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
+	Other                  string  `json:"other"`
+	BaseCostQuota          int     `json:"-" gorm:"default:0"`
+	CostQuota              int     `json:"-" gorm:"default:0"`
+	CostMultiplierSnapshot float64 `json:"-" gorm:"default:0"`
 }
 
 // don't use iota, avoid change log type value
@@ -326,18 +329,21 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 }
 
 type RecordConsumeLogParams struct {
-	ChannelId        int                    `json:"channel_id"`
-	PromptTokens     int                    `json:"prompt_tokens"`
-	CompletionTokens int                    `json:"completion_tokens"`
-	ModelName        string                 `json:"model_name"`
-	TokenName        string                 `json:"token_name"`
-	Quota            int                    `json:"quota"`
-	Content          string                 `json:"content"`
-	TokenId          int                    `json:"token_id"`
-	UseTimeSeconds   int                    `json:"use_time_seconds"`
-	IsStream         bool                   `json:"is_stream"`
-	Group            string                 `json:"group"`
-	Other            map[string]interface{} `json:"other"`
+	ChannelId              int                    `json:"channel_id"`
+	PromptTokens           int                    `json:"prompt_tokens"`
+	CompletionTokens       int                    `json:"completion_tokens"`
+	ModelName              string                 `json:"model_name"`
+	TokenName              string                 `json:"token_name"`
+	Quota                  int                    `json:"quota"`
+	Content                string                 `json:"content"`
+	TokenId                int                    `json:"token_id"`
+	UseTimeSeconds         int                    `json:"use_time_seconds"`
+	IsStream               bool                   `json:"is_stream"`
+	Group                  string                 `json:"group"`
+	Other                  map[string]interface{} `json:"other"`
+	BaseCostQuota          int                    `json:"-"`
+	CostQuota              int                    `json:"-"`
+	CostMultiplierSnapshot float64                `json:"-"`
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
@@ -379,9 +385,12 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			}
 			return ""
 		}(),
-		RequestId:         requestId,
-		UpstreamRequestId: upstreamRequestId,
-		Other:             otherStr,
+		RequestId:              requestId,
+		UpstreamRequestId:      upstreamRequestId,
+		Other:                  otherStr,
+		BaseCostQuota:          params.BaseCostQuota,
+		CostQuota:              params.CostQuota,
+		CostMultiplierSnapshot: params.CostMultiplierSnapshot,
 	}
 	err := createLog(log)
 	if err != nil {
@@ -404,16 +413,19 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 }
 
 type RecordTaskBillingLogParams struct {
-	UserId    int
-	LogType   int
-	Content   string
-	ChannelId int
-	ModelName string
-	Quota     int
-	TokenId   int
-	Group     string
-	Other     map[string]interface{}
-	NodeName  string // 任务发起节点；为空时回退当前节点
+	UserId                 int
+	LogType                int
+	Content                string
+	ChannelId              int
+	ModelName              string
+	Quota                  int
+	TokenId                int
+	Group                  string
+	Other                  map[string]interface{}
+	NodeName               string // 任务发起节点；为空时回退当前节点
+	BaseCostQuota          int
+	CostQuota              int
+	CostMultiplierSnapshot float64
 }
 
 func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
@@ -429,18 +441,21 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 	createdAt := common.GetTimestamp()
 	log := &Log{
-		UserId:    params.UserId,
-		Username:  username,
-		CreatedAt: createdAt,
-		Type:      params.LogType,
-		Content:   params.Content,
-		TokenName: tokenName,
-		ModelName: params.ModelName,
-		Quota:     params.Quota,
-		ChannelId: params.ChannelId,
-		TokenId:   params.TokenId,
-		Group:     params.Group,
-		Other:     common.MapToJsonStr(params.Other),
+		UserId:                 params.UserId,
+		Username:               username,
+		CreatedAt:              createdAt,
+		Type:                   params.LogType,
+		Content:                params.Content,
+		TokenName:              tokenName,
+		ModelName:              params.ModelName,
+		Quota:                  params.Quota,
+		ChannelId:              params.ChannelId,
+		TokenId:                params.TokenId,
+		Group:                  params.Group,
+		Other:                  common.MapToJsonStr(params.Other),
+		BaseCostQuota:          params.BaseCostQuota,
+		CostQuota:              params.CostQuota,
+		CostMultiplierSnapshot: params.CostMultiplierSnapshot,
 	}
 	err := createLog(log)
 	if err != nil {
@@ -613,6 +628,58 @@ type Stat struct {
 	Quota int `json:"quota"`
 	Rpm   int `json:"rpm"`
 	Tpm   int `json:"tpm"`
+}
+
+type CostAggregation struct {
+	RevenueQuota     int64   `json:"revenue_quota"`
+	CostQuota        int64   `json:"cost_quota"`
+	GrossProfitQuota int64   `json:"gross_profit_quota"`
+	Margin           float64 `json:"margin"`
+	RequestCount     int64   `json:"request_count"`
+	CostCoverage     float64 `json:"cost_coverage"`
+}
+
+func AggregateCost(startTimestamp, endTimestamp int64, channel int, modelName, username, tokenName, group string) (CostAggregation, error) {
+	query := LOG_DB.Table("logs").Where("type IN ?", []int{LogTypeConsume, LogTypeRefund})
+	if startTimestamp != 0 {
+		query = query.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		query = query.Where("created_at <= ?", endTimestamp)
+	}
+	if channel != 0 {
+		query = query.Where("channel_id = ?", channel)
+	}
+	var err error
+	if query, err = applyExplicitLogTextFilter(query, "model_name", modelName); err != nil {
+		return CostAggregation{}, err
+	}
+	if query, err = applyExplicitLogTextFilter(query, "username", username); err != nil {
+		return CostAggregation{}, err
+	}
+	if tokenName != "" {
+		query = query.Where("token_name = ?", tokenName)
+	}
+	if group != "" {
+		query = query.Where(logGroupCol+" = ?", group)
+	}
+	var row struct {
+		Revenue  int64 `gorm:"column:revenue"`
+		Cost     int64 `gorm:"column:cost"`
+		Requests int64 `gorm:"column:requests"`
+		Covered  int64 `gorm:"column:covered"`
+	}
+	if err := query.Select("COALESCE(SUM(CASE WHEN type = ? THEN -quota ELSE quota END),0) AS revenue, COALESCE(SUM(cost_quota),0) AS cost, COALESCE(SUM(CASE WHEN type = ? THEN 1 ELSE 0 END),0) AS requests, COALESCE(SUM(CASE WHEN type = ? AND cost_multiplier_snapshot > 0 THEN 1 ELSE 0 END),0) AS covered", LogTypeRefund, LogTypeConsume, LogTypeConsume).Scan(&row).Error; err != nil {
+		return CostAggregation{}, err
+	}
+	result := CostAggregation{RevenueQuota: row.Revenue, CostQuota: row.Cost, GrossProfitQuota: row.Revenue - row.Cost, RequestCount: row.Requests}
+	if row.Revenue > 0 {
+		result.Margin = float64(result.GrossProfitQuota) / float64(row.Revenue)
+	}
+	if row.Requests != 0 {
+		result.CostCoverage = float64(row.Covered) / float64(row.Requests)
+	}
+	return result, nil
 }
 
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {

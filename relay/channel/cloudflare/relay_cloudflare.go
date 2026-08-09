@@ -68,11 +68,12 @@ func cfStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Res
 		response.Id = id
 		response.Model = info.UpstreamModelName
 		helper.PreparePollingStreamOutput(c, resp, info)
+		validEventAt := time.Now()
 		err = helper.ObjectData(c, response)
 		helper.CommitPollingStreamOutput(c, resp, info)
-		if isFirst {
+		if err == nil && isFirst {
 			isFirst = false
-			info.FirstResponseTime = time.Now()
+			info.SetFirstResponseTimeAt(validEventAt)
 		}
 		if err != nil {
 			logger.LogError(c, "error_rendering_stream_response: "+err.Error())

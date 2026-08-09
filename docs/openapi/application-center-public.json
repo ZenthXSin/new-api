@@ -1,0 +1,756 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "应用中心公开下载与公告接口",
+    "description": "公开版本、安装包、更新检查和公告读取接口，无需认证。",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://ai.example.com:20082"
+    }
+  ],
+  "tags": [
+    {
+      "name": "公开应用"
+    },
+    {
+      "name": "下载站"
+    },
+    {
+      "name": "公告"
+    }
+  ],
+  "paths": {
+    "/api/public/apps": {
+      "get": {
+        "tags": ["公开应用"],
+        "summary": "获取公开应用列表",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/public/apps/{slug}": {
+      "get": {
+        "tags": ["公开应用"],
+        "summary": "获取单个公开应用",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/public/apps/{slug}/releases": {
+      "get": {
+        "tags": ["下载站"],
+        "summary": "获取已发布版本",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/Channel"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "按 SemVer 从高到低返回",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleasesResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/public/apps/{slug}/releases/latest": {
+      "get": {
+        "tags": ["下载站"],
+        "summary": "获取最新已发布版本",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/Channel"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/public/apps/{slug}/update": {
+      "get": {
+        "tags": ["下载站"],
+        "summary": "检查更新并获取匹配安装包和公告",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/Version"
+          },
+          {
+            "$ref": "#/components/parameters/Channel"
+          },
+          {
+            "$ref": "#/components/parameters/Platform"
+          },
+          {
+            "$ref": "#/components/parameters/Architecture"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "即使没有可用版本也返回 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/public/apps/{slug}/assets/{asset_id}/download": {
+      "get": {
+        "tags": ["下载站"],
+        "summary": "下载安装包",
+        "description": "支持 Range、ETag、Last-Modified 和长期不可变缓存。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/AssetID"
+          },
+          {
+            "name": "Range",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "bytes=0-1048575"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/BinaryFile"
+          },
+          "206": {
+            "$ref": "#/components/responses/BinaryFile"
+          },
+          "304": {
+            "description": "条件请求命中缓存"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "416": {
+            "description": "Range 无效"
+          }
+        }
+      },
+      "head": {
+        "tags": ["下载站"],
+        "summary": "读取安装包响应头",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/AssetID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "返回文件长度、ETag、Last-Modified 和 Range 能力"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/public/apps/{slug}/announcements": {
+      "get": {
+        "tags": ["公告"],
+        "summary": "获取当前有效公告",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/Channel"
+          },
+          {
+            "$ref": "#/components/parameters/Platform"
+          },
+          {
+            "$ref": "#/components/parameters/Version"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "置顶优先，其次按创建时间倒序",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnouncementsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/public/apps/{slug}/announcements/{announcement_id}": {
+      "get": {
+        "tags": ["公告"],
+        "summary": "获取单条当前有效公告",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/AnnouncementID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnouncementResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "Slug": {
+        "name": "slug",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,31}$"
+        }
+      },
+      "AssetID": {
+        "name": "asset_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        }
+      },
+      "AnnouncementID": {
+        "name": "announcement_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        }
+      },
+      "Channel": {
+        "name": "channel",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "example": "stable"
+        }
+      },
+      "Platform": {
+        "name": "platform",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "example": "windows"
+        }
+      },
+      "Architecture": {
+        "name": "arch",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "example": "amd64"
+        }
+      },
+      "Version": {
+        "name": "version",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "example": "1.2.0"
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "参数无效",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "资源不存在或尚未公开",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "内部处理失败",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "BinaryFile": {
+        "description": "文件内容",
+        "headers": {
+          "Accept-Ranges": {
+            "schema": {
+              "type": "string",
+              "example": "bytes"
+            }
+          },
+          "ETag": {
+            "schema": {
+              "type": "string"
+            }
+          },
+          "Last-Modified": {
+            "schema": {
+              "type": "string"
+            }
+          },
+          "Content-Length": {
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        },
+        "content": {
+          "application/octet-stream": {
+            "schema": {
+              "type": "string",
+              "format": "binary"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "App": {
+        "type": "object",
+        "required": ["id", "name", "slug", "public", "telemetry_enabled", "created_at", "updated_at"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "telemetry_enabled": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Asset": {
+        "type": "object",
+        "required": ["id", "release_id", "platform", "architecture", "filename", "size", "sha256", "downloads", "created_at"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "release_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "architecture": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "content_type": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "downloads": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Release": {
+        "type": "object",
+        "required": ["id", "app_id", "version", "channel", "status", "notes", "created_at", "updated_at"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "app_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "version": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["draft", "published", "archived"]
+          },
+          "notes": {
+            "type": "string"
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "assets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Asset"
+            }
+          }
+        }
+      },
+      "Announcement": {
+        "type": "object",
+        "required": ["id", "app_id", "title", "body", "status", "pinned", "created_at", "updated_at"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "app_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["draft", "published", "archived"]
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "min_version": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["success", "message"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": false
+          },
+          "message": {
+            "type": "string",
+            "example": "应用中心操作失败"
+          }
+        }
+      },
+      "AppResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/App"
+          }
+        }
+      },
+      "AppsResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/App"
+            }
+          }
+        }
+      },
+      "ReleaseResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/Release"
+          }
+        }
+      },
+      "ReleasesResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Release"
+            }
+          }
+        }
+      },
+      "AnnouncementResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/Announcement"
+          }
+        }
+      },
+      "AnnouncementsResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Announcement"
+            }
+          }
+        }
+      },
+      "UpdateResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "type": "object",
+            "required": ["update_available", "release", "assets", "announcements"],
+            "properties": {
+              "update_available": {
+                "type": "boolean"
+              },
+              "release": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Release"
+                  }
+                ],
+                "nullable": true
+              },
+              "assets": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Asset"
+                }
+              },
+              "announcements": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Announcement"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -5,20 +5,8 @@ This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as
 published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
-
-export type DistributionApp = { id: number; slug: string; name: string }
 
 export type DistributionAsset = {
   id: number
@@ -60,32 +48,91 @@ export type DistributionAnnouncement = {
   updated_at: string
 }
 
-type ApiResponse<T> = { success: boolean; message?: string; data: T }
-
-type DistributionManagementResource = 'releases' | 'announcements'
-
-export function distributionManagementQueryKey(
-  resource: DistributionManagementResource,
-  slug: string,
-  credentialGeneration: number
-) {
-  return ['distribution-admin', resource, slug, credentialGeneration] as const
+export type DistributionApp = {
+  id: number
+  slug: string
+  name: string
+  description?: string
+  public: boolean
+  telemetry_enabled?: boolean
+  created_at?: string
+  updated_at?: string
+  telemetry_token?: string
 }
 
-export function submitDistributionManagementCredential(
-  bearer: string,
-  credentialGeneration: number
-) {
-  return {
-    bearer: bearer.trim(),
-    credentialGeneration: credentialGeneration + 1,
-  }
+export type UsageSummary = {
+  starts: number
+  online_seconds: number
+  average_session_seconds: number
+  versions?: Array<{ version: string; starts: number; online_seconds: number }>
+  platforms?: Array<{
+    platform: string
+    starts: number
+    online_seconds: number
+  }>
+  trend?: Array<{ bucket_ts: number; starts: number; online_seconds: number }>
+}
+
+export type CustomEventsSummary = {
+  events?: Array<{
+    name: string
+    count: number
+    unique_users: number
+    dimensions?: Record<string, unknown> | string
+  }>
+  trend?: EventTrend[]
+}
+
+export type EventTrend = {
+  bucket_ts: number
+  name: string
+  count: number
+  unique_users: number
+}
+
+export type UsageBucket = {
+  app_id: number
+  bucket_ts: number
+  version: string
+  platform: string
+  architecture: string
+  start_count: number
+  online_seconds: number
+}
+export type CustomEventBucket = {
+  app_id: number
+  bucket_ts: number
+  name: string
+  dimensions: string
+  count: number
+  unique_users: number
+}
+export type EventRegion = {
+  country: string
+  region: string
+  city: string
+  unique_users: number
+}
+export type EventRegionSummary = {
+  regions: EventRegion[]
+  events: Array<{ name: string; unique_users: number }>
+}
+
+type ApiResponse<T> = { success: boolean; message?: string; data: T }
+
+export function distributionErrorMessage(error: unknown) {
+  const status = (error as { response?: { status?: number } })?.response?.status
+  if (status === 401) return '登录状态已失效，请重新登录'
+  if (status === 403) return '当前账号没有应用中心管理权限'
+  if (status === 500) return '应用中心服务暂时不可用，请稍后再试'
+  return '应用中心操作失败，请稍后再试'
 }
 
 const publicPath = (slug: string) =>
-  `/api/distribution/apps/${encodeURIComponent(slug)}`
+  `/api/public/apps/${encodeURIComponent(slug)}`
+const adminPath = (id: number | string) => `/api/app-center/apps/${id}`
 
-async function publicGet<T>(
+async function get<T>(
   path: string,
   params?: Record<string, string | undefined>
 ) {
@@ -96,123 +143,111 @@ async function publicGet<T>(
   return response.data
 }
 
+async function write<T>(
+  method: 'post' | 'put' | 'patch',
+  path: string,
+  data?: unknown
+) {
+  const response = await api[method]<ApiResponse<T>>(path, data, {
+    skipErrorHandler: true,
+  })
+  return response.data
+}
+
+export function getPublicApps() {
+  return get<DistributionApp[]>('/api/public/apps')
+}
 export function getDistributionApp(slug: string) {
-  return publicGet<DistributionApp>(publicPath(slug))
+  return get<DistributionApp>(publicPath(slug))
 }
-
 export function getDistributionReleases(slug: string, channel?: string) {
-  return publicGet<DistributionRelease[]>(`${publicPath(slug)}/releases`, {
+  return get<DistributionRelease[]>(`${publicPath(slug)}/releases`, {
     channel,
   })
 }
-
 export function getLatestDistributionRelease(slug: string, channel?: string) {
-  return publicGet<DistributionRelease>(`${publicPath(slug)}/releases/latest`, {
+  return get<DistributionRelease>(`${publicPath(slug)}/releases/latest`, {
     channel,
   })
 }
-
 export function getDistributionAnnouncements(
   slug: string,
   params?: { channel?: string; platform?: string; version?: string }
 ) {
-  return publicGet<DistributionAnnouncement[]>(
+  return get<DistributionAnnouncement[]>(
     `${publicPath(slug)}/announcements`,
     params
   )
 }
-
-export async function getManagedDistributionReleases(
-  slug: string,
-  bearer: string
-) {
-  const response = await api.get<ApiResponse<DistributionRelease[]>>(
-    `${publicPath(slug)}/manage/releases`,
-    managementConfig(bearer)
-  )
-  return response.data
-}
-
-export async function getManagedDistributionAnnouncements(
-  slug: string,
-  bearer: string
-) {
-  const response = await api.get<ApiResponse<DistributionAnnouncement[]>>(
-    `${publicPath(slug)}/manage/announcements`,
-    managementConfig(bearer)
-  )
-  return response.data
-}
-
 export function getDistributionAnnouncement(slug: string, id: number) {
-  return publicGet<DistributionAnnouncement>(
+  return get<DistributionAnnouncement>(
     `${publicPath(slug)}/announcements/${id}`
   )
 }
-
+export async function getPublicAnnouncements(apps: DistributionApp[]) {
+  const responses = await Promise.all(
+    apps.map((app) => getDistributionAnnouncements(app.slug))
+  )
+  return {
+    success: true,
+    data: responses.flatMap((response) => response.data ?? []),
+  }
+}
 export function getDistributionAssetDownloadUrl(slug: string, id: number) {
   return `${publicPath(slug)}/assets/${id}/download`
 }
 
-function writeConfig(bearer: string) {
-  return {
-    headers: { Authorization: `Bearer ${bearer.trim()}` },
-    skipErrorHandler: true,
-    skipAuthRefresh: true,
-    skipPanelAuth: true,
-  }
+export function getManagedDistributionApps() {
+  return get<DistributionApp[]>('/api/app-center/apps')
 }
-
-function managementConfig(bearer: string) {
-  return {
-    ...writeConfig(bearer),
-    skipRequestDedup: true,
-  }
-}
-
-export async function createDistributionRelease(
-  slug: string,
-  bearer: string,
-  input: { version: string; channel: string; notes?: string }
-) {
-  const response = await api.post<ApiResponse<DistributionRelease>>(
-    `${publicPath(slug)}/releases`,
-    input,
-    writeConfig(bearer)
+export function createManagedDistributionApp(input: {
+  name: string
+  slug: string
+  description?: string
+  public: boolean
+  telemetry_enabled: boolean
+}) {
+  return write<{ app: DistributionApp; token?: string }>(
+    'post',
+    '/api/app-center/apps',
+    input
   )
-  return response.data
 }
-
-export async function updateDistributionRelease(
-  slug: string,
-  bearer: string,
+export function updateManagedDistributionApp(
+  id: number,
+  input: Partial<DistributionApp>
+) {
+  return write<DistributionApp>('put', adminPath(id), input)
+}
+export function revealManagedTelemetryToken(id: number) {
+  return get<{ token: string }>(`${adminPath(id)}/telemetry-key`)
+}
+export function rotateManagedTelemetryToken(id: number) {
+  return write<{ token: string }>(
+    'post',
+    `${adminPath(id)}/telemetry-key/rotate`
+  )
+}
+export function getManagedDistributionReleases(id: number) {
+  return get<DistributionRelease[]>(`${adminPath(id)}/releases`)
+}
+export function createManagedDistributionRelease(
   id: number,
   input: { version: string; channel: string; notes?: string }
 ) {
-  const response = await api.put<ApiResponse<DistributionRelease>>(
-    `${publicPath(slug)}/releases/${id}`,
-    input,
-    writeConfig(bearer)
-  )
-  return response.data
+  return write<DistributionRelease>('post', `${adminPath(id)}/releases`, input)
 }
-
-export async function publishDistributionRelease(
-  slug: string,
-  bearer: string,
-  id: number
+export function publishManagedDistributionRelease(
+  id: number,
+  releaseID: number
 ) {
-  const response = await api.post<ApiResponse<DistributionRelease>>(
-    `${publicPath(slug)}/releases/${id}/publish`,
-    undefined,
-    writeConfig(bearer)
+  return write<DistributionRelease>(
+    'post',
+    `${adminPath(id)}/releases/${releaseID}/publish`
   )
-  return response.data
 }
-
-export async function uploadDistributionAsset(
-  slug: string,
-  bearer: string,
+export async function uploadManagedDistributionAsset(
+  id: number,
   releaseID: number,
   input: { file: File; platform: string; architecture: string }
 ) {
@@ -221,19 +256,15 @@ export async function uploadDistributionAsset(
   form.append('platform', input.platform)
   form.append('architecture', input.architecture)
   const response = await api.post<ApiResponse<DistributionAsset>>(
-    `${publicPath(slug)}/releases/${releaseID}/assets`,
+    `${adminPath(id)}/releases/${releaseID}/assets`,
     form,
-    {
-      ...writeConfig(bearer),
-      headers: {
-        ...writeConfig(bearer).headers,
-        'Content-Type': 'multipart/form-data',
-      },
-    }
+    { skipErrorHandler: true }
   )
   return response.data
 }
-
+export function getManagedDistributionAnnouncements(id: number) {
+  return get<DistributionAnnouncement[]>(`${adminPath(id)}/announcements`)
+}
 export type DistributionAnnouncementInput = {
   title: string
   body: string
@@ -244,56 +275,45 @@ export type DistributionAnnouncementInput = {
   platform?: string
   min_version?: string
 }
-
-export async function createDistributionAnnouncement(
-  slug: string,
-  bearer: string,
-  input: DistributionAnnouncementInput
-) {
-  const response = await api.post<ApiResponse<DistributionAnnouncement>>(
-    `${publicPath(slug)}/announcements`,
-    input,
-    writeConfig(bearer)
-  )
-  return response.data
-}
-
-export async function updateDistributionAnnouncement(
-  slug: string,
-  bearer: string,
+export function createManagedDistributionAnnouncement(
   id: number,
   input: DistributionAnnouncementInput
 ) {
-  const response = await api.put<ApiResponse<DistributionAnnouncement>>(
-    `${publicPath(slug)}/announcements/${id}`,
-    input,
-    writeConfig(bearer)
+  return write<DistributionAnnouncement>(
+    'post',
+    `${adminPath(id)}/announcements`,
+    input
   )
-  return response.data
 }
-
-export async function publishDistributionAnnouncement(
-  slug: string,
-  bearer: string,
-  id: number
+export function publishManagedDistributionAnnouncement(
+  id: number,
+  announcementID: number
 ) {
-  const response = await api.post<ApiResponse<DistributionAnnouncement>>(
-    `${publicPath(slug)}/announcements/${id}/publish`,
-    undefined,
-    writeConfig(bearer)
+  return write<DistributionAnnouncement>(
+    'post',
+    `${adminPath(id)}/announcements/${announcementID}/publish`
   )
-  return response.data
 }
-
-export async function archiveDistributionAnnouncement(
-  slug: string,
-  bearer: string,
-  id: number
-) {
-  const response = await api.post<ApiResponse<DistributionAnnouncement>>(
-    `${publicPath(slug)}/announcements/${id}/archive`,
-    undefined,
-    writeConfig(bearer)
-  )
-  return response.data
+export function getUsageSummary(id: number, hours: number) {
+  return get<UsageBucket[]>(`${adminPath(id)}/usage`, { hours: String(hours) })
+}
+export function getUsageRegions(id: number, hours: number) {
+  return get<EventRegion[]>(`${adminPath(id)}/usage/regions`, {
+    hours: String(hours),
+  })
+}
+export function getCustomEventsSummary(id: number, hours: number) {
+  return get<CustomEventBucket[]>(`${adminPath(id)}/events`, {
+    hours: String(hours),
+  })
+}
+export function getCustomEventTrend(id: number, hours: number) {
+  return get<EventTrend[]>(`${adminPath(id)}/events/trend`, {
+    hours: String(hours),
+  })
+}
+export function getCustomEventRegions(id: number, hours: number) {
+  return get<EventRegionSummary>(`${adminPath(id)}/events/regions`, {
+    hours: String(hours),
+  })
 }

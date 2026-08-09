@@ -59,8 +59,17 @@ func SetRelayRouter(router *gin.Engine) {
 		})
 	}
 
+	tokenInfoRouter := router.Group("/v1/token")
+	tokenInfoRouter.Use(middleware.RouteTag("relay"))
+	tokenInfoRouter.Use(middleware.DisableCache())
+	tokenInfoRouter.Use(middleware.TokenAuth())
+	{
+		tokenInfoRouter.GET("/group", controller.GetTokenGroup)
+	}
+
 	playgroundRouter := router.Group("/pg")
 	playgroundRouter.Use(middleware.RouteTag("relay"))
+	playgroundRouter.Use(middleware.RelayTiming())
 	playgroundRouter.Use(middleware.SystemPerformanceCheck())
 	playgroundRouter.Use(middleware.UserAuth(), middleware.Distribute())
 	{
@@ -68,6 +77,7 @@ func SetRelayRouter(router *gin.Engine) {
 	}
 	relayV1Router := router.Group("/v1")
 	relayV1Router.Use(middleware.RouteTag("relay"))
+	relayV1Router.Use(middleware.RelayTiming())
 	relayV1Router.Use(middleware.SystemPerformanceCheck())
 	relayV1Router.Use(middleware.TokenAuth())
 	relayV1Router.Use(middleware.ModelRequestRateLimit())
@@ -193,6 +203,7 @@ func SetRelayRouter(router *gin.Engine) {
 
 	relayGeminiRouter := router.Group("/v1beta")
 	relayGeminiRouter.Use(middleware.RouteTag("relay"))
+	relayGeminiRouter.Use(middleware.RelayTiming())
 	relayGeminiRouter.Use(middleware.SystemPerformanceCheck())
 	relayGeminiRouter.Use(middleware.TokenAuth())
 	relayGeminiRouter.Use(middleware.ModelRequestRateLimit())

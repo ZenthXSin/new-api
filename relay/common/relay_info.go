@@ -73,6 +73,7 @@ type ChannelMeta struct {
 	UpstreamModelName    string
 	IsModelMapped        bool
 	SupportStreamOptions bool // 是否支持流式选项
+	CostMultiplier       float64
 }
 
 type TokenCountMeta struct {
@@ -81,6 +82,7 @@ type TokenCountMeta struct {
 }
 
 type RelayInfo struct {
+	Timing            *common.RelayTiming
 	TokenId           int
 	TokenKey          string
 	TokenGroup        string
@@ -214,6 +216,14 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 		UpstreamModelName:    common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
 		IsModelMapped:        false,
 		SupportStreamOptions: false,
+	}
+	if value, exists := c.Get("channel_cost_multiplier"); exists {
+		if multiplier, ok := value.(float64); ok {
+			channelMeta.CostMultiplier = multiplier
+		}
+	}
+	if channelMeta.CostMultiplier <= 0 {
+		channelMeta.CostMultiplier = 1
 	}
 
 	if channelType == constant.ChannelTypeAzure {
@@ -473,7 +483,9 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 	if reqId == "" {
 		reqId = common.NewRequestId()
 	}
+	timing, _ := common.GetContextKeyType[*common.RelayTiming](c, constant.ContextKeyRelayTiming)
 	info := &RelayInfo{
+		Timing:  timing,
 		Request: request,
 
 		RequestId:  reqId,
@@ -811,9 +823,22 @@ func (info *RelayInfo) ConvOptions() *convmeta.Options {
 }
 
 func (info *RelayInfo) SetFirstResponseTime() {
+	info.SetFirstResponseTimeAt(time.Now())
+}
+
+func (info *RelayInfo) SetFirstResponseTimeAt(at time.Time) {
+	if info == nil {
+		return
+	}
 	if info.isFirstResponse {
-		info.FirstResponseTime = time.Now()
+		if at.IsZero() {
+			at = time.Now()
+		}
+		info.FirstResponseTime = at
 		info.isFirstResponse = false
+	}
+	if info.Timing != nil {
+		info.Timing.CommitValidEvent(at)
 	}
 }
 

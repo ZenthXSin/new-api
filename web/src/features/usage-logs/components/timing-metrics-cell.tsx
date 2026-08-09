@@ -25,16 +25,31 @@ import {
   type StatusVariant,
 } from '@/components/status-badge'
 import {
+  Popover,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { toIntlLocale } from '@/i18n/languages'
 import { formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import { getFirstResponseTimeColor, getResponseTimeColor } from '../lib/format'
-import type { LogOtherData } from '../types'
+import {
+  formatTimingBytes,
+  formatTimingEndStatus,
+  formatTimingMilliseconds,
+  getFirstResponseTimeColor,
+  getResponseTimeColor,
+  getTimingConnectionPhases,
+} from '../lib/format'
+import type { DetailedTimingMetrics, LogOtherData } from '../types'
 
 /**
  * Softened fills for the full-height timing bar. The bar sits directly beside
@@ -56,6 +71,8 @@ interface TimingMetricsCellProps {
   frtMs?: number
   isStream: boolean
   className?: string
+  /** Detailed relay timing shown in an accessible popover when available. */
+  detailedTiming?: DetailedTimingMetrics
   /**
    * `bar` (default) draws a full-height color segment beside the labels,
    * matching the dense desktop table. `dot` swaps that segment for small
@@ -66,7 +83,7 @@ interface TimingMetricsCellProps {
 }
 
 export function TimingMetricsCell(props: TimingMetricsCellProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const indicator = props.indicator ?? 'bar'
   const showFirstToken = props.isStream
   const firstTokenSeconds =
@@ -122,30 +139,117 @@ export function TimingMetricsCell(props: TimingMetricsCellProps) {
     </div>
   )
 
-  if (indicator === 'dot') {
-    return (
+  const timingSummary =
+    indicator === 'dot' ? (
       <div className={cn('flex items-stretch', props.className)}>{labels}</div>
+    ) : (
+      <div className={cn('flex items-stretch gap-2', props.className)}>
+        <span
+          aria-hidden
+          className={cn(
+            'flex w-1 shrink-0 flex-col overflow-hidden rounded-full',
+            !showFirstToken && barColorMap[totalTimeVariant]
+          )}
+        >
+          {showFirstToken && (
+            <>
+              <span className={cn('flex-1', barColorMap[firstTokenVariant])} />
+              <span className={cn('flex-1', barColorMap[totalTimeVariant])} />
+            </>
+          )}
+        </span>
+        {labels}
+      </div>
     )
+
+  if (!props.detailedTiming) return timingSummary
+
+  const detail = props.detailedTiming
+  const connectionPhases = getTimingConnectionPhases(detail)
+  let connectionValue = '—'
+  if (detail.upstream_connection?.reused || detail.upstream_reused) {
+    connectionValue = t('Reused')
+  } else if (connectionPhases.length > 0) {
+    connectionValue = connectionPhases
+      .map((phase) => `${phase.label} ${formatTimingMilliseconds(phase.value)}`)
+      .join(' / ')
+  } else if (detail.upstream_connection_ms != null) {
+    connectionValue = formatTimingMilliseconds(detail.upstream_connection_ms)
   }
 
+  const detailRows = [
+    {
+      label: t('Site processing'),
+      value: formatTimingMilliseconds(detail.site_processing_ms),
+    },
+    { label: t('Upstream connection'), value: connectionValue },
+    {
+      label: t('Upstream first event'),
+      value: formatTimingMilliseconds(detail.upstream_first_event_ms),
+    },
+    {
+      label: t('Relay processing'),
+      value: formatTimingMilliseconds(detail.relay_processing_ms),
+    },
+    {
+      label: t('Downstream send'),
+      value: formatTimingMilliseconds(detail.downstream_send_ms),
+    },
+    {
+      label: t('Total time'),
+      value: formatTimingMilliseconds(detail.total_ms),
+    },
+    {
+      label: t('Sent bytes'),
+      value: formatTimingBytes(
+        detail.sent_bytes,
+        toIntlLocale(i18n.resolvedLanguage || i18n.language)
+      ),
+    },
+    {
+      label: t('End status'),
+      value: formatTimingEndStatus(detail.end_status, t),
+    },
+  ]
+
   return (
-    <div className={cn('flex items-stretch gap-2', props.className)}>
-      <span
-        aria-hidden
-        className={cn(
-          'flex w-1 shrink-0 flex-col overflow-hidden rounded-full',
-          !showFirstToken && barColorMap[totalTimeVariant]
-        )}
+    <Popover>
+      <PopoverTrigger
+        render={
+          <button
+            type='button'
+            aria-label={t('View detailed timing')}
+            onClick={(event) => event.stopPropagation()}
+            className='focus-visible:ring-ring font-inherit inline-flex w-full min-w-0 cursor-pointer appearance-none border-0 bg-transparent p-0 text-left focus-visible:ring-2 focus-visible:outline-none'
+          />
+        }
       >
-        {showFirstToken && (
-          <>
-            <span className={cn('flex-1', barColorMap[firstTokenVariant])} />
-            <span className={cn('flex-1', barColorMap[totalTimeVariant])} />
-          </>
-        )}
-      </span>
-      {labels}
-    </div>
+        {timingSummary}
+      </PopoverTrigger>
+      <PopoverContent
+        side='top'
+        align='start'
+        collisionPadding={8}
+        className='w-72 max-w-[calc(100vw-1rem)]'
+      >
+        <PopoverHeader>
+          <PopoverTitle>{t('Timing details')}</PopoverTitle>
+        </PopoverHeader>
+        <dl className='divide-border/60 divide-y text-xs'>
+          {detailRows.map((row) => (
+            <div
+              key={row.label}
+              className='flex items-start justify-between gap-4 py-1.5 first:pt-0 last:pb-0'
+            >
+              <dt className='text-muted-foreground shrink-0'>{row.label}</dt>
+              <dd className='text-foreground min-w-0 text-right font-mono break-words tabular-nums'>
+                {row.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </PopoverContent>
+    </Popover>
   )
 }
 

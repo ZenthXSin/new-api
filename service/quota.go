@@ -30,13 +30,16 @@ type TokenDetails struct {
 }
 
 type QuotaInfo struct {
-	InputDetails  TokenDetails
-	OutputDetails TokenDetails
-	ModelName     string
-	UsePrice      bool
-	ModelPrice    float64
-	ModelRatio    float64
-	GroupRatio    float64
+	InputDetails         TokenDetails
+	OutputDetails        TokenDetails
+	ModelName            string
+	UsePrice             bool
+	ModelPrice           float64
+	ModelRatio           float64
+	GroupRatio           float64
+	CompletionRatio      *float64
+	AudioRatio           *float64
+	AudioCompletionRatio *float64
 }
 
 func hasCustomModelRatio(modelName string, currentRatio float64) bool {
@@ -48,18 +51,40 @@ func hasCustomModelRatio(modelName string, currentRatio float64) bool {
 }
 
 func calculateAudioQuota(info QuotaInfo) (int, *common.QuotaClamp) {
+	return common.QuotaFromDecimalChecked(calculateAudioQuotaDecimal(info))
+}
+
+func calculateAudioQuotaDecimal(info QuotaInfo) decimal.Decimal {
 	if info.UsePrice {
 		modelPrice := decimal.NewFromFloat(info.ModelPrice)
 		quotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 		groupRatio := decimal.NewFromFloat(info.GroupRatio)
 
 		quota := modelPrice.Mul(quotaPerUnit).Mul(groupRatio)
-		return common.QuotaFromDecimalChecked(quota)
+		return quota
 	}
 
-	completionRatio := decimal.NewFromFloat(ratio_setting.GetCompletionRatio(info.ModelName))
-	audioRatio := decimal.NewFromFloat(ratio_setting.GetAudioRatio(info.ModelName))
-	audioCompletionRatio := decimal.NewFromFloat(ratio_setting.GetAudioCompletionRatio(info.ModelName))
+	completionRatioValue := 0.0
+	if info.CompletionRatio != nil {
+		completionRatioValue = *info.CompletionRatio
+	} else {
+		completionRatioValue = ratio_setting.GetCompletionRatio(info.ModelName)
+	}
+	audioRatioValue := 0.0
+	if info.AudioRatio != nil {
+		audioRatioValue = *info.AudioRatio
+	} else {
+		audioRatioValue = ratio_setting.GetAudioRatio(info.ModelName)
+	}
+	audioCompletionRatioValue := 0.0
+	if info.AudioCompletionRatio != nil {
+		audioCompletionRatioValue = *info.AudioCompletionRatio
+	} else {
+		audioCompletionRatioValue = ratio_setting.GetAudioCompletionRatio(info.ModelName)
+	}
+	completionRatio := decimal.NewFromFloat(completionRatioValue)
+	audioRatio := decimal.NewFromFloat(audioRatioValue)
+	audioCompletionRatio := decimal.NewFromFloat(audioCompletionRatioValue)
 
 	groupRatio := decimal.NewFromFloat(info.GroupRatio)
 	modelRatio := decimal.NewFromFloat(info.ModelRatio)
@@ -83,7 +108,7 @@ func calculateAudioQuota(info QuotaInfo) (int, *common.QuotaClamp) {
 		quota = decimal.NewFromInt(1)
 	}
 
-	return common.QuotaFromDecimalChecked(quota)
+	return quota
 }
 
 func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.RealtimeUsage) error {
@@ -132,6 +157,7 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 		},
 		ModelName:  modelName,
 		UsePrice:   relayInfo.UsePrice,
+		ModelPrice: relayInfo.PriceData.ModelPrice,
 		ModelRatio: modelRatio,
 		GroupRatio: actualGroupRatio,
 	}
@@ -196,6 +222,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		},
 		ModelName:  modelName,
 		UsePrice:   usePrice,
+		ModelPrice: modelPrice,
 		ModelRatio: modelRatio,
 		GroupRatio: groupRatio,
 	}
@@ -241,20 +268,28 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	if tieredResult != nil {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
+	costSnapshot := CostSnapshotFromAudioQuota(relayInfo, quotaInfo)
+	if tieredResult != nil {
+		costSnapshot = costSnapshotFromBaseDecimal(relayInfo, decimal.NewFromFloat(tieredResult.ActualQuotaBeforeGroup))
+	}
+	AppendCostSnapshotAdminInfo(other, costSnapshot, quota, "actual_usage")
 	attachQuotaSaturation(ctx, relayInfo, other)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
-		ChannelId:        relayInfo.ChannelId,
-		PromptTokens:     usage.InputTokens,
-		CompletionTokens: usage.OutputTokens,
-		ModelName:        logModel,
-		TokenName:        tokenName,
-		Quota:            quota,
-		Content:          logContent,
-		TokenId:          relayInfo.TokenId,
-		UseTimeSeconds:   int(useTimeSeconds),
-		IsStream:         relayInfo.IsStream,
-		Group:            relayInfo.UsingGroup,
-		Other:            other,
+		ChannelId:              relayInfo.ChannelId,
+		PromptTokens:           usage.InputTokens,
+		CompletionTokens:       usage.OutputTokens,
+		ModelName:              logModel,
+		TokenName:              tokenName,
+		Quota:                  quota,
+		Content:                logContent,
+		TokenId:                relayInfo.TokenId,
+		UseTimeSeconds:         int(useTimeSeconds),
+		IsStream:               relayInfo.IsStream,
+		Group:                  relayInfo.UsingGroup,
+		Other:                  other,
+		BaseCostQuota:          costSnapshot.BaseCostQuota,
+		CostQuota:              costSnapshot.CostQuota,
+		CostMultiplierSnapshot: costSnapshot.Multiplier,
 	})
 }
 
@@ -319,6 +354,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		},
 		ModelName:  relayInfo.OriginModelName,
 		UsePrice:   usePrice,
+		ModelPrice: modelPrice,
 		ModelRatio: modelRatio,
 		GroupRatio: groupRatio,
 	}
@@ -364,20 +400,28 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	if tieredResult != nil {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
+	costSnapshot := CostSnapshotFromAudioQuota(relayInfo, quotaInfo)
+	if tieredResult != nil {
+		costSnapshot = costSnapshotFromBaseDecimal(relayInfo, decimal.NewFromFloat(tieredResult.ActualQuotaBeforeGroup))
+	}
+	AppendCostSnapshotAdminInfo(other, costSnapshot, quota, "actual_usage")
 	attachQuotaSaturation(ctx, relayInfo, other)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
-		ChannelId:        relayInfo.ChannelId,
-		PromptTokens:     usage.PromptTokens,
-		CompletionTokens: usage.CompletionTokens,
-		ModelName:        logModel,
-		TokenName:        tokenName,
-		Quota:            quota,
-		Content:          logContent,
-		TokenId:          relayInfo.TokenId,
-		UseTimeSeconds:   int(useTimeSeconds),
-		IsStream:         relayInfo.IsStream,
-		Group:            relayInfo.UsingGroup,
-		Other:            other,
+		ChannelId:              relayInfo.ChannelId,
+		PromptTokens:           usage.PromptTokens,
+		CompletionTokens:       usage.CompletionTokens,
+		ModelName:              logModel,
+		TokenName:              tokenName,
+		Quota:                  quota,
+		Content:                logContent,
+		TokenId:                relayInfo.TokenId,
+		UseTimeSeconds:         int(useTimeSeconds),
+		IsStream:               relayInfo.IsStream,
+		Group:                  relayInfo.UsingGroup,
+		Other:                  other,
+		BaseCostQuota:          costSnapshot.BaseCostQuota,
+		CostQuota:              costSnapshot.CostQuota,
+		CostMultiplierSnapshot: costSnapshot.Multiplier,
 	})
 	gopool.Go(func() {
 		perfmetrics.RecordRelaySample(relayInfo, true, int64(usage.CompletionTokens))

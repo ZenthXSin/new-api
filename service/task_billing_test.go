@@ -332,6 +332,43 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	assert.Zero(t, getTaskQuota(t, task.ID))
 }
 
+func TestRefundTaskQuotaRetainsUpstreamCost(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	seedUser(t, 31, 10000)
+	seedChannel(t, 31)
+	task := makeTask(31, 31, 500, 0, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.BaseCostQuota = 300
+	task.PrivateData.BillingContext.CostQuota = 450
+	task.PrivateData.BillingContext.CostMultiplier = 1.5
+	require.NoError(t, model.DB.Create(task).Error)
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		Type:                   model.LogTypeConsume,
+		CreatedAt:              common.GetTimestamp(),
+		ChannelId:              task.ChannelId,
+		ModelName:              "test-model",
+		Quota:                  task.Quota,
+		BaseCostQuota:          300,
+		CostQuota:              450,
+		CostMultiplierSnapshot: 1.5,
+	}).Error)
+
+	require.True(t, RefundTaskQuota(ctx, task, "upstream failure"))
+	refund := getLastLog(t)
+	require.NotNil(t, refund)
+	assert.Equal(t, model.LogTypeRefund, refund.Type)
+	assert.Zero(t, refund.BaseCostQuota)
+	assert.Zero(t, refund.CostQuota)
+	assert.Zero(t, refund.CostMultiplierSnapshot)
+
+	report, err := model.AggregateCost(0, 0, task.ChannelId, "test-model", "", "", "")
+	require.NoError(t, err)
+	assert.Zero(t, report.RevenueQuota)
+	assert.Equal(t, int64(450), report.CostQuota)
+	assert.Equal(t, int64(1), report.RequestCount)
+}
+
 func TestRefundTaskQuota_Subscription(t *testing.T) {
 	truncate(t)
 	ctx := context.Background()
@@ -528,6 +565,93 @@ func TestRecalculate_ActualQuotaZero(t *testing.T) {
 	// No change (early return)
 	assert.Equal(t, initQuota, getUserQuota(t, userID))
 	assert.Equal(t, int64(0), countLogs(t))
+}
+
+func TestRecalculateZeroQuotaWithFrozenCostDelta(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	seedUser(t, 130, 10000)
+	seedChannel(t, 130)
+	task := makeTask(130, 130, 0, 0, BillingSourceWallet, 0)
+	require.NoError(t, model.DB.Create(task).Error)
+
+	// A free group produces no user charge, but the upstream request still has
+	// a cost that must be retained in the billing ledger.
+	recalculateTaskQuota(ctx, task, 0, "frozen upstream cost", &CostSnapshot{
+		BaseCostQuota: 100,
+		CostQuota:     200,
+		Multiplier:    2,
+	})
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeConsume, log.Type)
+	assert.Zero(t, log.Quota)
+	assert.Equal(t, 100, log.BaseCostQuota)
+	assert.Equal(t, 200, log.CostQuota)
+	assert.Equal(t, 2.0, log.CostMultiplierSnapshot)
+}
+
+func TestRecalculateTaskQuotaByTokensKeepsCostForFreeGroup(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	seedUser(t, 32, 10000)
+	seedChannel(t, 32)
+	task := makeTask(32, 32, 0, 0, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.ModelRatio = 2
+	task.PrivateData.BillingContext.GroupRatio = 0
+	task.PrivateData.BillingContext.RevenueQuota = 0
+	task.PrivateData.BillingContext.BaseCostQuota = 100
+	task.PrivateData.BillingContext.CostQuota = 200
+	task.PrivateData.BillingContext.CostMultiplier = 2
+	task.PrivateData.BillingContext.SettledBaseCostQuota = 100
+	task.PrivateData.BillingContext.SettledCostQuota = 200
+	require.NoError(t, model.DB.Create(task).Error)
+
+	RecalculateTaskQuotaByTokens(ctx, task, 100)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeConsume, log.Type)
+	assert.Zero(t, log.Quota)
+	assert.Equal(t, 100, log.BaseCostQuota)
+	assert.Equal(t, 200, log.CostQuota)
+	assert.Equal(t, 2.0, log.CostMultiplierSnapshot)
+	assert.Equal(t, 200, task.PrivateData.BillingContext.SettledBaseCostQuota)
+	assert.Equal(t, 400, task.PrivateData.BillingContext.SettledCostQuota)
+}
+
+func TestRecalculateTaskQuotaByTokensAuditsSaturatedFrozenCost(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	seedUser(t, 33, 10000)
+	seedChannel(t, 33)
+	task := makeTask(33, 33, 0, 0, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.ModelRatio = 1
+	task.PrivateData.BillingContext.GroupRatio = 0
+	task.PrivateData.BillingContext.CostMultiplier = 2
+	require.NoError(t, model.DB.Create(task).Error)
+
+	RecalculateTaskQuotaByTokens(ctx, task, common.MaxQuota-1)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Zero(t, log.Quota)
+	assert.Equal(t, common.MaxQuota-1, log.BaseCostQuota)
+	assert.Equal(t, common.MaxQuota, log.CostQuota)
+
+	other := map[string]interface{}{}
+	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	saturation, ok := adminInfo["quota_saturation"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "QuotaFromDecimal", saturation["op"])
+	assert.Equal(t, string(common.QuotaClampOverflow), saturation["kind"])
+	assert.Equal(t, float64(common.MaxQuota), saturation["clamped"])
 }
 
 func TestRecalculate_Subscription_NegativeDelta(t *testing.T) {

@@ -475,6 +475,11 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 	if channel == nil {
 		return fmt.Errorf("channel cannot be empty")
 	}
+	if channel.CostMultiplier == 0 && isAdd {
+		channel.CostMultiplier = model.DefaultChannelCostMultiplier
+	} else if channel.CostMultiplier != 0 && model.NormalizeChannelCostMultiplier(channel.CostMultiplier) == 0 {
+		return fmt.Errorf("cost_multiplier must be finite and between %.4f and %.0f", model.MinChannelCostMultiplier, model.MaxChannelCostMultiplier)
+	}
 
 	// 校验 channel settings
 	if err := channel.ValidateSettings(); err != nil {
@@ -981,6 +986,12 @@ func UpdateChannel(c *gin.Context) {
 		})
 		return
 	}
+	if _, provided := requestData["cost_multiplier"]; !provided {
+		channel.CostMultiplier = originChannel.GetCostMultiplier()
+	} else if channel.CostMultiplier == 0 || model.NormalizeChannelCostMultiplier(channel.CostMultiplier) == 0 {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": fmt.Sprintf("cost_multiplier must be finite and between %.4f and %.0f", model.MinChannelCostMultiplier, model.MaxChannelCostMultiplier)})
+		return
+	}
 	originProxy := originChannel.GetSetting().Proxy
 	proxyChanged := false
 	if _, settingProvided := requestData["setting"]; settingProvided {
@@ -1108,6 +1119,9 @@ func UpdateChannel(c *gin.Context) {
 	}
 	if channel.Key != "" && channel.Key != originChannel.Key {
 		changedFields = append(changedFields, "key")
+	}
+	if _, provided := requestData["cost_multiplier"]; provided && channel.CostMultiplier != originChannel.CostMultiplier {
+		changedFields = append(changedFields, "cost_multiplier")
 	}
 	recordManageAudit(c, "channel.update", map[string]interface{}{
 		"id":             channel.Id,

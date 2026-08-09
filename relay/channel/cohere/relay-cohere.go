@@ -145,9 +145,10 @@ func cohereStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			continue
 		}
 		helper.PreparePollingStreamOutput(c, resp, info)
+		validEventAt := time.Now()
 		c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonStr)})
-		if helper.CommitPollingStreamOutput(c, resp, info) && info.FirstResponseTime.IsZero() {
-			info.FirstResponseTime = time.Now()
+		if helper.CommitPollingStreamOutput(c, resp, info) {
+			info.SetFirstResponseTimeAt(validEventAt)
 		}
 		c.Writer.Flush()
 	}

@@ -112,7 +112,35 @@ export interface ToolSurchargeItem {
   price: number
 }
 
+/**
+ * Detailed relay timing captured by the backend for newer usage logs.
+ * Connection phase timings are optional because they are not available when
+ * the upstream connection is reused (or for older records).
+ */
+export interface DetailedTimingMetrics {
+  site_processing_ms?: number
+  /** Flat form kept for compatibility with timing payloads from older builds. */
+  upstream_connection_ms?: number
+  upstream_dns_ms?: number
+  upstream_tcp_ms?: number
+  upstream_tls_ms?: number
+  upstream_reused?: boolean
+  upstream_connection?: {
+    reused?: boolean
+    dns_ms?: number
+    tcp_ms?: number
+    tls_ms?: number
+  }
+  upstream_first_event_ms?: number
+  relay_processing_ms?: number
+  downstream_send_ms?: number
+  total_ms?: number
+  sent_bytes?: number
+  end_status?: string | number
+}
+
 export interface LogOtherData {
+  timing?: DetailedTimingMetrics
   admin_info?: {
     is_multi_key?: boolean
     multi_key_index?: number
@@ -141,6 +169,12 @@ export interface LogOtherData {
       original: number
       clamped: number
     }
+    cost_coverage?: 'actual_usage' | 'unavailable' | string
+    cost_source?: string
+    base_cost_quota?: number
+    cost_quota?: number
+    cost_multiplier_snapshot?: number
+    gross_profit_quota?: number
   }
   // Language-independent operation descriptor (audit/login logs).
   // Frontend renders localized content from action + params via i18n templates.
@@ -353,6 +387,21 @@ export interface GetLogStatsResponse {
   success: boolean
   message?: string
   data?: LogStatistics
+}
+
+export interface CostBillingReport {
+  revenue_quota: number
+  cost_quota: number
+  gross_profit_quota: number
+  margin: number
+  request_count: number
+  cost_coverage: number
+}
+
+export interface GetCostBillingReportResponse {
+  success: boolean
+  message?: string
+  data?: CostBillingReport
 }
 
 // ============================================================================

@@ -120,6 +120,14 @@ type TaskBillingContext struct {
 	OtherRatios     map[string]float64 `json:"other_ratios,omitempty"`      // 附加倍率（时长、分辨率等）
 	OriginModelName string             `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
 	PerCallBilling  bool               `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
+	RevenueQuota    int                `json:"revenue_quota,omitempty"`
+	BaseCostQuota   int                `json:"base_cost_quota,omitempty"`
+	CostQuota       int                `json:"cost_quota,omitempty"`
+	CostMultiplier  float64            `json:"cost_multiplier,omitempty"`
+	// Settled cost totals are updated from frozen pricing as async usage arrives.
+	// They make each subsequent adjustment a delta without consulting current settings.
+	SettledBaseCostQuota int `json:"settled_base_cost_quota,omitempty"`
+	SettledCostQuota     int `json:"settled_cost_quota,omitempty"`
 }
 
 // GetUpstreamTaskID 获取上游真实 task ID（用于与 provider 通信）
@@ -409,6 +417,16 @@ func (Task *Task) Update() error {
 
 func (t *Task) UpdateQuota() error {
 	return DB.Model(t).Update("quota", t.Quota).Error
+}
+
+// UpdateBillingContext persists the frozen async cost ledger independently of
+// task status updates. Polling can therefore retain an immutable pricing basis
+// while recording multiple settlement deltas.
+func (t *Task) UpdateBillingContext() error {
+	if t == nil {
+		return nil
+	}
+	return DB.Model(t).Update("private_data", t.PrivateData).Error
 }
 
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).

@@ -61,6 +61,13 @@ func TestChannelHasSensitiveChanges(t *testing.T) {
 		assert.True(t, channelHasSensitiveChanges(&updated, origin, map[string]any{"header_override": newHeaderOverride}))
 	})
 
+	t.Run("cost multiplier change is sensitive", func(t *testing.T) {
+		origin.CostMultiplier = 1
+		updated := PatchChannel{Channel: *origin}
+		updated.CostMultiplier = 2
+		assert.True(t, channelHasSensitiveChanges(&updated, origin, map[string]any{"cost_multiplier": updated.CostMultiplier}))
+	})
+
 	t.Run("omitted sensitive fields do not use zero values", func(t *testing.T) {
 		updated := PatchChannel{}
 		updated.Id = origin.Id

@@ -32,9 +32,9 @@ afterEach(() => {
   useAuthStore.setState({ auth: originalAuth })
 })
 
-test('skipPanelAuth preserves an explicit application bearer token', async () => {
+test('app-center management uses the panel session request path', async () => {
   useAuthStore.setState({
-    auth: { ...originalAuth, accessToken: 'panel-access-token' },
+    auth: { ...originalAuth, accessToken: null },
   })
   let captured: InternalAxiosRequestConfig | undefined
   api.defaults.adapter = (async (config) => {
@@ -48,17 +48,15 @@ test('skipPanelAuth preserves an explicit application bearer token', async () =>
     }
   }) satisfies AxiosAdapter
 
-  await api.get('/api/distribution/apps/test/manage/releases', {
+  await api.get('/api/app-center/apps/7/releases', {
     disableDuplicate: true,
-    headers: { Authorization: 'Bearer app_v1.key.secret' },
-    skipAuthRefresh: true,
-    skipPanelAuth: true,
   })
 
-  assert.equal(captured?.headers.Authorization, 'Bearer app_v1.key.secret')
+  assert.equal(captured?.url, '/api/app-center/apps/7/releases')
+  assert.equal(captured?.headers.Authorization, undefined)
 })
 
-test('skipRequestDedup keeps overlapping replacement bearer requests separate', async () => {
+test('skipRequestDedup keeps overlapping app-center requests separate', async () => {
   const captured: InternalAxiosRequestConfig[] = []
   let releaseRequests = () => {}
   const requestGate = new Promise<void>((resolve) => {
@@ -77,16 +75,10 @@ test('skipRequestDedup keeps overlapping replacement bearer requests separate', 
   }) satisfies AxiosAdapter
 
   const requests = [
-    api.get('/api/distribution/apps/test/manage/releases', {
-      headers: { Authorization: 'Bearer app_v1.old-secret' },
-      skipAuthRefresh: true,
-      skipPanelAuth: true,
+    api.get('/api/app-center/apps/7/releases', {
       skipRequestDedup: true,
     }),
-    api.get('/api/distribution/apps/test/manage/releases', {
-      headers: { Authorization: 'Bearer app_v1.rotated-secret' },
-      skipAuthRefresh: true,
-      skipPanelAuth: true,
+    api.get('/api/app-center/apps/7/releases', {
       skipRequestDedup: true,
     }),
   ]
@@ -94,9 +86,6 @@ test('skipRequestDedup keeps overlapping replacement bearer requests separate', 
   await Promise.all(requests)
 
   assert.equal(captured.length, 2)
-  assert.equal(captured[0]?.headers.Authorization, 'Bearer app_v1.old-secret')
-  assert.equal(
-    captured[1]?.headers.Authorization,
-    'Bearer app_v1.rotated-secret'
-  )
+  assert.equal(captured[0]?.url, '/api/app-center/apps/7/releases')
+  assert.equal(captured[1]?.url, '/api/app-center/apps/7/releases')
 })

@@ -88,9 +88,9 @@ export function DistributionPublicPage() {
     return (
       <PublicLayout>
         <div className='mx-auto max-w-3xl py-24 text-center'>
-          <h1 className='text-2xl font-semibold'>{t('Application not found')}</h1>
+          <h1 className='text-2xl font-semibold'>{t('找不到应用')}</h1>
           <p className='text-muted-foreground mt-2'>
-            {t('Check that the distribution URL is correct.')}
+            {t('请检查应用分发地址是否正确。')}
           </p>
         </div>
       </PublicLayout>
@@ -102,28 +102,33 @@ export function DistributionPublicPage() {
     <PublicLayout>
       <div className='mx-auto max-w-5xl space-y-8 py-4 sm:py-8'>
         <header className='space-y-2'>
-          <p className='text-muted-foreground text-sm'>{t('Public distribution')}</p>
+          <p className='text-muted-foreground text-sm'>{t('公开下载')}</p>
           <h1 className='text-3xl font-bold tracking-tight'>{app.name}</h1>
           <p className='text-muted-foreground'>
-            {t('Download stable releases, review release notes, and read the latest announcements.')}
+            {t('下载稳定版本、查看版本说明并阅读最新公告。')}
           </p>
         </header>
 
         <section className='border-border bg-card rounded-lg border p-5 sm:p-6'>
           <div className='flex flex-wrap items-start justify-between gap-4'>
             <div className='space-y-1'>
-              <p className='text-muted-foreground text-sm'>{t('Latest release')}</p>
+              <p className='text-muted-foreground text-sm'>{t('最新版本')}</p>
               <h2 className='text-2xl font-semibold'>
-                {latest ? `v${latest.version}` : t('No published releases yet')}
+                {latest ? `v${latest.version}` : t('暂无已发布版本')}
               </h2>
               {latest && (
                 <p className='text-muted-foreground text-sm'>
-                  {latest.channel} · {formatDistributionDate(latest.published_at, i18n.language, 'medium')}
+                  {latest.channel} ·{' '}
+                  {formatDistributionDate(
+                    latest.published_at,
+                    i18n.language,
+                    'medium'
+                  )}
                 </p>
               )}
             </div>
             <Badge variant={latest ? 'default' : 'secondary'}>
-              {latest ? t('Published') : t('Waiting for release')}
+              {latest ? t('已发布') : t('等待发布')}
             </Badge>
           </div>
           {latest?.notes && (
@@ -159,11 +164,13 @@ export function DistributionPublicPage() {
 
         <section className='space-y-4'>
           <div className='flex items-center justify-between'>
-            <h2 className='text-xl font-semibold'>{t('Release history')}</h2>
+            <h2 className='text-xl font-semibold'>{t('版本历史')}</h2>
             <Download className='text-muted-foreground size-5' />
           </div>
           {releases.length === 0 ? (
-            <p className='text-muted-foreground py-8 text-sm'>{t('No releases yet.')}</p>
+            <p className='text-muted-foreground py-8 text-sm'>
+              {t('暂无版本。')}
+            </p>
           ) : (
             <div className='divide-border divide-y border-y'>
               {releases.map((release) => (
@@ -177,7 +184,11 @@ export function DistributionPublicPage() {
                       <Badge variant='outline'>{release.channel}</Badge>
                     </div>
                     <p className='text-muted-foreground text-sm'>
-                      {formatDistributionDate(release.published_at, i18n.language, 'medium')}
+                      {formatDistributionDate(
+                        release.published_at,
+                        i18n.language,
+                        'medium'
+                      )}
                     </p>
                     {release.notes && (
                       <RichContent
@@ -215,11 +226,13 @@ export function DistributionPublicPage() {
 
         <section className='space-y-4'>
           <div className='flex items-center justify-between'>
-            <h2 className='text-xl font-semibold'>{t('Announcements')}</h2>
+            <h2 className='text-xl font-semibold'>{t('公告')}</h2>
             <CalendarDays className='text-muted-foreground size-5' />
           </div>
           {announcements.length === 0 ? (
-            <p className='text-muted-foreground py-8 text-sm'>{t('No announcements yet.')}</p>
+            <p className='text-muted-foreground py-8 text-sm'>
+              {t('暂无公告。')}
+            </p>
           ) : (
             <div className='divide-border divide-y border-y'>
               {announcements.map((item) => (
@@ -232,10 +245,16 @@ export function DistributionPublicPage() {
                     >
                       {item.title}
                     </Link>
-                    {item.pinned && <Badge variant='secondary'>{t('Pinned')}</Badge>}
+                    {item.pinned && (
+                      <Badge variant='secondary'>{t('置顶')}</Badge>
+                    )}
                   </div>
                   <p className='text-muted-foreground mt-1 text-xs'>
-                    {formatDistributionDate(item.created_at, i18n.language, 'medium')}
+                    {formatDistributionDate(
+                      item.created_at,
+                      i18n.language,
+                      'medium'
+                    )}
                   </p>
                   <p className='text-muted-foreground mt-2 line-clamp-2 text-sm'>
                     {item.body}
