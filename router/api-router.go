@@ -258,6 +258,7 @@ func SetApiRouter(router *gin.Engine) {
 			appCenterRoute.PATCH("/apps/:id/announcements/:announcement_id", controller.UpdateAppCenterAnnouncement)
 			appCenterRoute.DELETE("/apps/:id/announcements/:announcement_id", controller.DeleteAppCenterAnnouncement)
 			appCenterRoute.GET("/apps/:id/usage", controller.GetAppCenterUsageDashboard)
+			appCenterRoute.GET("/apps/:id/downloads", controller.GetAppCenterDownloads)
 			appCenterRoute.GET("/apps/:id/usage/regions", controller.GetAppCenterUsageRegionsDashboard)
 			appCenterRoute.GET("/apps/:id/events", controller.GetAppCenterEventsDashboard)
 			appCenterRoute.GET("/apps/:id/events/trend", controller.GetAppCenterEventTrendDashboard)

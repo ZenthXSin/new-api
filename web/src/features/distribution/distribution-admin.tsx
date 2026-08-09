@@ -39,6 +39,7 @@ import {
   getCustomEventsSummary,
   getCustomEventTrend,
   getCustomEventRegions,
+  getAppCenterDownloads,
   getManagedDistributionAnnouncements,
   getManagedDistributionApps,
   getManagedDistributionReleases,
@@ -53,6 +54,7 @@ import {
 } from './api'
 import { DistributionTargetSelects } from './distribution-target-selects'
 import {
+  DownloadsTrendChart,
   TelemetryBarChart,
   TelemetryEventTrendChart,
   TelemetryRegionChart,
@@ -64,6 +66,7 @@ import {
   formatOnlineDuration,
   rankEventRows,
   rankUsageRows,
+  summarizeDownloads,
   summarizeEvents,
   summarizeUsage,
 } from './telemetry-data'
@@ -139,6 +142,15 @@ export function DistributionAdmin() {
       }
     },
     enabled: selectedID > 0 && tab === 'events',
+  })
+  const downloadsQuery = useQuery({
+    queryKey: ['app-center-downloads', selectedID, hours],
+    queryFn: async () =>
+      summarizeDownloads(
+        (await getAppCenterDownloads(selectedID, hours)).data ?? [],
+        hours
+      ),
+    enabled: selectedID > 0 && tab === 'content',
   })
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['app-center-apps'] })
@@ -563,6 +575,9 @@ export function DistributionAdmin() {
                       </div>
                     </div>
                   </section>
+                  {downloadsQuery.data && (
+                    <DownloadsTrendChart data={downloadsQuery.data} />
+                  )}
                   <ContentList
                     title={'版本列表'}
                     items={releases.map((item) => ({

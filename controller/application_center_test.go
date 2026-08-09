@@ -136,3 +136,36 @@ func TestAppCenterEventTrendDashboardDeduplicatesIPAndExpiresRows(t *testing.T) 
 	assert.Equal(t, "opened", regionsResponse.Data.Events[0].Name)
 	assert.Equal(t, int64(2), regionsResponse.Data.Events[0].UniqueUsers)
 }
+
+func TestGetAppCenterDownloadsFiltersHourWindowAndSortsAscending(t *testing.T) {
+	previousDB := model.DB
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.AppCenterDownloadBucket{}))
+	model.DB = db
+	t.Cleanup(func() { model.DB = previousDB })
+
+	now := time.Now().UTC()
+	current := now.Unix() / 3600 * 3600
+	older := current - 3600
+	outside := current - 10*3600
+	require.NoError(t, db.Create(&model.AppCenterDownloadBucket{AppID: 1, BucketTs: current, Version: "1.0.0", Platform: "linux", Architecture: "amd64", Count: 5}).Error)
+	require.NoError(t, db.Create(&model.AppCenterDownloadBucket{AppID: 1, BucketTs: older, Version: "1.0.0", Platform: "linux", Architecture: "amd64", Count: 2}).Error)
+	require.NoError(t, db.Create(&model.AppCenterDownloadBucket{AppID: 1, BucketTs: outside, Version: "1.0.0", Platform: "linux", Architecture: "amd64", Count: 9}).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: strconv.FormatInt(1, 10)}}
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/app-center/apps/1/downloads?hours=2", nil)
+	GetAppCenterDownloads(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Data []model.AppCenterDownloadBucket `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Len(t, response.Data, 2)
+	assert.Equal(t, older, response.Data[0].BucketTs)
+	assert.Equal(t, int64(2), response.Data[0].Count)
+	assert.Equal(t, current, response.Data[1].BucketTs)
+	assert.Equal(t, int64(5), response.Data[1].Count)
+}

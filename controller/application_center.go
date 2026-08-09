@@ -162,7 +162,7 @@ func DownloadAppCenterAsset(c *gin.Context) {
 	c.Header("Accept-Ranges", "bytes")
 	http.ServeContent(c.Writer, c.Request, asset.Filename, asset.CreatedAt, f)
 	if c.Request.Method == http.MethodGet {
-		service.IncrementAppCenterDownload(asset.ID)
+		service.IncrementAppCenterDownload(asset)
 	}
 }
 func GetAppCenterUpdate(c *gin.Context) {
@@ -484,6 +484,26 @@ func GetAppCenterUsageDashboard(c *gin.Context) {
 	}
 	var rows []model.AppCenterUsageBucket
 	if err := model.DB.Where("app_id = ? AND bucket_ts >= ?", id, time.Now().Add(-time.Duration(hours)*time.Hour).Unix()).Order("bucket_ts ASC").Find(&rows).Error; err != nil {
+		appCenterError(c, 500)
+		return
+	}
+	appCenterJSON(c, 200, rows)
+}
+
+// GetAppCenterDownloads returns the raw hourly download buckets of an app,
+// covering the last N complete hourly buckets including the current one.
+func GetAppCenterDownloads(c *gin.Context) {
+	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	hours := 720
+	if raw := c.Query("hours"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 1 && parsed <= 720 {
+			hours = parsed
+		}
+	}
+	now := time.Now().UTC()
+	cutoff := now.Unix()/3600*3600 - int64(hours-1)*3600
+	var rows []model.AppCenterDownloadBucket
+	if err := model.DB.Where("app_id = ? AND bucket_ts >= ?", id, cutoff).Order("bucket_ts ASC").Find(&rows).Error; err != nil {
 		appCenterError(c, 500)
 		return
 	}

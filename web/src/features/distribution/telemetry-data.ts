@@ -9,6 +9,7 @@ License, or (at your option) any later version.
 import type {
   CustomEventBucket,
   CustomEventsSummary,
+  DownloadBucket,
   EventTrend,
   UsageBucket,
   UsageSummary,
@@ -96,6 +97,61 @@ export function summarizeUsage(
     platforms: [...platforms.values()].sort((a, b) => b.starts - a.starts),
     trend: trendRows,
   }
+}
+
+export type DownloadsSummary = {
+  total: number
+  series: Array<{
+    version: string
+    points: Array<{ bucket_ts: number; count: number }>
+  }>
+}
+
+export function summarizeDownloads(
+  rows: DownloadBucket[],
+  hours = 0,
+  referenceTimestamp = Math.floor(Date.now() / 1000)
+): DownloadsSummary {
+  const byVersion = new Map<
+    string,
+    { buckets: Map<number, number>; total: number }
+  >()
+  let total = 0
+  for (const row of rows) {
+    total += row.count
+    const entry = byVersion.get(row.version) ?? {
+      buckets: new Map<number, number>(),
+      total: 0,
+    }
+    entry.total += row.count
+    entry.buckets.set(
+      row.bucket_ts,
+      (entry.buckets.get(row.bucket_ts) ?? 0) + row.count
+    )
+    byVersion.set(row.version, entry)
+  }
+  const series = [...byVersion.entries()]
+    .map(([version, entry]) => {
+      let points = [...entry.buckets.entries()]
+        .map(([bucket_ts, count]) => ({ bucket_ts, count }))
+        .sort((a, b) => a.bucket_ts - b.bucket_ts)
+      if (hours > 0) {
+        const end = Math.floor(referenceTimestamp / 3600) * 3600
+        const byBucket = new Map(points.map((point) => [point.bucket_ts, point]))
+        points = []
+        for (
+          let bucketTs = end - (hours - 1) * 3600;
+          bucketTs <= end;
+          bucketTs += 3600
+        ) {
+          points.push(byBucket.get(bucketTs) ?? { bucket_ts: bucketTs, count: 0 })
+        }
+      }
+      return { version, total: entry.total, points }
+    })
+    .sort((a, b) => b.total - a.total)
+    .map(({ version, points }) => ({ version, points }))
+  return { total, series }
 }
 
 export function summarizeEvents(

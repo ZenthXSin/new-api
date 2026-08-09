@@ -20,7 +20,7 @@ func setupAppCenterServiceTest(t *testing.T) (*model.AppCenterApp, string) {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&model.AppCenterSchemaState{}, &model.AppCenterApp{}, &model.AppCenterRelease{}, &model.AppCenterAsset{}, &model.AppCenterAnnouncement{}, &model.AppCenterUsageSession{}, &model.AppCenterUsageBucket{}, &model.AppCenterCustomEventBucket{}, &model.AppCenterEventReceipt{}, &model.AppCenterEventIPReceipt{}))
+	require.NoError(t, db.AutoMigrate(&model.AppCenterSchemaState{}, &model.AppCenterApp{}, &model.AppCenterRelease{}, &model.AppCenterAsset{}, &model.AppCenterAnnouncement{}, &model.AppCenterUsageSession{}, &model.AppCenterUsageBucket{}, &model.AppCenterDownloadBucket{}, &model.AppCenterCustomEventBucket{}, &model.AppCenterEventReceipt{}, &model.AppCenterEventIPReceipt{}))
 	model.DB, common.CryptoSecret = db, "app-center-test-secret"
 	t.Cleanup(func() { model.DB, common.CryptoSecret = previousDB, previousSecret; _ = sqlDB.Close() })
 	app, token, err := CreateAppCenterApp("Test", "test-app", "", true, true)
@@ -173,4 +173,50 @@ func TestAppCenterRejectsOrphanPublicationRows(t *testing.T) {
 	assert.ErrorIs(t, err, ErrAppCenterNotFound)
 	_, err = CreateAppCenterAnnouncement(999, AppCenterAnnouncementInput{Title: "notice"})
 	assert.ErrorIs(t, err, ErrAppCenterNotFound)
+}
+
+func TestAppCenterDownloadBucketsAccumulatePerHour(t *testing.T) {
+	app, _ := setupAppCenterServiceTest(t)
+	release, err := CreateAppCenterRelease(app.ID, AppCenterReleaseInput{Version: "1.0.0", Channel: "stable"})
+	require.NoError(t, err)
+	asset := &model.AppCenterAsset{ReleaseID: release.ID, Platform: "linux", Architecture: "amd64", Filename: "app.bin", ContentType: "application/octet-stream", Size: 1}
+	require.NoError(t, model.DB.Create(asset).Error)
+
+	IncrementAppCenterDownload(asset)
+	IncrementAppCenterDownload(asset)
+
+	var bucket model.AppCenterDownloadBucket
+	require.NoError(t, model.DB.First(&bucket).Error)
+	assert.Equal(t, app.ID, bucket.AppID)
+	assert.Equal(t, time.Now().Unix()/3600*3600, bucket.BucketTs)
+	assert.Equal(t, "1.0.0", bucket.Version)
+	assert.Equal(t, "linux", bucket.Platform)
+	assert.Equal(t, "amd64", bucket.Architecture)
+	assert.Equal(t, int64(2), bucket.Count)
+	var assetRow model.AppCenterAsset
+	require.NoError(t, model.DB.First(&assetRow, asset.ID).Error)
+	assert.Equal(t, int64(2), assetRow.Downloads)
+}
+
+func TestAppCenterDeleteCleansDownloadBuckets(t *testing.T) {
+	app, _ := setupAppCenterServiceTest(t)
+	release, err := CreateAppCenterRelease(app.ID, AppCenterReleaseInput{Version: "1.0.0", Channel: "stable"})
+	require.NoError(t, err)
+	asset := &model.AppCenterAsset{ReleaseID: release.ID, Platform: "linux", Architecture: "amd64", Filename: "app.bin", ContentType: "application/octet-stream", Size: 1, StoragePath: "unused"}
+	require.NoError(t, model.DB.Create(asset).Error)
+	bucketTs := time.Now().Unix() / 3600 * 3600
+	require.NoError(t, model.DB.Create(&model.AppCenterDownloadBucket{AppID: app.ID, BucketTs: bucketTs, Version: "1.0.0", Platform: "linux", Architecture: "amd64", Count: 3}).Error)
+	require.NoError(t, model.DB.Create(&model.AppCenterUsageBucket{AppID: app.ID, BucketTs: bucketTs, Version: "1.0.0", Platform: "linux", Architecture: "amd64", StartCount: 1}).Error)
+
+	require.NoError(t, DeleteAppCenterData(app.ID))
+
+	var downloadBuckets int64
+	require.NoError(t, model.DB.Model(&model.AppCenterDownloadBucket{}).Where("app_id = ?", app.ID).Count(&downloadBuckets).Error)
+	assert.Zero(t, downloadBuckets)
+	var usageBuckets int64
+	require.NoError(t, model.DB.Model(&model.AppCenterUsageBucket{}).Where("app_id = ?", app.ID).Count(&usageBuckets).Error)
+	assert.Zero(t, usageBuckets)
+	var apps int64
+	require.NoError(t, model.DB.Model(&model.AppCenterApp{}).Count(&apps).Error)
+	assert.Zero(t, apps)
 }

@@ -9,14 +9,17 @@ License, or (at your option) any later version.
 import { VChart } from '@visactor/react-vchart'
 import { BarChart3, LineChart } from 'lucide-react'
 import { useMemo, type ReactNode } from 'react'
-import { useTranslation } from 'react-i18next'
 
 import { useChartTheme } from '@/lib/use-chart-theme'
 import { cn } from '@/lib/utils'
 import { VCHART_OPTION } from '@/lib/vchart'
 
 import type { EventRegion, EventTrend, UsageSummary } from './api'
-import { formatOnlineDuration, formatTelemetryBucket } from './telemetry-data'
+import {
+  formatOnlineDuration,
+  formatTelemetryBucket,
+  type DownloadsSummary,
+} from './telemetry-data'
 
 const CHART_COLORS = [
   '#0f766e',
@@ -288,6 +291,114 @@ export function TelemetryEventTrendChart({
   )
 }
 
+export function DownloadsTrendChart({ data }: { data: DownloadsSummary }) {
+  const { resolvedTheme, themeReady } = useChartTheme()
+  const tokens = chartTokens(resolvedTheme)
+  const series = useMemo(() => data.series.slice(0, 8), [data.series])
+  const values = useMemo(
+    () =>
+      series.flatMap((entry) =>
+        entry.points.map((point) => ({
+          bucket_ts: point.bucket_ts,
+          version: entry.version,
+          count: point.count,
+        }))
+      ),
+    [series]
+  )
+  const maxPoints = useMemo(
+    () =>
+      series.reduce((max, entry) => Math.max(max, entry.points.length), 0),
+    [series]
+  )
+  const spec = useMemo(() => {
+    if (values.length === 0) return null
+    return {
+      type: 'line' as const,
+      data: [{ id: 'downloads-trend', values }],
+      xField: 'bucket_ts',
+      yField: 'count',
+      seriesField: 'version',
+      color: CHART_COLORS,
+      line: { style: { lineWidth: 2 } },
+      point: {
+        visible: maxPoints <= 48,
+        style: { size: 4, stroke: '#ffffff', lineWidth: 1 },
+      },
+      legends: {
+        visible: series.length > 1,
+        orient: 'bottom',
+        maxRow: 2,
+        item: { label: { style: { fill: tokens.text, fontSize: 10 } } },
+      },
+      tooltip: {
+        dimension: {
+          title: {
+            value: (datum: { bucket_ts: number }) =>
+              formatTelemetryBucket(datum.bucket_ts),
+          },
+          content: [
+            {
+              key: (datum: { version: string }) => datum.version,
+              value: (datum: { count: number }) => String(datum.count),
+            },
+          ],
+        },
+      },
+      axes: [
+        {
+          orient: 'bottom',
+          label: {
+            formatMethod: (value: number | string) =>
+              formatTelemetryBucket(Number(value)),
+            style: { fill: tokens.text, fontSize: 10 },
+            autoLimit: true,
+          },
+          tick: { visible: false },
+        },
+        {
+          orient: 'left',
+          label: {
+            formatMethod: (value: number | string) =>
+              String(Math.round(Number(value))),
+            style: { fill: tokens.text, fontSize: 10 },
+          },
+          grid: {
+            visible: true,
+            style: { lineDash: [3, 3], stroke: tokens.grid },
+          },
+        },
+      ],
+      animationAppear: { duration: 350 },
+    }
+  }, [maxPoints, series, tokens.grid, tokens.text, values])
+
+  return (
+    <ChartFrame
+      title={'下载量趋势'}
+      icon={<LineChart className='size-4' aria-hidden='true' />}
+    >
+      {values.length === 0 ? (
+        <EmptyChart message={'暂无下载数据'} />
+      ) : (
+        <div className='h-64 sm:h-72'>
+          {themeReady && spec && (
+            <VChart
+              key={`downloads-trend-${resolvedTheme}`}
+              spec={{
+                ...spec,
+                theme: resolvedTheme === 'dark' ? 'dark' : 'light',
+                background: 'transparent',
+              }}
+              option={VCHART_OPTION}
+            />
+          )}
+        </div>
+      )}
+    </ChartFrame>
+  )
+}
+
 export function TelemetryBarChart({
   title,
   rows,
@@ -299,7 +410,6 @@ export function TelemetryBarChart({
   valueLabel?: string
   formatValue?: (value: number) => string
 }) {
-  const { t } = useTranslation()
   const { resolvedTheme, themeReady } = useChartTheme()
   const tokens = chartTokens(resolvedTheme)
   const visibleRows = rows.filter(
@@ -352,7 +462,7 @@ export function TelemetryBarChart({
         },
       },
     }
-  }, [formatValue, t, tokens.grid, tokens.text, valueLabel, visibleRows])
+  }, [formatValue, tokens.grid, tokens.text, valueLabel, visibleRows])
 
   return (
     <ChartFrame

@@ -125,6 +125,18 @@ type AppCenterUsageBucket struct {
 
 func (AppCenterUsageBucket) TableName() string { return "app_center_usage_buckets" }
 
+type AppCenterDownloadBucket struct {
+	ID           int64  `json:"id" gorm:"primaryKey"`
+	AppID        int64  `json:"app_id" gorm:"uniqueIndex:idx_app_center_download_bucket,priority:1"`
+	BucketTs     int64  `json:"bucket_ts" gorm:"uniqueIndex:idx_app_center_download_bucket,priority:2;index"`
+	Version      string `json:"version" gorm:"size:64;uniqueIndex:idx_app_center_download_bucket,priority:3"`
+	Platform     string `json:"platform" gorm:"size:32;uniqueIndex:idx_app_center_download_bucket,priority:4"`
+	Architecture string `json:"architecture" gorm:"size:32;uniqueIndex:idx_app_center_download_bucket,priority:5"`
+	Count        int64  `json:"count"`
+}
+
+func (AppCenterDownloadBucket) TableName() string { return "app_center_download_buckets" }
+
 type AppCenterCustomEventBucket struct {
 	ID             int64  `json:"id" gorm:"primaryKey"`
 	AppID          int64  `json:"app_id" gorm:"uniqueIndex:idx_app_center_event_bucket,priority:1"`
@@ -235,4 +247,8 @@ func LockAppCenterForUpdate(tx *gorm.DB) *gorm.DB {
 
 func UpsertAppCenterUsageBucket(tx *gorm.DB, b *AppCenterUsageBucket) error {
 	return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "app_id"}, {Name: "bucket_ts"}, {Name: "version"}, {Name: "platform"}, {Name: "architecture"}}, DoUpdates: clause.Assignments(map[string]interface{}{"start_count": gorm.Expr("app_center_usage_buckets.start_count + ?", b.StartCount), "online_seconds": gorm.Expr("app_center_usage_buckets.online_seconds + ?", b.OnlineSeconds)})}).Create(b).Error
+}
+
+func UpsertAppCenterDownloadBucket(tx *gorm.DB, b *AppCenterDownloadBucket) error {
+	return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "app_id"}, {Name: "bucket_ts"}, {Name: "version"}, {Name: "platform"}, {Name: "architecture"}}, DoUpdates: clause.Assignments(map[string]interface{}{"count": gorm.Expr("app_center_download_buckets.count + ?", b.Count)})}).Create(b).Error
 }

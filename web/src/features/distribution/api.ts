@@ -99,6 +99,14 @@ export type UsageBucket = {
   start_count: number
   online_seconds: number
 }
+export type DownloadBucket = {
+  app_id: number
+  bucket_ts: number
+  version: string
+  platform: string
+  architecture: string
+  count: number
+}
 export type CustomEventBucket = {
   app_id: number
   bucket_ts: number
@@ -296,6 +304,11 @@ export function publishManagedDistributionAnnouncement(
 }
 export function getUsageSummary(id: number, hours: number) {
   return get<UsageBucket[]>(`${adminPath(id)}/usage`, { hours: String(hours) })
+}
+export function getAppCenterDownloads(id: number, hours: number) {
+  return get<DownloadBucket[]>(`${adminPath(id)}/downloads`, {
+    hours: String(hours),
+  })
 }
 export function getUsageRegions(id: number, hours: number) {
   return get<EventRegion[]>(`${adminPath(id)}/usage/regions`, {

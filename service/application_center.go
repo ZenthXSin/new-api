@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -357,8 +358,28 @@ func AppCenterAssetFile(a *model.AppCenterAsset) (*os.File, error) {
 	}
 	return os.Open(filepath.Join(AppCenterStorageRoot, a.StoragePath))
 }
-func IncrementAppCenterDownload(id int64) {
-	_ = model.DB.Model(&model.AppCenterAsset{}).Where("id = ?", id).UpdateColumn("downloads", gorm.Expr("downloads + ?", 1)).Error
+func IncrementAppCenterDownload(asset *model.AppCenterAsset) {
+	if asset == nil {
+		return
+	}
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		var release model.AppCenterRelease
+		if err := tx.First(&release, "id = ?", asset.ReleaseID).Error; err != nil {
+			return err
+		}
+		res := tx.Model(&model.AppCenterAsset{}).Where("id = ?", asset.ID).UpdateColumn("downloads", gorm.Expr("downloads + ?", 1))
+		if res.Error != nil {
+			return res.Error
+		}
+		bucket := &model.AppCenterDownloadBucket{AppID: release.AppID, BucketTs: time.Now().Unix() / 3600 * 3600, Version: release.Version, Platform: asset.Platform, Architecture: asset.Architecture, Count: 1}
+		if err := model.UpsertAppCenterDownloadBucket(tx, bucket); err != nil {
+			common.SysError(fmt.Sprintf("app-center download bucket write failed: app_id=%d asset_id=%d err=%v", release.AppID, asset.ID, err))
+		}
+		return nil
+	})
+	if err != nil {
+		common.SysError(fmt.Sprintf("app-center download counting failed: asset_id=%d err=%v", asset.ID, err))
+	}
 }
 
 func CreateAppCenterAnnouncement(appID int64, in AppCenterAnnouncementInput) (*model.AppCenterAnnouncement, error) {
@@ -659,6 +680,9 @@ func DeleteAppCenterData(appID int64) error {
 			}
 		}
 		if err := tx.Where("app_id = ?", appID).Delete(&model.AppCenterUsageBucket{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("app_id = ?", appID).Delete(&model.AppCenterDownloadBucket{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("app_id = ?", appID).Delete(&model.AppCenterCustomEventBucket{}).Error; err != nil {
