@@ -650,7 +650,7 @@ type CostAggregation struct {
 func AggregateCost(startTimestamp, endTimestamp int64, channel int, modelName, username, tokenName, group string) (CostAggregation, error) {
 	// 营收聚合剔除排除利润统计令牌产生的记录（消费与退款成对出现，消费侧与退款侧都打上标记）
 	query := LOG_DB.Table("logs").Where("type IN ?", []int{LogTypeConsume, LogTypeRefund}).
-		Where("COALESCE(exclude_profit_stat, 0) = 0")
+		Where("COALESCE(exclude_profit_stat, false) = false")
 	if startTimestamp != 0 {
 		query = query.Where("created_at >= ?", startTimestamp)
 	}
