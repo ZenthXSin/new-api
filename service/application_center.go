@@ -168,11 +168,7 @@ func CreateAppCenterApp(name, slug, description string, public, telemetry bool) 
 	if err != nil {
 		return nil, "", err
 	}
-	cipher, err := common.EncryptSecret(secret, "app-center-telemetry-key")
-	if err != nil {
-		return nil, "", err
-	}
-	app := &model.AppCenterApp{Name: name, Slug: slug, Description: description, Public: public, TelemetryEnabled: telemetry, TelemetryKeyID: keyID, TelemetrySecretCiphertext: cipher}
+	app := &model.AppCenterApp{Name: name, Slug: slug, Description: description, Public: public, TelemetryEnabled: telemetry, TelemetryKeyID: keyID, TelemetrySecret: secret}
 	if err := model.DB.Create(app).Error; err != nil {
 		return nil, "", err
 	}
@@ -183,9 +179,14 @@ func RevealAppCenterKey(appID int64) (string, error) {
 	if err := model.DB.First(&a, appID).Error; err != nil {
 		return "", ErrAppCenterNotFound
 	}
-	secret, err := common.DecryptSecret(a.TelemetrySecretCiphertext, "app-center-telemetry-key")
-	if err != nil {
-		return "", err
+	secret := a.TelemetrySecret
+	// 明文为空时回退解密旧密文,兼容历史加密数据
+	if secret == "" {
+		legacy, err := common.DecryptSecret(a.TelemetrySecretCiphertext, "app-center-telemetry-key")
+		if err != nil {
+			return "", err
+		}
+		secret = legacy
 	}
 	return "app_v2." + a.TelemetryKeyID + "." + secret, nil
 }
@@ -206,11 +207,7 @@ func CreateRotatedAppCenterKey(appID int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	c, err := common.EncryptSecret(sec, "app-center-telemetry-key")
-	if err != nil {
-		return "", err
-	}
-	if err = model.DB.Model(&a).Updates(map[string]interface{}{"telemetry_key_id": kid, "telemetry_secret_ciphertext": c}).Error; err != nil {
+	if err = model.DB.Model(&a).Updates(map[string]interface{}{"telemetry_key_id": kid, "telemetry_secret": sec, "telemetry_secret_ciphertext": ""}).Error; err != nil {
 		return "", err
 	}
 	return "app_v2." + kid + "." + sec, nil

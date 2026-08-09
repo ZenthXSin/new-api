@@ -2,6 +2,14 @@
 
 DO NOT send optional commentary
 
+## Deployment Verification
+
+- At the end of any delivery (feature, fix, or change that affects the running product), verify whether the change has been deployed to the production environment, and state the result explicitly.
+- Production deployment facts: production runs as Docker container `new-api-dev` (compose at `/root/new-api-prod/compose.yml`) built from this repo; the running image tag embeds a date+time stamp (e.g. `release-YYYYMMDD-HHMM`). Check with `docker ps` / `docker images` and compare against the latest commit: an image tag older than the commit date, or a commit present in git but in no image, means "not deployed".
+- A change is "deployed" only when a freshly built image containing it is running in production and health checks pass. Committed+pushed code is NOT deployed.
+- After any delivery accepted for production, build the image, deploy it to `new-api-dev`, and verify health checks yourself — do not stop at "offer to deploy". If the change is not deployed, say so explicitly and do not imply otherwise.
+- Keep the deployment cycle self-contained per delivery: commit → push → build image → replace container → health check.
+
 ## Agent Delegation
 
 - Use `sol-advisor:orchestration` for delegated implementation work.

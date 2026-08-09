@@ -28,6 +28,31 @@ func setupAppCenterServiceTest(t *testing.T) (*model.AppCenterApp, string) {
 	return app, token
 }
 
+func TestTelemetryKeyPlaintextPermanent(t *testing.T) {
+	app, token := setupAppCenterServiceTest(t)
+	require.NoError(t, model.DB.First(app, app.ID).Error)
+	require.NotEmpty(t, app.TelemetrySecret)
+	assert.Empty(t, app.TelemetrySecretCiphertext)
+	_, err := VerifyAppCenterBearer("127.0.0.1", "Bearer "+token)
+	require.NoError(t, err)
+	// 篡改 SESSION_SECRET(留下原值供恢复)后 token 仍须有效
+	previousSecret := common.CryptoSecret
+	common.CryptoSecret = "app-center-test-secret-tampered"
+	t.Cleanup(func() { common.CryptoSecret = previousSecret })
+	assert.NotEqual(t, previousSecret, common.CryptoSecret)
+	_, err = VerifyAppCenterBearer("127.0.0.1", "Bearer "+token)
+	require.NoError(t, err)
+	// 密文列是只读列,直接以表作用域写入垃圾值模拟历史坏数据(明文列仍保留)
+	require.NoError(t, model.DB.Table("app_center_apps").Where("id = ?", app.ID).Update("telemetry_secret_ciphertext", "garbage").Error)
+	require.NoError(t, model.DB.First(app, app.ID).Error)
+	assert.Equal(t, "garbage", app.TelemetrySecretCiphertext)
+	_, err = VerifyAppCenterBearer("127.0.0.1", "Bearer "+token)
+	require.NoError(t, err)
+	revealed, err := RevealAppCenterKey(app.ID)
+	require.NoError(t, err)
+	assert.Equal(t, token, revealed)
+}
+
 func TestAppCenterKeyRotationAndTelemetryOnlyBearer(t *testing.T) {
 	app, token := setupAppCenterServiceTest(t)
 	require.NoError(t, model.DB.First(app, app.ID).Error)

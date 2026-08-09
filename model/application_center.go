@@ -29,7 +29,8 @@ type AppCenterApp struct {
 	Public                    bool      `json:"public"`
 	TelemetryEnabled          bool      `json:"telemetry_enabled"`
 	TelemetryKeyID            string    `json:"-" gorm:"size:48;uniqueIndex"`
-	TelemetrySecretCiphertext string    `json:"-" gorm:"type:text"`
+	TelemetrySecret           string    `json:"-" gorm:"type:text"`
+	TelemetrySecretCiphertext string    `json:"-" gorm:"column:telemetry_secret_ciphertext;<-:false"`
 	CreatedAt                 time.Time `json:"created_at"`
 	UpdatedAt                 time.Time `json:"updated_at"`
 }
@@ -206,8 +207,16 @@ func FindAppCenterBearer(keyID, secret string) (*AppCenterApp, error) {
 	if err := DB.Where("telemetry_key_id = ? AND telemetry_enabled = ?", keyID, true).First(&app).Error; err != nil {
 		return nil, err
 	}
-	plain, err := common.DecryptSecret(app.TelemetrySecretCiphertext, "app-center-telemetry-key")
-	if err != nil || plain != secret {
+	// 明文为空时回退解密旧密文,兼容历史加密数据
+	plain := app.TelemetrySecret
+	if plain == "" && app.TelemetrySecretCiphertext != "" {
+		var err error
+		plain, err = common.DecryptSecret(app.TelemetrySecretCiphertext, "app-center-telemetry-key")
+		if err != nil {
+			return nil, gorm.ErrRecordNotFound
+		}
+	}
+	if plain != secret {
 		return nil, gorm.ErrRecordNotFound
 	}
 	return &app, nil
