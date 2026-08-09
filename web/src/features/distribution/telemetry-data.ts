@@ -22,48 +22,71 @@ export function summarizeUsage(
 ): UsageSummary {
   const versions = new Map<
     string,
-    { version: string; starts: number; online_seconds: number }
+    {
+      version: string
+      starts: number
+      online_seconds: number
+      active_users: number
+    }
   >()
   const platforms = new Map<
     string,
-    { platform: string; starts: number; online_seconds: number }
+    {
+      platform: string
+      starts: number
+      online_seconds: number
+      active_users: number
+    }
   >()
   const trend = new Map<
     number,
-    { bucket_ts: number; starts: number; online_seconds: number }
+    {
+      bucket_ts: number
+      starts: number
+      online_seconds: number
+      active_users: number
+    }
   >()
   let starts = 0
   let online = 0
+  let activeUsers = 0
 
   for (const row of rows) {
     starts += row.start_count
     online += row.online_seconds
+    activeUsers += row.active_users
 
     const version = versions.get(row.version) ?? {
       version: row.version,
       starts: 0,
       online_seconds: 0,
+      active_users: 0,
     }
     version.starts += row.start_count
     version.online_seconds += row.online_seconds
+    version.active_users += row.active_users
     versions.set(row.version, version)
 
     const platform = platforms.get(row.platform) ?? {
       platform: row.platform,
       starts: 0,
       online_seconds: 0,
+      active_users: 0,
     }
     platform.starts += row.start_count
     platform.online_seconds += row.online_seconds
+    platform.active_users += row.active_users
     platforms.set(row.platform, platform)
 
     const bucket = trend.get(row.bucket_ts) ?? {
       bucket_ts: row.bucket_ts,
       starts: 0,
       online_seconds: 0,
+      active_users: 0,
     }
     bucket.starts += row.start_count
     bucket.online_seconds += row.online_seconds
+    bucket.active_users += row.active_users
     trend.set(row.bucket_ts, bucket)
   }
 
@@ -84,6 +107,7 @@ export function summarizeUsage(
           bucket_ts: bucketTs,
           starts: 0,
           online_seconds: 0,
+          active_users: 0,
         }
       )
     }
@@ -92,6 +116,7 @@ export function summarizeUsage(
   return {
     starts,
     online_seconds: online,
+    active_users: activeUsers,
     average_session_seconds: starts ? online / starts : 0,
     versions: [...versions.values()].sort((a, b) => b.starts - a.starts),
     platforms: [...platforms.values()].sort((a, b) => b.starts - a.starts),
@@ -137,14 +162,18 @@ export function summarizeDownloads(
         .sort((a, b) => a.bucket_ts - b.bucket_ts)
       if (hours > 0) {
         const end = Math.floor(referenceTimestamp / 3600) * 3600
-        const byBucket = new Map(points.map((point) => [point.bucket_ts, point]))
+        const byBucket = new Map(
+          points.map((point) => [point.bucket_ts, point])
+        )
         points = []
         for (
           let bucketTs = end - (hours - 1) * 3600;
           bucketTs <= end;
           bucketTs += 3600
         ) {
-          points.push(byBucket.get(bucketTs) ?? { bucket_ts: bucketTs, count: 0 })
+          points.push(
+            byBucket.get(bucketTs) ?? { bucket_ts: bucketTs, count: 0 }
+          )
         }
       }
       return { version, total: entry.total, points }
@@ -230,8 +259,8 @@ export function formatTelemetryBucket(timestamp: number): string {
 }
 
 export function rankUsageRows<
-  T extends { starts: number; online_seconds: number },
->(rows: T[], metric: 'starts' | 'online_seconds', limit = 10): T[] {
+  T extends { starts: number; online_seconds: number; active_users: number },
+>(rows: T[], metric: 'starts' | 'active_users', limit = 10): T[] {
   return [...rows]
     .sort((left, right) => right[metric] - left[metric])
     .slice(0, limit)

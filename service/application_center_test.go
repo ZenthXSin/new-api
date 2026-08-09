@@ -20,7 +20,7 @@ func setupAppCenterServiceTest(t *testing.T) (*model.AppCenterApp, string) {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&model.AppCenterSchemaState{}, &model.AppCenterApp{}, &model.AppCenterRelease{}, &model.AppCenterAsset{}, &model.AppCenterAnnouncement{}, &model.AppCenterUsageSession{}, &model.AppCenterUsageBucket{}, &model.AppCenterDownloadBucket{}, &model.AppCenterCustomEventBucket{}, &model.AppCenterEventReceipt{}, &model.AppCenterEventIPReceipt{}))
+	require.NoError(t, db.AutoMigrate(&model.AppCenterSchemaState{}, &model.AppCenterApp{}, &model.AppCenterRelease{}, &model.AppCenterAsset{}, &model.AppCenterAnnouncement{}, &model.AppCenterUsageSession{}, &model.AppCenterUsageBucket{}, &model.AppCenterUsageActiveBucket{}, &model.AppCenterDownloadBucket{}, &model.AppCenterCustomEventBucket{}, &model.AppCenterEventReceipt{}, &model.AppCenterEventIPReceipt{}))
 	model.DB, common.CryptoSecret = db, "app-center-test-secret"
 	t.Cleanup(func() { model.DB, common.CryptoSecret = previousDB, previousSecret; _ = sqlDB.Close() })
 	app, token, err := CreateAppCenterApp("Test", "test-app", "", true, true)
@@ -196,6 +196,35 @@ func TestAppCenterDownloadBucketsAccumulatePerHour(t *testing.T) {
 	var assetRow model.AppCenterAsset
 	require.NoError(t, model.DB.First(&assetRow, asset.ID).Error)
 	assert.Equal(t, int64(2), assetRow.Downloads)
+}
+
+func TestAppCenterUsageActiveUsersDeduplicatePerHour(t *testing.T) {
+	app, _ := setupAppCenterServiceTest(t)
+	base := AppCenterUsageInput{Type: "start", SessionID: "session-a", InstallationID: "install-a", Sequence: 1, Version: "1.0.0", Platform: "linux", Architecture: "amd64"}
+	_, err := RecordAppCenterUsage(app, base)
+	require.NoError(t, err)
+	heartbeat := base
+	heartbeat.Type, heartbeat.Sequence = "heartbeat", 2
+	_, err = RecordAppCenterUsage(app, heartbeat)
+	require.NoError(t, err)
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.AppCenterUsageActiveBucket{}).Where("app_id = ?", app.ID).Count(&count).Error)
+	assert.Equal(t, int64(1), count, "same installation must count once per hour")
+
+	other := base
+	other.SessionID, other.InstallationID = "session-b", "install-b"
+	_, err = RecordAppCenterUsage(app, other)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.AppCenterUsageActiveBucket{}).Where("app_id = ?", app.ID).Count(&count).Error)
+	assert.Equal(t, int64(2), count, "distinct installations must each count")
+
+	var active model.AppCenterUsageActiveBucket
+	require.NoError(t, model.DB.First(&active).Error)
+	assert.Equal(t, time.Now().Unix()/3600*3600, active.BucketTs)
+	assert.Equal(t, "1.0.0", active.Version)
+	assert.Equal(t, "linux", active.Platform)
+	assert.Equal(t, "amd64", active.Architecture)
 }
 
 func TestAppCenterDeleteCleansDownloadBuckets(t *testing.T) {

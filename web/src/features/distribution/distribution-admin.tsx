@@ -691,11 +691,8 @@ function TelemetryUsageView({
   }
   const rankedVersions = rankUsageRows(data.versions ?? [], metric)
   const rankedPlatforms = rankUsageRows(data.platforms ?? [], metric)
-  const valueLabel = metric === 'online_seconds' ? '在线时长' : '启动次数'
-  const formatValue =
-    metric === 'online_seconds'
-      ? formatOnlineDuration
-      : (value: number) => String(value)
+  const valueLabel = metric === 'active_users' ? '使用人数' : '启动次数'
+  const formatValue = (value: number) => String(value)
   return (
     <section className='space-y-5'>
       <h2 className='font-semibold'>{'软件使用'}</h2>
@@ -715,7 +712,7 @@ function TelemetryUsageView({
         value={metric}
         options={[
           { value: 'starts', label: '启动次数' },
-          { value: 'online_seconds', label: '在线时长' },
+          { value: 'active_users', label: '使用人数' },
         ]}
         onChange={onMetricChange}
       />
@@ -723,7 +720,7 @@ function TelemetryUsageView({
       <div className='grid gap-5 lg:grid-cols-2'>
         <TelemetryBarChart
           title={
-            metric === 'online_seconds' ? '版本在线时长排行' : '版本启动排行'
+            metric === 'active_users' ? '版本使用人数排行' : '版本启动排行'
           }
           rows={rankedVersions.map((row) => ({
             label: row.version || '未知版本',
@@ -734,7 +731,7 @@ function TelemetryUsageView({
         />
         <TelemetryBarChart
           title={
-            metric === 'online_seconds' ? '平台在线时长排行' : '平台启动排行'
+            metric === 'active_users' ? '平台使用人数排行' : '平台启动排行'
           }
           rows={rankedPlatforms.map((row) => ({
             label: row.platform || '未知平台',

@@ -15,11 +15,7 @@ import { cn } from '@/lib/utils'
 import { VCHART_OPTION } from '@/lib/vchart'
 
 import type { EventRegion, EventTrend, UsageSummary } from './api'
-import {
-  formatOnlineDuration,
-  formatTelemetryBucket,
-  type DownloadsSummary,
-} from './telemetry-data'
+import { formatTelemetryBucket, type DownloadsSummary } from './telemetry-data'
 
 const CHART_COLORS = [
   '#0f766e',
@@ -75,7 +71,7 @@ function ChartFrame({
   )
 }
 
-export type UsageMetric = 'starts' | 'online_seconds'
+export type UsageMetric = 'starts' | 'active_users'
 
 export function TelemetryUsageTrendChart({
   data,
@@ -91,7 +87,7 @@ export function TelemetryUsageTrendChart({
     if (points.length === 0) return null
     const values = points.map((point) => ({
       bucket_ts: point.bucket_ts,
-      value: metric === 'online_seconds' ? point.online_seconds : point.starts,
+      value: metric === 'active_users' ? point.active_users : point.starts,
     }))
     return {
       type: 'line' as const,
@@ -111,11 +107,8 @@ export function TelemetryUsageTrendChart({
           },
           content: [
             {
-              key: metric === 'online_seconds' ? '在线时长' : '启动次数',
-              value: (datum: { value: number }) =>
-                metric === 'online_seconds'
-                  ? formatOnlineDuration(datum.value)
-                  : String(datum.value),
+              key: metric === 'active_users' ? '使用人数' : '启动次数',
+              value: (datum: { value: number }) => String(datum.value),
             },
           ],
         },
@@ -134,10 +127,7 @@ export function TelemetryUsageTrendChart({
         {
           orient: 'left',
           label: {
-            formatMethod: (value: number | string) =>
-              metric === 'online_seconds'
-                ? formatOnlineDuration(Number(value))
-                : String(value),
+            formatMethod: (value: number | string) => String(value),
             style: { fill: tokens.text, fontSize: 10 },
           },
           grid: {
@@ -152,7 +142,7 @@ export function TelemetryUsageTrendChart({
 
   return (
     <ChartFrame
-      title={metric === 'online_seconds' ? '在线时长趋势' : '启动次数趋势'}
+      title={metric === 'active_users' ? '使用人数趋势' : '启动次数趋势'}
       icon={<LineChart className='size-4' aria-hidden='true' />}
     >
       {points.length === 0 ? (
@@ -307,8 +297,7 @@ export function DownloadsTrendChart({ data }: { data: DownloadsSummary }) {
     [series]
   )
   const maxPoints = useMemo(
-    () =>
-      series.reduce((max, entry) => Math.max(max, entry.points.length), 0),
+    () => series.reduce((max, entry) => Math.max(max, entry.points.length), 0),
     [series]
   )
   const spec = useMemo(() => {

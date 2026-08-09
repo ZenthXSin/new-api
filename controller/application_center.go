@@ -160,6 +160,7 @@ func DownloadAppCenterAsset(c *gin.Context) {
 	c.Header("ETag", `"`+asset.SHA256+`"`)
 	c.Header("Last-Modified", asset.CreatedAt.UTC().Format(http.TimeFormat))
 	c.Header("Accept-Ranges", "bytes")
+	c.Header("Content-Disposition", "attachment; filename="+strconv.Quote(asset.Filename))
 	http.ServeContent(c.Writer, c.Request, asset.Filename, asset.CreatedAt, f)
 	if c.Request.Method == http.MethodGet {
 		service.IncrementAppCenterDownload(asset)
@@ -486,6 +487,26 @@ func GetAppCenterUsageDashboard(c *gin.Context) {
 	if err := model.DB.Where("app_id = ? AND bucket_ts >= ?", id, time.Now().Add(-time.Duration(hours)*time.Hour).Unix()).Order("bucket_ts ASC").Find(&rows).Error; err != nil {
 		appCenterError(c, 500)
 		return
+	}
+	var activeRows []struct {
+		BucketTs     int64
+		Version      string
+		Platform     string
+		Architecture string
+		Users        int64
+	}
+	if err := model.DB.Table("app_center_usage_active_buckets").Select("bucket_ts, version, platform, architecture, COUNT(*) AS users").Where("app_id = ? AND bucket_ts >= ?", id, time.Now().Add(-time.Duration(hours)*time.Hour).Unix()).Group("bucket_ts, version, platform, architecture").Scan(&activeRows).Error; err != nil {
+		appCenterError(c, 500)
+		return
+	}
+	activeByKey := make(map[string]int64, len(activeRows))
+	for _, row := range activeRows {
+		key := fmt.Sprintf("%d|%s|%s|%s", row.BucketTs, row.Version, row.Platform, row.Architecture)
+		activeByKey[key] = row.Users
+	}
+	for i := range rows {
+		key := fmt.Sprintf("%d|%s|%s|%s", rows[i].BucketTs, rows[i].Version, rows[i].Platform, rows[i].Architecture)
+		rows[i].ActiveUsers = activeByKey[key]
 	}
 	appCenterJSON(c, 200, rows)
 }

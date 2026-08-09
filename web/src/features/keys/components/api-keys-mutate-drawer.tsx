@@ -62,8 +62,8 @@ import {
 } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { useStatus } from '@/hooks/use-status'
 import { useIsAdmin } from '@/hooks/use-admin'
+import { useStatus } from '@/hooks/use-status'
 import { getUserModels, getUserGroups } from '@/lib/api'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { cn } from '@/lib/utils'
@@ -588,9 +588,7 @@ export function ApiKeysMutateDrawer({
                         control={form.control}
                         name='exclude_profit_stat'
                         render={({ field }) => (
-                          <FormItem
-                            className={sideDrawerSwitchItemClassName()}
-                          >
+                          <FormItem className={sideDrawerSwitchItemClassName()}>
                             <div className='flex flex-col gap-0.5'>
                               <FormLabel className='text-sm'>
                                 {t('Exclude from profit statistics')}

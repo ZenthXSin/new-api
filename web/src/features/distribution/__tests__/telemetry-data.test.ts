@@ -28,6 +28,7 @@ test('aggregates usage dimensions into a complete hourly trend', () => {
       architecture: 'amd64',
       start_count: 2,
       online_seconds: 120,
+      active_users: 2,
     },
     {
       app_id: 1,
@@ -37,6 +38,7 @@ test('aggregates usage dimensions into a complete hourly trend', () => {
       architecture: 'amd64',
       start_count: 3,
       online_seconds: 180,
+      active_users: 3,
     },
     {
       app_id: 1,
@@ -46,6 +48,7 @@ test('aggregates usage dimensions into a complete hourly trend', () => {
       architecture: 'amd64',
       start_count: 1,
       online_seconds: 60,
+      active_users: 1,
     },
   ]
 
@@ -53,10 +56,11 @@ test('aggregates usage dimensions into a complete hourly trend', () => {
 
   assert.equal(result.starts, 6)
   assert.equal(result.online_seconds, 360)
+  assert.equal(result.active_users, 6)
   assert.deepEqual(result.trend, [
-    { bucket_ts: 3600, starts: 5, online_seconds: 300 },
-    { bucket_ts: 7200, starts: 0, online_seconds: 0 },
-    { bucket_ts: 10800, starts: 1, online_seconds: 60 },
+    { bucket_ts: 3600, starts: 5, online_seconds: 300, active_users: 5 },
+    { bucket_ts: 7200, starts: 0, online_seconds: 0, active_users: 0 },
+    { bucket_ts: 10800, starts: 1, online_seconds: 60, active_users: 1 },
   ])
   assert.equal(result.versions?.[0].version, '1.1.0')
 })
@@ -115,16 +119,16 @@ test('formats online seconds as a compact Chinese duration', () => {
 
 test('ranks usage and event rows by the selected metric', () => {
   const usageRows = [
-    { name: 'starts-first', starts: 20, online_seconds: 30 },
-    { name: 'online-first', starts: 2, online_seconds: 300 },
+    { name: 'starts-first', starts: 20, online_seconds: 30, active_users: 5 },
+    { name: 'users-first', starts: 2, online_seconds: 300, active_users: 30 },
   ]
   assert.deepEqual(
     rankUsageRows(usageRows, 'starts').map((row) => row.name),
-    ['starts-first', 'online-first']
+    ['starts-first', 'users-first']
   )
   assert.deepEqual(
-    rankUsageRows(usageRows, 'online_seconds').map((row) => row.name),
-    ['online-first', 'starts-first']
+    rankUsageRows(usageRows, 'active_users').map((row) => row.name),
+    ['users-first', 'starts-first']
   )
 
   const eventRows = [

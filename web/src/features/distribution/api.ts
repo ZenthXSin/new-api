@@ -63,14 +63,26 @@ export type DistributionApp = {
 export type UsageSummary = {
   starts: number
   online_seconds: number
+  active_users: number
   average_session_seconds: number
-  versions?: Array<{ version: string; starts: number; online_seconds: number }>
+  versions?: Array<{
+    version: string
+    starts: number
+    online_seconds: number
+    active_users: number
+  }>
   platforms?: Array<{
     platform: string
     starts: number
     online_seconds: number
+    active_users: number
   }>
-  trend?: Array<{ bucket_ts: number; starts: number; online_seconds: number }>
+  trend?: Array<{
+    bucket_ts: number
+    starts: number
+    online_seconds: number
+    active_users: number
+  }>
 }
 
 export type CustomEventsSummary = {
@@ -98,6 +110,7 @@ export type UsageBucket = {
   architecture: string
   start_count: number
   online_seconds: number
+  active_users: number
 }
 export type DownloadBucket = {
   app_id: number

@@ -24,7 +24,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const AppCenterStorageRoot = "/data/app-center"
+var AppCenterStorageRoot = "/data/app-center"
 const AppCenterMaxAssetBytes int64 = 512 << 20
 const AppCenterMaxEventBuckets int64 = 10000
 
@@ -576,7 +576,11 @@ func RecordAppCenterUsage(app *model.AppCenterApp, in AppCenterUsageInput, sourc
 		if in.Type == "start" {
 			b.StartCount = 1
 		}
-		return model.UpsertAppCenterUsageBucket(tx, b)
+		if err := model.UpsertAppCenterUsageBucket(tx, b); err != nil {
+			return err
+		}
+		ab := &model.AppCenterUsageActiveBucket{AppID: app.ID, BucketTs: b.BucketTs, InstallationHash: ih, Version: s.Version, Platform: s.Platform, Architecture: s.Architecture}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(ab).Error
 	})
 	return elapsed, err
 }

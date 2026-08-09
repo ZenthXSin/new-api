@@ -121,9 +121,22 @@ type AppCenterUsageBucket struct {
 	Architecture  string `json:"architecture" gorm:"size:32;uniqueIndex:idx_app_center_usage_bucket,priority:5"`
 	StartCount    int64  `json:"start_count"`
 	OnlineSeconds int64  `json:"online_seconds"`
+	ActiveUsers   int64  `json:"active_users"`
 }
 
 func (AppCenterUsageBucket) TableName() string { return "app_center_usage_buckets" }
+
+type AppCenterUsageActiveBucket struct {
+	ID               int64  `json:"id" gorm:"primaryKey"`
+	AppID            int64  `json:"app_id" gorm:"uniqueIndex:idx_app_center_usage_active,priority:1"`
+	BucketTs         int64  `json:"bucket_ts" gorm:"uniqueIndex:idx_app_center_usage_active,priority:2;index"`
+	InstallationHash string `json:"-" gorm:"size:64;uniqueIndex:idx_app_center_usage_active,priority:3;index"`
+	Version          string `json:"version" gorm:"size:64;uniqueIndex:idx_app_center_usage_active,priority:4"`
+	Platform         string `json:"platform" gorm:"size:32;uniqueIndex:idx_app_center_usage_active,priority:5"`
+	Architecture     string `json:"architecture" gorm:"size:32;uniqueIndex:idx_app_center_usage_active,priority:6"`
+}
+
+func (AppCenterUsageActiveBucket) TableName() string { return "app_center_usage_active_buckets" }
 
 type AppCenterDownloadBucket struct {
 	ID           int64  `json:"id" gorm:"primaryKey"`

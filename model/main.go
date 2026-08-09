@@ -261,7 +261,7 @@ func InitLogDB() (err error) {
 }
 
 func migrateDB() error {
-	if err := DB.AutoMigrate(&AppCenterSchemaState{}, &AppCenterApp{}, &AppCenterRelease{}, &AppCenterAsset{}, &AppCenterAnnouncement{}, &AppCenterUsageSession{}, &AppCenterUsageBucket{}, &AppCenterDownloadBucket{}, &AppCenterCustomEventBucket{}, &AppCenterEventReceipt{}, &AppCenterEventIPReceipt{}); err != nil {
+	if err := DB.AutoMigrate(&AppCenterSchemaState{}, &AppCenterApp{}, &AppCenterRelease{}, &AppCenterAsset{}, &AppCenterAnnouncement{}, &AppCenterUsageSession{}, &AppCenterUsageBucket{}, &AppCenterUsageActiveBucket{}, &AppCenterDownloadBucket{}, &AppCenterCustomEventBucket{}, &AppCenterEventReceipt{}, &AppCenterEventIPReceipt{}); err != nil {
 		return err
 	}
 	if err := EnsureAppCenterSchemaState(); err != nil {
@@ -332,7 +332,7 @@ func migrateDB() error {
 }
 
 func migrateDBFast() error {
-	if err := DB.AutoMigrate(&AppCenterSchemaState{}, &AppCenterApp{}, &AppCenterRelease{}, &AppCenterAsset{}, &AppCenterAnnouncement{}, &AppCenterUsageSession{}, &AppCenterUsageBucket{}, &AppCenterDownloadBucket{}, &AppCenterCustomEventBucket{}, &AppCenterEventReceipt{}, &AppCenterEventIPReceipt{}); err != nil {
+	if err := DB.AutoMigrate(&AppCenterSchemaState{}, &AppCenterApp{}, &AppCenterRelease{}, &AppCenterAsset{}, &AppCenterAnnouncement{}, &AppCenterUsageSession{}, &AppCenterUsageBucket{}, &AppCenterUsageActiveBucket{}, &AppCenterDownloadBucket{}, &AppCenterCustomEventBucket{}, &AppCenterEventReceipt{}, &AppCenterEventIPReceipt{}); err != nil {
 		return err
 	}
 	if err := EnsureAppCenterSchemaState(); err != nil {
