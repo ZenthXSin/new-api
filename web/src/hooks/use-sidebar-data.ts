@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Activity,
+  Banknote,
   Box,
   CreditCard,
   FileText,
@@ -150,6 +151,11 @@ export function useSidebarData(): SidebarData {
             title: t('Subscriptions'),
             url: '/subscriptions',
             icon: CreditCard,
+          },
+          {
+            title: t('Finance'),
+            url: '/finance',
+            icon: Banknote,
           },
           {
             title: t('System Info'),
