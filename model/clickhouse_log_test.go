@@ -86,6 +86,7 @@ func TestClickHouseLogCreateTableSQL(t *testing.T) {
 	assert.Contains(t, withoutTTL, "base_cost_quota Int32 DEFAULT 0")
 	assert.Contains(t, withoutTTL, "cost_quota Int32 DEFAULT 0")
 	assert.Contains(t, withoutTTL, "cost_multiplier_snapshot Float64 DEFAULT 0")
+	assert.Contains(t, withoutTTL, "exclude_profit_stat UInt8 DEFAULT 0")
 	assert.NotContains(t, withoutTTL, "TTL ")
 
 	withTTL := clickHouseLogCreateTableSQL(30)
@@ -95,10 +96,11 @@ func TestClickHouseLogCreateTableSQL(t *testing.T) {
 
 func TestClickHouseLogCostColumnMigrationSQL(t *testing.T) {
 	statements := clickHouseLogCostColumnMigrationSQL()
-	require.Len(t, statements, 3)
+	require.Len(t, statements, 4)
 	for _, statement := range statements {
 		assert.Contains(t, statement, "ALTER TABLE logs ADD COLUMN IF NOT EXISTS")
 	}
+	assert.Contains(t, statements[3], "exclude_profit_stat UInt8 DEFAULT 0")
 }
 
 func TestClickHouseCreateTableHasTTL(t *testing.T) {

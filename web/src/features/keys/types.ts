@@ -45,6 +45,7 @@ export const apiKeySchema = z.object({
   model_limits_enabled: z.boolean(),
   model_limits: z.string().nullish().default(''),
   allow_ips: z.string().nullish().default(''),
+  exclude_profit_stat: z.boolean().optional().default(false),
 })
 
 export type ApiKey = z.infer<typeof apiKeySchema>
@@ -92,6 +93,8 @@ export interface ApiKeyFormData {
   allow_ips: string
   group: string
   cross_group_retry: boolean
+  /** 管理员字段：是否参与利润统计；非管理员请求不应携带该字段 */
+  exclude_profit_stat?: boolean
 }
 
 // ============================================================================

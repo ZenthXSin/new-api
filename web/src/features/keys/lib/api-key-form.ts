@@ -22,7 +22,7 @@ import { z } from 'zod'
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 
 import { DEFAULT_GROUP } from '../constants'
-import { type ApiKeyFormData, type ApiKey } from '../types'
+import type { ApiKeyFormData, ApiKey } from '../types'
 
 // ============================================================================
 // Form Schema
@@ -39,6 +39,8 @@ export function getApiKeyFormSchema(t: TFunction) {
       allow_ips: z.string().optional(),
       group: z.string().optional(),
       cross_group_retry: z.boolean().optional(),
+      // 管理员专属字段：普通用户表单不含该控件，提交时也不会携带
+      exclude_profit_stat: z.boolean().optional(),
       tokenCount: z.number().min(1).optional(),
     })
     .superRefine((data, ctx) => {
@@ -74,6 +76,7 @@ export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   allow_ips: '',
   group: DEFAULT_GROUP,
   cross_group_retry: true,
+  exclude_profit_stat: false,
   tokenCount: 1,
 }
 
@@ -92,10 +95,13 @@ export function getApiKeyFormDefaultValues(
 // ============================================================================
 
 /**
- * Transform form data to API payload
+ * Transform form data to API payload.
+ * exclude_profit_stat 为管理员专属字段：仅当 includeExcludeProfitStat 为 true
+ * 时才会携带，普通用户提交的请求不会包含该字段。
  */
 export function transformFormDataToPayload(
-  data: ApiKeyFormValues
+  data: ApiKeyFormValues,
+  includeExcludeProfitStat = false
 ): ApiKeyFormData {
   return {
     name: data.name,
@@ -111,6 +117,9 @@ export function transformFormDataToPayload(
     allow_ips: data.allow_ips || '',
     group: data.group || '',
     cross_group_retry: data.group === 'auto' ? !!data.cross_group_retry : false,
+    ...(includeExcludeProfitStat
+      ? { exclude_profit_stat: !!data.exclude_profit_stat }
+      : {}),
   }
 }
 
@@ -136,6 +145,7 @@ export function transformApiKeyToFormDefaults(
     allow_ips: apiKey.allow_ips || '',
     group: apiKey.group || DEFAULT_GROUP,
     cross_group_retry: !!apiKey.cross_group_retry,
+    exclude_profit_stat: !!apiKey.exclude_profit_stat,
     tokenCount: 1,
   }
 }

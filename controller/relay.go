@@ -860,6 +860,7 @@ func RelayTask(c *gin.Context) {
 			CostMultiplier:       costSnapshot.Multiplier,
 			SettledBaseCostQuota: costSnapshot.BaseCostQuota,
 			SettledCostQuota:     costSnapshot.CostQuota,
+			ExcludeProfitStat:    relayInfo.ExcludeProfitStat,
 		}
 		task.Quota = result.Quota
 		task.Data = result.TaskData

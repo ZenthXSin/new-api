@@ -345,6 +345,7 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 		c.Set("id", token.UserId)
 		c.Set("token_id", token.Id)
 		c.Set("token_key", token.Key)
+		common.SetContextKey(c, constant.ContextKeyTokenExcludeProfitStat, token.ExcludeProfitStat)
 		c.Next()
 	}
 }
@@ -502,6 +503,7 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 	}
 	common.SetContextKey(c, constant.ContextKeyTokenGroup, token.Group)
 	common.SetContextKey(c, constant.ContextKeyTokenCrossGroupRetry, token.CrossGroupRetry)
+	common.SetContextKey(c, constant.ContextKeyTokenExcludeProfitStat, token.ExcludeProfitStat)
 	if len(parts) > 1 {
 		if model.IsAdmin(token.UserId) {
 			c.Set("specific_channel_id", parts[1])

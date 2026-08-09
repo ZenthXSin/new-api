@@ -445,6 +445,7 @@ func clickHouseLogCostColumnMigrationSQL() []string {
 		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS base_cost_quota Int32 DEFAULT 0",
 		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS cost_quota Int32 DEFAULT 0",
 		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS cost_multiplier_snapshot Float64 DEFAULT 0",
+		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS exclude_profit_stat UInt8 DEFAULT 0",
 	}
 }
 
@@ -496,7 +497,8 @@ CREATE TABLE IF NOT EXISTS logs (
 	other String DEFAULT '',
 	base_cost_quota Int32 DEFAULT 0,
 	cost_quota Int32 DEFAULT 0,
-	cost_multiplier_snapshot Float64 DEFAULT 0
+	cost_multiplier_snapshot Float64 DEFAULT 0,
+	exclude_profit_stat UInt8 DEFAULT 0
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime(created_at))

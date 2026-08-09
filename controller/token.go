@@ -14,21 +14,29 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func buildMaskedTokenResponse(token *model.Token) *model.Token {
+func buildMaskedTokenResponse(token *model.Token, isAdmin bool) *model.Token {
 	if token == nil {
 		return nil
 	}
 	maskedToken := *token
 	maskedToken.Key = token.GetMaskedKey()
+	if !isAdmin {
+		// 排除利润统计仅管理员可见，非管理员响应中恒为 false
+		maskedToken.ExcludeProfitStat = false
+	}
 	return &maskedToken
 }
 
-func buildMaskedTokenResponses(tokens []*model.Token) []*model.Token {
+func buildMaskedTokenResponses(tokens []*model.Token, isAdmin bool) []*model.Token {
 	maskedTokens := make([]*model.Token, 0, len(tokens))
 	for _, token := range tokens {
-		maskedTokens = append(maskedTokens, buildMaskedTokenResponse(token))
+		maskedTokens = append(maskedTokens, buildMaskedTokenResponse(token, isAdmin))
 	}
 	return maskedTokens
+}
+
+func isTokenAdmin(c *gin.Context) bool {
+	return c.GetInt("role") >= common.RoleAdminUser
 }
 
 func GetAllTokens(c *gin.Context) {
@@ -41,7 +49,7 @@ func GetAllTokens(c *gin.Context) {
 	}
 	total, _ := model.CountUserTokens(userId)
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(buildMaskedTokenResponses(tokens))
+	pageInfo.SetItems(buildMaskedTokenResponses(tokens, isTokenAdmin(c)))
 	common.ApiSuccess(c, pageInfo)
 }
 
@@ -58,7 +66,7 @@ func SearchTokens(c *gin.Context) {
 		return
 	}
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(buildMaskedTokenResponses(tokens))
+	pageInfo.SetItems(buildMaskedTokenResponses(tokens, isTokenAdmin(c)))
 	common.ApiSuccess(c, pageInfo)
 }
 
@@ -74,7 +82,7 @@ func GetToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, buildMaskedTokenResponse(token))
+	common.ApiSuccess(c, buildMaskedTokenResponse(token, isTokenAdmin(c)))
 }
 
 func GetTokenKey(c *gin.Context) {
@@ -171,6 +179,10 @@ func AddToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	// 排除利润统计仅管理员可配置：普通用户提交的该字段静默忽略
+	if !isTokenAdmin(c) {
+		token.ExcludeProfitStat = false
+	}
 	if len(token.Name) > 50 {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
@@ -221,6 +233,7 @@ func AddToken(c *gin.Context) {
 		AllowIps:           token.AllowIps,
 		Group:              token.Group,
 		CrossGroupRetry:    token.CrossGroupRetry,
+		ExcludeProfitStat:  token.ExcludeProfitStat,
 	}
 	err = cleanToken.Insert()
 	if err != nil {
@@ -299,6 +312,10 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		// 排除利润统计仅管理员可配置：非管理员不修改原值
+		if isTokenAdmin(c) {
+			cleanToken.ExcludeProfitStat = token.ExcludeProfitStat
+		}
 	}
 	err = cleanToken.Update()
 	if err != nil {
@@ -308,7 +325,7 @@ func UpdateToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    buildMaskedTokenResponse(cleanToken),
+		"data":    buildMaskedTokenResponse(cleanToken, isTokenAdmin(c)),
 	})
 }
 

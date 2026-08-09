@@ -66,6 +66,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		BaseCostQuota:          costSnapshot.BaseCostQuota,
 		CostQuota:              costSnapshot.CostQuota,
 		CostMultiplierSnapshot: costSnapshot.Multiplier,
+		ExcludeProfitStat:      info.ExcludeProfitStat,
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
@@ -232,6 +233,13 @@ func taskModelName(task *model.Task) string {
 	return task.Properties.OriginModelName
 }
 
+// taskExcludeProfitStat 返回任务提交时冻结的"排除利润统计"标记。
+// 结算/退款日志必须与提交时的消费日志口径一致（冻结在 BillingContext 中），
+// 避免"消费被排除而退款未排除"导致营收聚合反转。
+func taskExcludeProfitStat(task *model.Task) bool {
+	return task != nil && task.PrivateData.BillingContext != nil && task.PrivateData.BillingContext.ExcludeProfitStat
+}
+
 // RefundTaskQuota 统一的任务失败退款逻辑。
 // 当异步任务失败时，将预扣的 quota 退还给用户（支持钱包和订阅），并退还令牌额度。
 // 返回资金来源是否已成功退还；失败时保留 quota，供显式重试或人工对账。
@@ -272,6 +280,7 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 		BaseCostQuota:          costSnapshot.BaseCostQuota,
 		CostQuota:              costSnapshot.CostQuota,
 		CostMultiplierSnapshot: costSnapshot.Multiplier,
+		ExcludeProfitStat:      taskExcludeProfitStat(task),
 	})
 
 	// 4. 资金退款完成后再清除持久化标记。
@@ -383,6 +392,7 @@ func recalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		BaseCostQuota:          costSnapshot.BaseCostQuota,
 		CostQuota:              costSnapshot.CostQuota,
 		CostMultiplierSnapshot: costSnapshot.Multiplier,
+		ExcludeProfitStat:      taskExcludeProfitStat(task),
 	})
 }
 

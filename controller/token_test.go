@@ -16,6 +16,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -537,4 +539,148 @@ func TestGetTokenKeyRequiresOwnershipAndReturnsFullKey(t *testing.T) {
 	if strings.Contains(unauthorizedRecorder.Body.String(), token.Key) {
 		t.Fatalf("unauthorized key response leaked raw token key: %s", unauthorizedRecorder.Body.String())
 	}
+}
+
+type tokenExcludeProfitResponseItem struct {
+	ID                int  `json:"id"`
+	ExcludeProfitStat bool `json:"exclude_profit_stat"`
+}
+
+func TestAddTokenNonAdminForcesExcludeProfitStatFalse(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/", map[string]any{
+		"name":                "user-token",
+		"unlimited_quota":     true,
+		"expired_time":        -1,
+		"cross_group_retry":   false,
+		"exclude_profit_stat": true,
+	}, 1)
+	AddToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "expected success response, got message: %s", response.Message)
+
+	var stored model.Token
+	require.NoError(t, db.First(&stored, "user_id = ?", 1).Error)
+	assert.False(t, stored.ExcludeProfitStat, "non-admin submitted exclude_profit_stat must be ignored")
+}
+
+func TestAddTokenAdminKeepsExcludeProfitStat(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/", map[string]any{
+		"name":                "admin-token",
+		"unlimited_quota":     true,
+		"expired_time":        -1,
+		"cross_group_retry":   false,
+		"exclude_profit_stat": true,
+	}, 1)
+	ctx.Set("role", common.RoleAdminUser)
+	AddToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "expected success response, got message: %s", response.Message)
+
+	var stored model.Token
+	require.NoError(t, db.First(&stored, "user_id = ?", 1).Error)
+	assert.True(t, stored.ExcludeProfitStat, "admin submitted exclude_profit_stat must be preserved")
+}
+
+func TestGetAllTokensHidesExcludeProfitStatForNonAdmin(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	excluded := seedToken(t, db, 1, "excluded-token", "abcd1234efgh5678")
+	require.NoError(t, db.Model(&model.Token{}).Where("id = ?", excluded.Id).Update("exclude_profit_stat", true).Error)
+
+	userCtx, userRecorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/?p=1&size=10", nil, 1)
+	GetAllTokens(userCtx)
+	userResponse := decodeAPIResponse(t, userRecorder)
+	require.True(t, userResponse.Success)
+
+	var userPage struct {
+		Items []tokenExcludeProfitResponseItem `json:"items"`
+	}
+	require.NoError(t, common.Unmarshal(userResponse.Data, &userPage))
+	require.Len(t, userPage.Items, 1)
+	assert.False(t, userPage.Items[0].ExcludeProfitStat, "non-admin must always see exclude_profit_stat=false")
+
+	adminCtx, adminRecorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/?p=1&size=10", nil, 1)
+	adminCtx.Set("role", common.RoleAdminUser)
+	GetAllTokens(adminCtx)
+	adminResponse := decodeAPIResponse(t, adminRecorder)
+	require.True(t, adminResponse.Success)
+
+	var adminPage struct {
+		Items []tokenExcludeProfitResponseItem `json:"items"`
+	}
+	require.NoError(t, common.Unmarshal(adminResponse.Data, &adminPage))
+	require.Len(t, adminPage.Items, 1)
+	assert.True(t, adminPage.Items[0].ExcludeProfitStat, "admin must see the real exclude_profit_stat value")
+}
+
+func TestGetTokenHidesExcludeProfitStatForNonAdmin(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	token := seedToken(t, db, 1, "detail-excluded", "abcd1234efgh5678")
+	require.NoError(t, db.Model(&model.Token{}).Where("id = ?", token.Id).Update("exclude_profit_stat", true).Error)
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/"+strconv.Itoa(token.Id), nil, 1)
+	ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(token.Id)}}
+	GetToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success)
+
+	var detail tokenExcludeProfitResponseItem
+	require.NoError(t, common.Unmarshal(response.Data, &detail))
+	assert.False(t, detail.ExcludeProfitStat, "non-admin must always see exclude_profit_stat=false")
+}
+
+func TestUpdateTokenExcludeProfitStatAdminOnly(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	token := seedToken(t, db, 1, "update-excluded", "abcd1234efgh5678")
+	require.NoError(t, db.Model(&model.Token{}).Where("id = ?", token.Id).Update("exclude_profit_stat", true).Error)
+
+	// 非管理员提交 true 被忽略，原值保持不变
+	userBody := map[string]any{
+		"id":                   token.Id,
+		"name":                 "updated-by-user",
+		"expired_time":         -1,
+		"remain_quota":         100,
+		"unlimited_quota":      true,
+		"model_limits_enabled": false,
+		"model_limits":         "",
+		"group":                "default",
+		"cross_group_retry":    false,
+		"exclude_profit_stat":  true,
+	}
+	userCtx, userRecorder := newAuthenticatedContext(t, http.MethodPut, "/api/token/", userBody, 1)
+	UpdateToken(userCtx)
+	userResponse := decodeAPIResponse(t, userRecorder)
+	require.True(t, userResponse.Success, "expected success response, got message: %s", userResponse.Message)
+
+	var stored model.Token
+	require.NoError(t, db.First(&stored, "id = ?", token.Id).Error)
+	assert.True(t, stored.ExcludeProfitStat, "non-admin update must not change exclude_profit_stat")
+
+	// 管理员提交 false 生效
+	adminBody := map[string]any{
+		"id":                   token.Id,
+		"name":                 "updated-by-admin",
+		"expired_time":         -1,
+		"remain_quota":         100,
+		"unlimited_quota":      true,
+		"model_limits_enabled": false,
+		"model_limits":         "",
+		"group":                "default",
+		"cross_group_retry":    false,
+		"exclude_profit_stat":  false,
+	}
+	adminCtx, adminRecorder := newAuthenticatedContext(t, http.MethodPut, "/api/token/", adminBody, 1)
+	adminCtx.Set("role", common.RoleAdminUser)
+	UpdateToken(adminCtx)
+	adminResponse := decodeAPIResponse(t, adminRecorder)
+	require.True(t, adminResponse.Success, "expected success response, got message: %s", adminResponse.Message)
+
+	require.NoError(t, db.First(&stored, "id = ?", token.Id).Error)
+	assert.False(t, stored.ExcludeProfitStat, "admin update must apply exclude_profit_stat")
 }

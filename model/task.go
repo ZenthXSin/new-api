@@ -128,6 +128,9 @@ type TaskBillingContext struct {
 	// They make each subsequent adjustment a delta without consulting current settings.
 	SettledBaseCostQuota int `json:"settled_base_cost_quota,omitempty"`
 	SettledCostQuota     int `json:"settled_cost_quota,omitempty"`
+	// ExcludeProfitStat 提交时冻结的"排除利润统计"标记：异步任务的结算/退款日志
+	// 继承该标记，保证与提交时的消费日志口径一致（仅管理员令牌可配置，默认 false）。
+	ExcludeProfitStat bool `json:"exclude_profit_stat,omitempty"`
 }
 
 // GetUpstreamTaskID 获取上游真实 task ID（用于与 provider 通信）

@@ -23,6 +23,9 @@ type Midjourney struct {
 	Quota       int    `json:"quota"`
 	Buttons     string `json:"buttons"`
 	Properties  string `json:"properties"`
+	// ExcludeProfitStat 提交时冻结的"排除利润统计"标记：任务失败退款日志继承该标记。
+	// 仅凭据过滤用途，不通过 JSON 直接输出（GetUserMidjourney 等接口直接序列化本结构）。
+	ExcludeProfitStat bool `json:"-"`
 }
 
 // TaskQueryParams 用于包含所有搜索条件的结构体，可以根据需求添加更多字段

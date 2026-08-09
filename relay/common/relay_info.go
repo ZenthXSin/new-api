@@ -82,14 +82,17 @@ type TokenCountMeta struct {
 }
 
 type RelayInfo struct {
-	Timing            *common.RelayTiming
-	TokenId           int
-	TokenKey          string
-	TokenGroup        string
-	UserId            int
-	UsingGroup        string // 使用的分组，当auto跨分组重试时，会变动
-	UserGroup         string // 用户所在分组
-	TokenUnlimited    bool
+	Timing         *common.RelayTiming
+	TokenId        int
+	TokenKey       string
+	TokenGroup     string
+	UserId         int
+	UsingGroup     string // 使用的分组，当auto跨分组重试时，会变动
+	UserGroup      string // 用户所在分组
+	TokenUnlimited bool
+	// ExcludeProfitStat 该令牌排除利润统计：消费/退款日志仍完整记录，
+	// 但不进入 revenue/cost 等营收聚合。
+	ExcludeProfitStat bool
 	StartTime         time.Time
 	FirstResponseTime time.Time
 	isFirstResponse   bool
@@ -497,16 +500,16 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 
 		OriginModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
 
-		TokenId:        common.GetContextKeyInt(c, constant.ContextKeyTokenId),
-		TokenKey:       common.GetContextKeyString(c, constant.ContextKeyTokenKey),
-		TokenUnlimited: common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
-		TokenGroup:     tokenGroup,
-
-		isFirstResponse: true,
-		RelayMode:       relayconstant.Path2RelayMode(c.Request.URL.Path),
-		RequestURLPath:  c.Request.URL.String(),
-		RequestHeaders:  cloneRequestHeaders(c),
-		IsStream:        isStream,
+		TokenId:           common.GetContextKeyInt(c, constant.ContextKeyTokenId),
+		TokenKey:          common.GetContextKeyString(c, constant.ContextKeyTokenKey),
+		TokenUnlimited:    common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
+		TokenGroup:        tokenGroup,
+		ExcludeProfitStat: common.GetContextKeyBool(c, constant.ContextKeyTokenExcludeProfitStat),
+		isFirstResponse:   true,
+		RelayMode:         relayconstant.Path2RelayMode(c.Request.URL.Path),
+		RequestURLPath:    c.Request.URL.String(),
+		RequestHeaders:    cloneRequestHeaders(c),
+		IsStream:          isStream,
 
 		StartTime:         startTime,
 		FirstResponseTime: startTime.Add(-time.Second),

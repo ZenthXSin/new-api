@@ -290,6 +290,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		BaseCostQuota:          costSnapshot.BaseCostQuota,
 		CostQuota:              costSnapshot.CostQuota,
 		CostMultiplierSnapshot: costSnapshot.Multiplier,
+		ExcludeProfitStat:      relayInfo.ExcludeProfitStat,
 	})
 }
 
@@ -422,6 +423,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		BaseCostQuota:          costSnapshot.BaseCostQuota,
 		CostQuota:              costSnapshot.CostQuota,
 		CostMultiplierSnapshot: costSnapshot.Multiplier,
+		ExcludeProfitStat:      relayInfo.ExcludeProfitStat,
 	})
 	gopool.Go(func() {
 		perfmetrics.RecordRelaySample(relayInfo, true, int64(usage.CompletionTokens))

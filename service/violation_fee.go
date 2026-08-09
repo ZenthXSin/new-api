@@ -148,16 +148,17 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 	}
 
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
-		ChannelId:      relayInfo.ChannelId,
-		ModelName:      relayInfo.OriginModelName,
-		TokenName:      tokenName,
-		Quota:          feeQuota,
-		Content:        "Violation fee charged",
-		TokenId:        relayInfo.TokenId,
-		UseTimeSeconds: int(useTimeSeconds),
-		IsStream:       relayInfo.IsStream,
-		Group:          relayInfo.UsingGroup,
-		Other:          other,
+		ChannelId:         relayInfo.ChannelId,
+		ModelName:         relayInfo.OriginModelName,
+		TokenName:         tokenName,
+		Quota:             feeQuota,
+		Content:           "Violation fee charged",
+		TokenId:           relayInfo.TokenId,
+		UseTimeSeconds:    int(useTimeSeconds),
+		IsStream:          relayInfo.IsStream,
+		Group:             relayInfo.UsingGroup,
+		Other:             other,
+		ExcludeProfitStat: relayInfo.ExcludeProfitStat,
 	})
 
 	return true

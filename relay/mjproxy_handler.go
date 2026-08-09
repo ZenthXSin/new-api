@@ -243,14 +243,15 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 			logContent := fmt.Sprintf("模型固定价格 %.2f，分组倍率 %.2f，操作 %s", priceData.ModelPrice, priceData.GroupRatioInfo.GroupRatio, constant.MjActionSwapFace)
 			other := service.GenerateMjOtherInfo(info, priceData)
 			model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
-				ChannelId: info.ChannelId,
-				ModelName: modelName,
-				TokenName: tokenName,
-				Quota:     priceData.Quota,
-				Content:   logContent,
-				TokenId:   info.TokenId,
-				Group:     info.UsingGroup,
-				Other:     other,
+				ChannelId:         info.ChannelId,
+				ModelName:         modelName,
+				TokenName:         tokenName,
+				Quota:             priceData.Quota,
+				Content:           logContent,
+				TokenId:           info.TokenId,
+				Group:             info.UsingGroup,
+				Other:             other,
+				ExcludeProfitStat: info.ExcludeProfitStat,
 			})
 			model.UpdateUserUsedQuotaAndRequestCount(info.UserId, priceData.Quota)
 			model.UpdateChannelUsedQuota(info.ChannelId, priceData.Quota)
@@ -258,23 +259,24 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 	}()
 	midjResponse := &mjResp.Response
 	midjourneyTask := &model.Midjourney{
-		UserId:      info.UserId,
-		Code:        midjResponse.Code,
-		Action:      constant.MjActionSwapFace,
-		MjId:        midjResponse.Result,
-		Prompt:      "InsightFace",
-		PromptEn:    "",
-		Description: midjResponse.Description,
-		State:       "",
-		SubmitTime:  info.StartTime.UnixNano() / int64(time.Millisecond),
-		StartTime:   time.Now().UnixNano() / int64(time.Millisecond),
-		FinishTime:  0,
-		ImageUrl:    "",
-		Status:      "",
-		Progress:    "0%",
-		FailReason:  "",
-		ChannelId:   c.GetInt("channel_id"),
-		Quota:       priceData.Quota,
+		UserId:            info.UserId,
+		Code:              midjResponse.Code,
+		Action:            constant.MjActionSwapFace,
+		MjId:              midjResponse.Result,
+		Prompt:            "InsightFace",
+		PromptEn:          "",
+		Description:       midjResponse.Description,
+		State:             "",
+		SubmitTime:        info.StartTime.UnixNano() / int64(time.Millisecond),
+		StartTime:         time.Now().UnixNano() / int64(time.Millisecond),
+		FinishTime:        0,
+		ImageUrl:          "",
+		Status:            "",
+		Progress:          "0%",
+		FailReason:        "",
+		ChannelId:         c.GetInt("channel_id"),
+		Quota:             priceData.Quota,
+		ExcludeProfitStat: info.ExcludeProfitStat,
 	}
 	err = midjourneyTask.Insert()
 	if err != nil {
@@ -549,14 +551,15 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			logContent := fmt.Sprintf("模型固定价格 %.2f，分组倍率 %.2f，操作 %s，ID %s", priceData.ModelPrice, priceData.GroupRatioInfo.GroupRatio, midjRequest.Action, midjResponse.Result)
 			other := service.GenerateMjOtherInfo(relayInfo, priceData)
 			model.RecordConsumeLog(c, relayInfo.UserId, model.RecordConsumeLogParams{
-				ChannelId: relayInfo.ChannelId,
-				ModelName: modelName,
-				TokenName: tokenName,
-				Quota:     priceData.Quota,
-				Content:   logContent,
-				TokenId:   relayInfo.TokenId,
-				Group:     relayInfo.UsingGroup,
-				Other:     other,
+				ChannelId:         relayInfo.ChannelId,
+				ModelName:         modelName,
+				TokenName:         tokenName,
+				Quota:             priceData.Quota,
+				Content:           logContent,
+				TokenId:           relayInfo.TokenId,
+				Group:             relayInfo.UsingGroup,
+				Other:             other,
+				ExcludeProfitStat: relayInfo.ExcludeProfitStat,
 			})
 			model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, priceData.Quota)
 			model.UpdateChannelUsedQuota(relayInfo.ChannelId, priceData.Quota)
@@ -571,23 +574,24 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 	// 24-prompt包含敏感词 {"code":24,"description":"可能包含敏感词","properties":{"promptEn":"nude body","bannedWord":"nude"}}
 	// other: 提交错误，description为错误描述
 	midjourneyTask := &model.Midjourney{
-		UserId:      relayInfo.UserId,
-		Code:        midjResponse.Code,
-		Action:      midjRequest.Action,
-		MjId:        midjResponse.Result,
-		Prompt:      midjRequest.Prompt,
-		PromptEn:    "",
-		Description: midjResponse.Description,
-		State:       "",
-		SubmitTime:  time.Now().UnixNano() / int64(time.Millisecond),
-		StartTime:   0,
-		FinishTime:  0,
-		ImageUrl:    "",
-		Status:      "",
-		Progress:    "0%",
-		FailReason:  "",
-		ChannelId:   c.GetInt("channel_id"),
-		Quota:       priceData.Quota,
+		UserId:            relayInfo.UserId,
+		Code:              midjResponse.Code,
+		Action:            midjRequest.Action,
+		MjId:              midjResponse.Result,
+		Prompt:            midjRequest.Prompt,
+		PromptEn:          "",
+		Description:       midjResponse.Description,
+		State:             "",
+		SubmitTime:        time.Now().UnixNano() / int64(time.Millisecond),
+		StartTime:         0,
+		FinishTime:        0,
+		ImageUrl:          "",
+		Status:            "",
+		Progress:          "0%",
+		FailReason:        "",
+		ChannelId:         c.GetInt("channel_id"),
+		Quota:             priceData.Quota,
+		ExcludeProfitStat: relayInfo.ExcludeProfitStat,
 	}
 	if midjResponse.Code == 3 {
 		//无实例账号自动禁用渠道（No available account instance）

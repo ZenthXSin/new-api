@@ -81,6 +81,10 @@ type Log struct {
 	BaseCostQuota          int     `json:"-" gorm:"default:0"`
 	CostQuota              int     `json:"-" gorm:"default:0"`
 	CostMultiplierSnapshot float64 `json:"-" gorm:"default:0"`
+	// ExcludeProfitStat 该日志由排除利润统计的令牌产生：计入日志与账单，
+	// 但不参与利润/营收聚合。仅管理员令牌可配置，默认 false。
+	// 该字段仅用于统计过滤，不对外输出；日志明细接口直接序列化本结构。
+	ExcludeProfitStat bool `json:"-"`
 }
 
 // don't use iota, avoid change log type value
@@ -344,6 +348,7 @@ type RecordConsumeLogParams struct {
 	BaseCostQuota          int                    `json:"-"`
 	CostQuota              int                    `json:"-"`
 	CostMultiplierSnapshot float64                `json:"-"`
+	ExcludeProfitStat      bool                   `json:"exclude_profit_stat"`
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
@@ -391,6 +396,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		BaseCostQuota:          params.BaseCostQuota,
 		CostQuota:              params.CostQuota,
 		CostMultiplierSnapshot: params.CostMultiplierSnapshot,
+		ExcludeProfitStat:      params.ExcludeProfitStat,
 	}
 	err := createLog(log)
 	if err != nil {
@@ -426,6 +432,7 @@ type RecordTaskBillingLogParams struct {
 	BaseCostQuota          int
 	CostQuota              int
 	CostMultiplierSnapshot float64
+	ExcludeProfitStat      bool
 }
 
 func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
@@ -456,6 +463,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 		BaseCostQuota:          params.BaseCostQuota,
 		CostQuota:              params.CostQuota,
 		CostMultiplierSnapshot: params.CostMultiplierSnapshot,
+		ExcludeProfitStat:      params.ExcludeProfitStat,
 	}
 	err := createLog(log)
 	if err != nil {
@@ -640,7 +648,9 @@ type CostAggregation struct {
 }
 
 func AggregateCost(startTimestamp, endTimestamp int64, channel int, modelName, username, tokenName, group string) (CostAggregation, error) {
-	query := LOG_DB.Table("logs").Where("type IN ?", []int{LogTypeConsume, LogTypeRefund})
+	// 营收聚合剔除排除利润统计令牌产生的记录（消费与退款成对出现，消费侧与退款侧都打上标记）
+	query := LOG_DB.Table("logs").Where("type IN ?", []int{LogTypeConsume, LogTypeRefund}).
+		Where("COALESCE(exclude_profit_stat, 0) = 0")
 	if startTimestamp != 0 {
 		query = query.Where("created_at >= ?", startTimestamp)
 	}
