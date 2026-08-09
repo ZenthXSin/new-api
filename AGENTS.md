@@ -18,6 +18,7 @@ DO NOT send optional commentary
 - Use only Sol Advisor's native lane. Do not use `luna_worker` or the Luna task lane.
 - Keep requirements, architecture, decomposition, diff inspection, verification, and final acceptance in the primary Sol / High session.
 - Delegate implementation to `sol_advisor_terra_implementer` with `fork_turns: none`; its installed profile pins Terra / High.
+- **Subagent model rule (mandatory):** ALL subagents (`sol-advisor-routine`, `sol-advisor-high`, `sol-advisor-advisor`, `general`, `explore`) MUST run on model `opencode/deepseek-v4-flash` (2x usage) with reasoning effort `max`. Never substitute the free model or a lower effort for subagent work; never accept a report produced at a lower effort or different model; re-spawn if a spawned agent falls back to another model.
 - After primary-session verification, require a fresh `sol_advisor_sol_reviewer` with `fork_turns: none` and accept completion only after a `ship` verdict.
 - Follow the installed Sol Advisor skill's preflight, ownership, verification, runtime-routing, sandbox-observation, correction, and no-fallback requirements exactly.
 
