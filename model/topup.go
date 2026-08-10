@@ -33,6 +33,48 @@ type PaymentTransaction struct {
 	CreateTime      int64  `json:"create_time"`
 }
 
+// GrantTopUpAffiliateReward 按充值分红倍率给被邀请人的邀请人发放分红:
+// 被邀请人单次充值成功所得额度 × common.TopUpAffiliateRatio,直接进入
+// 邀请人主余额。必须在充值成功事务内调用(幂等:每个订单只在
+// pending→success 状态切换时执行一次),返回 (邀请人ID, 分红额度),
+// 调用方应在事务提交后调用 recordTopUpAffiliateLog 记录审计日志。
+// 分红失败不阻断充值本身,仅记 SysError 审计;倍率为 0、被邀请人无
+// 邀请人或分红额度为 0 时返回 (0, 0)。
+func GrantTopUpAffiliateReward(tx *gorm.DB, userId int, quotaToAdd int) (int, int) {
+	if common.TopUpAffiliateRatio <= 0 {
+		return 0, 0
+	}
+	if tx == nil {
+		tx = DB
+	}
+	var payer User
+	if err := tx.Select("inviter_id").First(&payer, "id = ?", userId).Error; err != nil || payer.InviterId <= 0 {
+		return 0, 0
+	}
+	reward, clamp := common.QuotaFromFloatChecked(float64(quotaToAdd) * common.TopUpAffiliateRatio)
+	if clamp != nil {
+		common.SysError(fmt.Sprintf("grantTopUpAffiliateReward: 分红额度达到上限 user_id=%d inviter_id=%d quota_to_add=%d ratio=%v clamp=%v", userId, payer.InviterId, quotaToAdd, common.TopUpAffiliateRatio, clamp))
+	}
+	if reward <= 0 {
+		return 0, 0
+	}
+	result := tx.Model(&User{}).Where("id = ?", payer.InviterId).Update("quota", gorm.Expr("quota + ?", reward))
+	if result.Error != nil || result.RowsAffected != 1 {
+		common.SysError(fmt.Sprintf("grantTopUpAffiliateReward: 邀请人额度更新失败 inviter_id=%d error=%v rows_affected=%d", payer.InviterId, result.Error, result.RowsAffected))
+		return 0, 0
+	}
+	return payer.InviterId, reward
+}
+
+// recordTopUpAffiliateLog 记录充值分红审计日志(必须在事务提交后调用,
+// 避免在事务内持有数据库连接时再次取连接造成死锁)。
+func recordTopUpAffiliateLog(inviterId int, userId int, quotaToAdd int, reward int) {
+	if inviterId <= 0 || reward <= 0 {
+		return
+	}
+	RecordLog(inviterId, LogTypeTopup, fmt.Sprintf("邀请的用户(ID:%d)充值 %s,按倍率 %v 获得分红 %s", userId, logger.LogQuota(quotaToAdd), common.TopUpAffiliateRatio, logger.LogQuota(reward)))
+}
+
 const (
 	PaymentMethodBalance      = "balance"
 	PaymentMethodStripe       = "stripe"
@@ -129,6 +171,7 @@ func RechargeWeChatPay(tradeNo string, paidAmountCents int64, providerTradeNo st
 
 	var topUp TopUp
 	var quotaToAdd int
+	var affInviterID, affReward int
 	credited := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(&topUp).Error; err != nil {
@@ -181,6 +224,7 @@ func RechargeWeChatPay(tradeNo string, paidAmountCents int64, providerTradeNo st
 		if result.RowsAffected != 1 {
 			return errors.New("充值用户不存在")
 		}
+		affInviterID, affReward = GrantTopUpAffiliateReward(tx, topUp.UserId, quotaToAdd)
 		credited = true
 		return nil
 	})
@@ -190,6 +234,7 @@ func RechargeWeChatPay(tradeNo string, paidAmountCents int64, providerTradeNo st
 	if !credited {
 		return nil
 	}
+	recordTopUpAffiliateLog(affInviterID, topUp.UserId, quotaToAdd, affReward)
 
 	RecordTopupLog(topUp.UserId, fmt.Sprintf("微信支付充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodWeChatPay)
 	return nil
@@ -201,6 +246,7 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 	}
 
 	var quota float64
+	var affInviterID, affReward int
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -234,6 +280,7 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		if err != nil {
 			return err
 		}
+		affInviterID, affReward = GrantTopUpAffiliateReward(tx, topUp.UserId, common.QuotaFromFloat(quota))
 
 		return nil
 	})
@@ -242,6 +289,7 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		common.SysError("topup failed: " + err.Error())
 		return errors.New("充值失败，请稍后重试")
 	}
+	recordTopUpAffiliateLog(affInviterID, topUp.UserId, common.QuotaFromFloat(quota), affReward)
 
 	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(int(quota)), topUp.Amount), callerIp, topUp.PaymentMethod, PaymentMethodStripe)
 
@@ -420,6 +468,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 	var quotaToAdd int
 	var payMoney float64
 	var paymentMethod string
+	var affInviterID, affReward int
 
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		topUp := &TopUp{}
@@ -463,6 +512,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
 			return err
 		}
+		affInviterID, affReward = GrantTopUpAffiliateReward(tx, topUp.UserId, quotaToAdd)
 
 		userId = topUp.UserId
 		payMoney = topUp.Money
@@ -473,6 +523,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 	if err != nil {
 		return err
 	}
+	recordTopUpAffiliateLog(affInviterID, userId, quotaToAdd, affReward)
 
 	// 事务外记录日志，避免阻塞
 	RecordTopupLog(userId, fmt.Sprintf("管理员补单成功，充值金额: %v，支付金额：%f", logger.FormatQuota(quotaToAdd), payMoney), callerIp, paymentMethod, "admin")
@@ -484,6 +535,7 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 	}
 
 	var quota int64
+	var affInviterID, affReward int
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -539,6 +591,7 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		if err != nil {
 			return err
 		}
+		affInviterID, affReward = GrantTopUpAffiliateReward(tx, topUp.UserId, int(quota))
 
 		return nil
 	})
@@ -547,6 +600,7 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		common.SysError("creem topup failed: " + err.Error())
 		return errors.New("充值失败，请稍后重试")
 	}
+	recordTopUpAffiliateLog(affInviterID, topUp.UserId, int(quota), affReward)
 
 	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", quota, topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodCreem)
 
@@ -559,6 +613,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 	}
 
 	var quotaToAdd int
+	var affInviterID, affReward int
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -600,6 +655,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
 			return err
 		}
+		affInviterID, affReward = GrantTopUpAffiliateReward(tx, topUp.UserId, quotaToAdd)
 
 		return nil
 	})
@@ -608,6 +664,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 		common.SysError("waffo topup failed: " + err.Error())
 		return errors.New("充值失败，请稍后重试")
 	}
+	recordTopUpAffiliateLog(affInviterID, topUp.UserId, quotaToAdd, affReward)
 
 	if quotaToAdd > 0 {
 		RecordTopupLog(topUp.UserId, fmt.Sprintf("Waffo充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodWaffo)
@@ -622,6 +679,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 	}
 
 	var quotaToAdd int
+	var affInviterID, affReward int
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -661,6 +719,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
 			return err
 		}
+		affInviterID, affReward = GrantTopUpAffiliateReward(tx, topUp.UserId, quotaToAdd)
 
 		return nil
 	})
@@ -669,6 +728,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 		common.SysError("waffo pancake topup failed: " + err.Error())
 		return errors.New("充值失败，请稍后重试")
 	}
+	recordTopUpAffiliateLog(affInviterID, topUp.UserId, quotaToAdd, affReward)
 
 	if quotaToAdd > 0 {
 		RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("Waffo Pancake充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money))

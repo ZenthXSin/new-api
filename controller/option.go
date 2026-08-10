@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -145,6 +146,16 @@ func UpdateOption(c *gin.Context) {
 	switch option.Key {
 	case "QuotaForInviter", "QuotaForInvitee":
 		if isPositiveOptionValue(option.Value.(string)) && !operation_setting.IsPaymentComplianceConfirmed() {
+			common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)
+			return
+		}
+	case "TopUpAffiliateRatio":
+		ratio, err := strconv.ParseFloat(option.Value.(string), 64)
+		if err != nil || math.IsNaN(ratio) || ratio < 0 {
+			common.ApiErrorMsg(c, "充值分红倍率必须是非负数字")
+			return
+		}
+		if ratio > 0 && !operation_setting.IsPaymentComplianceConfirmed() {
 			common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)
 			return
 		}

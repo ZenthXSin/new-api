@@ -78,6 +78,9 @@ export function AffiliateRewardsCard({
                 'Earn rewards when users join through your referral link. Transfer accumulated rewards to your balance anytime.'
               )}
             </p>
+            <p className='text-muted-foreground line-clamp-1 text-xs'>
+              被邀请人充值时，你还能按其充值所得额度按倍率获得分红，直接到账主余额。
+            </p>
           </div>
         </div>
 
