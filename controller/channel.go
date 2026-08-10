@@ -480,6 +480,9 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 	} else if channel.CostMultiplier != 0 && model.NormalizeChannelCostMultiplier(channel.CostMultiplier) == 0 {
 		return fmt.Errorf("cost_multiplier must be finite and between %.4f and %.0f", model.MinChannelCostMultiplier, model.MaxChannelCostMultiplier)
 	}
+	if channel.MaxTokens != nil && *channel.MaxTokens < 0 {
+		return fmt.Errorf("max_tokens must be a non-negative integer (unit: M tokens)")
+	}
 
 	// 校验 channel settings
 	if err := channel.ValidateSettings(); err != nil {

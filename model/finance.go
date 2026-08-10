@@ -19,10 +19,10 @@ type CostDayStat struct {
 
 // UserDayStat 单日新增用户、付费用户数与付费金额
 type UserDayStat struct {
-	Date       string  `json:"date" gorm:"column:date"`
-	NewUsers   int64   `json:"new_users" gorm:"column:new_users"`
-	PaidUsers  int64   `json:"paid_users" gorm:"column:paid_users"`
-	PaidMoney  float64 `json:"paid_money" gorm:"column:paid_money"`
+	Date      string  `json:"date" gorm:"column:date"`
+	NewUsers  int64   `json:"new_users" gorm:"column:new_users"`
+	PaidUsers int64   `json:"paid_users" gorm:"column:paid_users"`
+	PaidMoney float64 `json:"paid_money" gorm:"column:paid_money"`
 }
 
 // dayBucketExpr 返回把 unix 秒列截断为服务器本地时区日期的方言表达式

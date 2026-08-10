@@ -3727,6 +3727,36 @@ export function ChannelMutateDrawer({
                                   </FormItem>
                                 )}
                               />
+
+                              <FormField
+                                control={form.control}
+                                name='max_tokens'
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>最大可用 Token（M）</FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        type='number'
+                                        min={0}
+                                        step={1}
+                                        placeholder='0'
+                                        {...field}
+                                        onChange={(e) =>
+                                          field.onChange(
+                                            e.target.value === ''
+                                              ? undefined
+                                              : Number(e.target.value)
+                                          )
+                                        }
+                                      />
+                                    </FormControl>
+                                    <FormDescription>
+                                      渠道累计消费达到该 token 量（单位 M，即 100 万）后自动禁用；填 0 表示不限制。
+                                    </FormDescription>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
                             </div>
 
                             <FormField

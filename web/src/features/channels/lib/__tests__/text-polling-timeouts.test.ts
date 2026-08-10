@@ -43,6 +43,7 @@ function channelWithSettings(settings: Record<string, unknown>): Channel {
     models: 'gpt-5',
     group: 'default',
     used_quota: 0,
+    used_tokens: 0,
     other_info: '',
     remark: '',
     max_input_tokens: 0,

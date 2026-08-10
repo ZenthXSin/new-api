@@ -215,6 +215,11 @@ export const channelFormSchema = z
       .finite('Cost multiplier must be finite')
       .min(COST_MULTIPLIER_MIN, 'Cost multiplier must be at least 0.0001x')
       .max(COST_MULTIPLIER_MAX, 'Cost multiplier must not exceed 1000x'),
+    max_tokens: z
+      .number()
+      .int('Max tokens must be an integer')
+      .min(0, 'Max tokens must be at least 0')
+      .optional(), // unit: M tokens, 0 = unlimited
     setting: z
       .string()
       .optional()
@@ -411,6 +416,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   tag: '',
   remark: '',
   cost_multiplier: 1,
+  max_tokens: undefined,
   setting: '',
   param_override: '',
   header_override: '',
@@ -571,6 +577,7 @@ export function transformChannelToFormDefaults(
     tag: channel.tag || '',
     remark: channel.remark || '',
     cost_multiplier: channel.cost_multiplier || 1,
+    max_tokens: channel.max_tokens ?? undefined,
     setting: channel.setting || '',
     param_override: channel.param_override || '',
     header_override: channel.header_override || '',
@@ -843,6 +850,7 @@ export function transformFormDataToUpdatePayload(
     tag: formData.tag || null,
     remark: formData.remark || '',
     cost_multiplier: formData.cost_multiplier,
+    max_tokens: formData.max_tokens ?? null,
     setting: buildSettingJSON(formData),
     param_override: formData.param_override || null,
     header_override: formData.header_override || null,

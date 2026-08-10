@@ -67,6 +67,8 @@ type Channel struct {
 	Models             string  `json:"models"`
 	Group              string  `json:"group" gorm:"type:varchar(64);default:'default'"`
 	UsedQuota          int64   `json:"used_quota" gorm:"bigint;default:0"`
+	UsedTokens         int64   `json:"used_tokens" gorm:"bigint;default:0"`
+	MaxTokens          *int64  `json:"max_tokens" gorm:"bigint;default:0"` // 渠道最大可用 token,单位 M(100 万);0 或空表示不限制
 	ModelMapping       *string `json:"model_mapping" gorm:"type:text"`
 	//MaxInputTokens     *int    `json:"max_input_tokens" gorm:"default:0"`
 	StatusCodeMapping *string `json:"status_code_mapping" gorm:"type:varchar(1024);default:''"`
@@ -906,6 +908,51 @@ func updateChannelUsedQuota(id int, quota int) {
 	err := DB.Model(&Channel{}).Where("id = ?", id).Update("used_quota", gorm.Expr("used_quota + ?", quota)).Error
 	if err != nil {
 		common.SysLog(fmt.Sprintf("failed to update channel used quota: channel_id=%d, delta_quota=%d, error=%v", id, quota, err))
+	}
+}
+
+// UpdateChannelUsedTokens 累加渠道累计消费 token 数,并在达到渠道最大可用
+// token(单位为 M)上限时自动禁用渠道。幂等:渠道已处于禁用状态或未设置
+// 上限时不会重复禁用。
+func UpdateChannelUsedTokens(id int, tokens int) {
+	if id <= 0 || tokens <= 0 {
+		return
+	}
+	if common.BatchUpdateEnabled {
+		addNewRecord(BatchUpdateTypeChannelUsedTokens, id, tokens)
+		return
+	}
+	updateChannelUsedTokens(id, tokens)
+}
+
+func updateChannelUsedTokens(id int, tokens int) {
+	if id <= 0 || tokens <= 0 {
+		return
+	}
+	err := DB.Model(&Channel{}).Where("id = ?", id).
+		Update("used_tokens", gorm.Expr("used_tokens + ?", tokens)).Error
+	if err != nil {
+		common.SysLog(fmt.Sprintf("failed to update channel used tokens: channel_id=%d, delta_tokens=%d, error=%v", id, tokens, err))
+		return
+	}
+	// 达到上限即自动禁用(条件更新保证并发下只生效一次)
+	result := DB.Model(&Channel{}).
+		Where("id = ? AND max_tokens > 0 AND used_tokens >= max_tokens * ? AND status = ?", id, int64(1000000), common.ChannelStatusEnabled).
+		Update("status", common.ChannelStatusAutoDisabled)
+	if result.Error != nil {
+		common.SysLog(fmt.Sprintf("failed to auto disable channel by token limit: channel_id=%d, error=%v", id, result.Error))
+		return
+	}
+	if result.RowsAffected == 0 {
+		return
+	}
+	var channel Channel
+	if err := DB.Select("other_info").First(&channel, "id = ?", id).Error; err == nil {
+		info := channel.GetOtherInfo()
+		info["status_reason"] = "Token usage reached the configured maximum"
+		info["status_time"] = common.GetTimestamp()
+		channel.SetOtherInfo(info)
+		_ = DB.Model(&Channel{}).Where("id = ?", id).Update("other_info", channel.OtherInfo).Error
 	}
 }
 
