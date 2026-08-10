@@ -33,6 +33,8 @@ export type FinanceOverview = {
   cost_coverage: number
   paid_users_total: number
   paid_users_period: number
+  paid_money_total: number
+  paid_money_period: number
 }
 
 export type CostTrendPoint = {
@@ -47,6 +49,7 @@ export type UserTrendPoint = {
   date: string
   new_users: number
   paid_users: number
+  paid_money: number
 }
 
 export type FinanceTrends = {

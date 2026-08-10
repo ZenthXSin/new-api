@@ -29,6 +29,7 @@ import {
   type FinanceOverview,
   type FinanceTrends,
 } from './api'
+import { PaidMoneyTrendChart } from './components/paid-money-trend-chart'
 import { ProfitSummaryCards } from './components/profit-summary-cards'
 import { RevenueTrendChart } from './components/revenue-trend-chart'
 import { UserGrowthChart } from './components/user-growth-chart'
@@ -104,6 +105,11 @@ export function Finance() {
           error={error}
         />
         <UserGrowthChart data={trends?.users} loading={loading} error={error} />
+        <PaidMoneyTrendChart
+          data={trends?.users}
+          loading={loading}
+          error={error}
+        />
       </SectionPageLayout.Content>
     </SectionPageLayout>
   )

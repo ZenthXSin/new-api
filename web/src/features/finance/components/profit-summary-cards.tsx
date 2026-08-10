@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   BadgeDollarSign,
+  Banknote,
   Coins,
   PieChart,
   ReceiptText,
@@ -26,13 +27,18 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { formatLogQuota } from '@/lib/format'
+import { formatLogQuota, formatNumber } from '@/lib/format'
 
 import type { FinanceOverview } from '../api'
 
 function percent(value: number | undefined): string {
   if (value === undefined || !Number.isFinite(value)) return '0%'
   return `${(value * 100).toFixed(1)}%`
+}
+
+function money(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) return '¥0'
+  return `¥${formatNumber(value)}`
 }
 
 function OverviewCard({
@@ -121,6 +127,18 @@ export function ProfitSummaryCards({
         title={t('Paid Users Total')}
         value={String(overview.paid_users_total)}
         hint={t('All users who ever paid')}
+      />
+      <OverviewCard
+        icon={<Banknote className='size-4' aria-hidden='true' />}
+        title={t('Paid Money Period')}
+        value={money(overview.paid_money_period)}
+        hint={t('Successful topups in this window')}
+      />
+      <OverviewCard
+        icon={<Banknote className='size-4' aria-hidden='true' />}
+        title={t('Paid Money Total')}
+        value={money(overview.paid_money_total)}
+        hint={t('All successful topups')}
       />
     </div>
   )

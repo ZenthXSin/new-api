@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"gorm.io/gorm"
 )
 
 // CostDayStat 单日营收聚合结果
@@ -16,11 +17,12 @@ type CostDayStat struct {
 	RequestCount     int64  `json:"request_count" gorm:"column:request_count"`
 }
 
-// UserDayStat 单日新增用户与付费用户数
+// UserDayStat 单日新增用户、付费用户数与付费金额
 type UserDayStat struct {
-	Date      string `json:"date" gorm:"column:date"`
-	NewUsers  int64  `json:"new_users" gorm:"column:new_users"`
-	PaidUsers int64  `json:"paid_users" gorm:"column:paid_users"`
+	Date       string  `json:"date" gorm:"column:date"`
+	NewUsers   int64   `json:"new_users" gorm:"column:new_users"`
+	PaidUsers  int64   `json:"paid_users" gorm:"column:paid_users"`
+	PaidMoney  float64 `json:"paid_money" gorm:"column:paid_money"`
 }
 
 // dayBucketExpr 返回把 unix 秒列截断为服务器本地时区日期的方言表达式
@@ -88,10 +90,13 @@ func GetCostTrendByDay(startTimestamp, endTimestamp int64) ([]CostDayStat, error
 	return fillDayGaps(startTimestamp, endTimestamp, byDate), nil
 }
 
-// GetPaidUserStats 统计成功充值用户数:paidTotal 为累计,paidPeriod 按 complete_time 落在窗口内
-func GetPaidUserStats(startTimestamp, endTimestamp int64) (paidTotal, paidPeriod int64, err error) {
+// GetPaidUserStats 统计成功充值用户数与金额:total/period 分别为累计与窗口内
+func GetPaidUserStats(startTimestamp, endTimestamp int64) (paidTotal, paidPeriod int64, moneyTotal, moneyPeriod float64, err error) {
 	if err := DB.Model(&TopUp{}).Where("status = ?", common.TopUpStatusSuccess).Distinct("user_id").Count(&paidTotal).Error; err != nil {
-		return 0, 0, err
+		return 0, 0, 0, 0, err
+	}
+	if err := DB.Model(&TopUp{}).Where("status = ?", common.TopUpStatusSuccess).Select("COALESCE(SUM(money),0)").Scan(&moneyTotal).Error; err != nil {
+		return 0, 0, 0, 0, err
 	}
 	query := DB.Model(&TopUp{}).Where("status = ?", common.TopUpStatusSuccess)
 	if startTimestamp != 0 {
@@ -101,9 +106,12 @@ func GetPaidUserStats(startTimestamp, endTimestamp int64) (paidTotal, paidPeriod
 		query = query.Where("complete_time <= ?", endTimestamp)
 	}
 	if err := query.Distinct("user_id").Count(&paidPeriod).Error; err != nil {
-		return 0, 0, err
+		return 0, 0, 0, 0, err
 	}
-	return paidTotal, paidPeriod, nil
+	if err := query.Session(&gorm.Session{}).Select("COALESCE(SUM(money),0)").Scan(&moneyPeriod).Error; err != nil {
+		return 0, 0, 0, 0, err
+	}
+	return paidTotal, paidPeriod, moneyTotal, moneyPeriod, nil
 }
 
 // GetUserGrowthByDay 按天统计新增注册用户数与成功充值付费用户数
@@ -122,20 +130,21 @@ func GetUserGrowthByDay(startTimestamp, endTimestamp int64) ([]UserDayStat, erro
 	}
 	paidExpr := dayBucketExpr("complete_time", false)
 	var paidUsers []UserDayStat
-	err = DB.Table("top_ups").Select(fmt.Sprintf("%s AS date, COUNT(DISTINCT user_id) AS paid_users", paidExpr)).
+	err = DB.Table("top_ups").Select(fmt.Sprintf("%s AS date, COUNT(DISTINCT user_id) AS paid_users, COALESCE(SUM(money),0) AS paid_money", paidExpr)).
 		Where("status = ? AND complete_time >= ? AND complete_time <= ?", common.TopUpStatusSuccess, startTimestamp, endTimestamp).
 		Group(paidExpr).Scan(&paidUsers).Error
 	if err != nil {
 		return nil, err
 	}
-	paidByDate := make(map[string]int64, len(paidUsers))
+	paidByDate := make(map[string]UserDayStat, len(paidUsers))
 	for _, row := range paidUsers {
-		paidByDate[row.Date] = row.PaidUsers
+		paidByDate[row.Date] = row
 	}
 	result := make([]UserDayStat, 0)
 	for day := time.Unix(startTimestamp, 0).In(time.Local); !day.After(time.Unix(endTimestamp, 0).In(time.Local)); day = day.AddDate(0, 0, 1) {
 		date := day.Format("2006-01-02")
-		result = append(result, UserDayStat{Date: date, NewUsers: newByDate[date], PaidUsers: paidByDate[date]})
+		paid := paidByDate[date]
+		result = append(result, UserDayStat{Date: date, NewUsers: newByDate[date], PaidUsers: paid.PaidUsers, PaidMoney: paid.PaidMoney})
 	}
 	return result, nil
 }

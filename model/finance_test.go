@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -16,7 +17,12 @@ func insertFinanceLog(t *testing.T, ts int64, logType int, quota int, costQuota 
 
 func insertFinanceTopUp(t *testing.T, userID int, completeTime int64, status string) {
 	t.Helper()
-	require.NoError(t, DB.Create(&TopUp{UserId: userID, TradeNo: time.Now().String() + string(rune(userID)), Amount: 1, Money: 1, Status: status, CreateTime: completeTime, CompleteTime: completeTime}).Error)
+	insertFinanceTopUpWithMoney(t, userID, completeTime, status, 1)
+}
+
+func insertFinanceTopUpWithMoney(t *testing.T, userID int, completeTime int64, status string, money float64) {
+	t.Helper()
+	require.NoError(t, DB.Create(&TopUp{UserId: userID, TradeNo: fmt.Sprintf("%d-%d-%f", userID, completeTime, money), Amount: 1, Money: money, Status: status, CreateTime: completeTime, CompleteTime: completeTime}).Error)
 }
 
 func TestGetCostTrendByDayAggregatesAndFillsGaps(t *testing.T) {
@@ -76,18 +82,20 @@ func TestGetPaidUserStatsDistinctAndWindow(t *testing.T) {
 	truncateTables(t)
 	now := time.Now()
 	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
-	insertFinanceTopUp(t, 1, dayStart.Add(-48*time.Hour).Unix(), common.TopUpStatusSuccess)
-	insertFinanceTopUp(t, 1, dayStart.Add(-24*time.Hour).Unix(), common.TopUpStatusSuccess)
-	insertFinanceTopUp(t, 2, dayStart.Add(-24*time.Hour).Unix(), common.TopUpStatusSuccess)
-	insertFinanceTopUp(t, 3, dayStart.Add(-24*time.Hour).Unix(), common.TopUpStatusPending)
-	insertFinanceTopUp(t, 4, dayStart.Add(24*time.Hour).Unix()+1, common.TopUpStatusSuccess)
+	insertFinanceTopUpWithMoney(t, 1, dayStart.Add(-48*time.Hour).Unix(), common.TopUpStatusSuccess, 10)
+	insertFinanceTopUpWithMoney(t, 1, dayStart.Add(-24*time.Hour).Unix(), common.TopUpStatusSuccess, 5.5)
+	insertFinanceTopUpWithMoney(t, 2, dayStart.Add(-24*time.Hour).Unix(), common.TopUpStatusSuccess, 20)
+	insertFinanceTopUpWithMoney(t, 3, dayStart.Add(-24*time.Hour).Unix(), common.TopUpStatusPending, 30)
+	insertFinanceTopUpWithMoney(t, 4, dayStart.Add(24*time.Hour).Unix()+1, common.TopUpStatusSuccess, 40)
 
 	windowStart := dayStart.Add(-48 * time.Hour).Unix()
 	windowEnd := dayStart.Add(24 * time.Hour).Unix()
-	total, period, err := GetPaidUserStats(windowStart, windowEnd)
+	total, period, moneyTotal, moneyPeriod, err := GetPaidUserStats(windowStart, windowEnd)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), total)
 	assert.Equal(t, int64(2), period)
+	assert.InDelta(t, 75.5, moneyTotal, 0.0001)
+	assert.InDelta(t, 35.5, moneyPeriod, 0.0001)
 }
 
 func TestGetUserGrowthByDayMergesNewAndPaidUsers(t *testing.T) {
@@ -97,8 +105,8 @@ func TestGetUserGrowthByDayMergesNewAndPaidUsers(t *testing.T) {
 	require.NoError(t, DB.Create(&User{Username: "u1", AffCode: "aff-u1", CreatedAt: dayStart.Add(-24 * time.Hour).Unix()}).Error)
 	require.NoError(t, DB.Create(&User{Username: "u2", AffCode: "aff-u2", CreatedAt: dayStart.Add(-24 * time.Hour).Unix()}).Error)
 	require.NoError(t, DB.Create(&User{Username: "u3", AffCode: "aff-u3", CreatedAt: dayStart.Unix()}).Error)
-	insertFinanceTopUp(t, 2, dayStart.Add(-24*time.Hour).Unix(), common.TopUpStatusSuccess)
-	insertFinanceTopUp(t, 2, dayStart.Unix(), common.TopUpStatusSuccess)
+	insertFinanceTopUpWithMoney(t, 2, dayStart.Add(-24*time.Hour).Unix(), common.TopUpStatusSuccess, 15)
+	insertFinanceTopUpWithMoney(t, 2, dayStart.Unix(), common.TopUpStatusSuccess, 25)
 
 	windowStart := dayStart.Add(-48 * time.Hour).Unix()
 	windowEnd := dayStart.Add(24 * time.Hour).Unix()
@@ -108,10 +116,13 @@ func TestGetUserGrowthByDayMergesNewAndPaidUsers(t *testing.T) {
 	assert.Equal(t, dayStart.Add(-48*time.Hour).Format("2006-01-02"), users[0].Date)
 	assert.Zero(t, users[0].NewUsers)
 	assert.Zero(t, users[0].PaidUsers)
+	assert.Zero(t, users[0].PaidMoney)
 	assert.Equal(t, dayStart.Add(-24*time.Hour).Format("2006-01-02"), users[1].Date)
 	assert.Equal(t, int64(2), users[1].NewUsers)
 	assert.Equal(t, int64(1), users[1].PaidUsers)
+	assert.InDelta(t, 15, users[1].PaidMoney, 0.0001)
 	assert.Equal(t, dayStart.Format("2006-01-02"), users[2].Date)
 	assert.Equal(t, int64(1), users[2].NewUsers)
 	assert.Equal(t, int64(1), users[2].PaidUsers)
+	assert.InDelta(t, 25, users[2].PaidMoney, 0.0001)
 }

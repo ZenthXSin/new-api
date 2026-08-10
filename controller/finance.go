@@ -29,7 +29,7 @@ func GetFinanceOverview(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	paidTotal, paidPeriod, err := model.GetPaidUserStats(start, end)
+	paidTotal, paidPeriod, moneyTotal, moneyPeriod, err := model.GetPaidUserStats(start, end)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -46,6 +46,8 @@ func GetFinanceOverview(c *gin.Context) {
 			"cost_coverage":      report.CostCoverage,
 			"paid_users_total":   paidTotal,
 			"paid_users_period":  paidPeriod,
+			"paid_money_total":   moneyTotal,
+			"paid_money_period":  moneyPeriod,
 		},
 	})
 }
