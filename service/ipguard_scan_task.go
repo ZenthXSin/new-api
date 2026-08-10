@@ -9,9 +9,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -109,25 +111,36 @@ func restoreIPGuardBans(engine *ipguard.Engine) {
 	}
 }
 
-// discoverIPGuardLogs returns the concrete log paths for the configured dir,
-// sorted and deduped, matching the access/auth/secure glob patterns.
+// discoverIPGuardLogs returns the concrete log paths under the configured
+// dir, sorted and deduped, matching the access/auth/secure glob patterns.
+// Discovery is recursive (nginx keeps access logs in /var/log/nginx) and
+// skips gzip archives, which cannot be parsed as plain text.
 func discoverIPGuardLogs(cfg ipguard.Config) []string {
-	seen := make(map[string]bool)
 	var paths []string
-	for _, pattern := range logGlobPatterns {
-		matches, err := filepath.Glob(filepath.Join(cfg.LogDir, pattern))
+	seen := make(map[string]bool)
+	_ = filepath.WalkDir(cfg.LogDir, func(p string, entry os.DirEntry, err error) error {
 		if err != nil {
-			continue
+			return nil
 		}
-		for _, p := range matches {
-			if !seen[p] {
-				if info, err := os.Stat(p); err == nil && !info.IsDir() {
-					seen[p] = true
-					paths = append(paths, p)
-				}
+		if entry.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(p, ".gz") {
+			return nil
+		}
+		name := entry.Name()
+		for _, pattern := range logGlobPatterns {
+			ok, matchErr := path.Match(pattern, name)
+			if matchErr != nil {
+				continue
+			}
+			if ok && !seen[p] {
+				seen[p] = true
+				paths = append(paths, p)
 			}
 		}
-	}
+		return nil
+	})
 	sort.Strings(paths)
 	return paths
 }
