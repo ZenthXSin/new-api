@@ -236,6 +236,7 @@ func SetApiRouter(router *gin.Engine) {
 		appCenterRoute.Use(middleware.AppCenterAuthScope(), middleware.UserAuth(), middleware.AppCenterAdmin())
 		{
 			appCenterRoute.GET("/apps", controller.ListAppCenterApps)
+			appCenterRoute.GET("/files", controller.ListAppCenterServerFiles)
 			appCenterRoute.POST("/apps", controller.CreateAppCenterApp)
 			appCenterRoute.GET("/apps/:id", controller.GetAppCenterApp)
 			appCenterRoute.PUT("/apps/:id", controller.UpdateAppCenterApp)

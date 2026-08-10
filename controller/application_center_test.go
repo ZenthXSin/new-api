@@ -2,11 +2,14 @@ package controller
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -215,6 +218,71 @@ func TestDownloadAppCenterAssetSetsContentDisposition(t *testing.T) {
 	contentDisposition := rec.Header().Get("Content-Disposition")
 	assert.Contains(t, contentDisposition, "attachment")
 	assert.Contains(t, contentDisposition, "app-release-1.0.0.apk")
+}
+
+func TestListAppCenterServerFilesAndServerFileUpload(t *testing.T) {
+	previousDB, previousSecret := model.DB, common.CryptoSecret
+	previousRoot := service.AppCenterStorageRoot
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.AppCenterApp{}, &model.AppCenterRelease{}, &model.AppCenterAsset{}))
+	model.DB, common.CryptoSecret = db, "controller-app-center-secret"
+	root := t.TempDir()
+	service.AppCenterStorageRoot = root
+	t.Cleanup(func() {
+		model.DB, common.CryptoSecret = previousDB, previousSecret
+		service.AppCenterStorageRoot = previousRoot
+	})
+
+	app, _, err := service.CreateAppCenterApp("Server", "server-app", "", true, true)
+	require.NoError(t, err)
+	release, err := service.CreateAppCenterRelease(app.ID, service.AppCenterReleaseInput{Version: "1.0.0", Channel: "stable"})
+	require.NoError(t, err)
+
+	importDir := filepath.Join(root, "imports")
+	require.NoError(t, os.MkdirAll(importDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(importDir, "server-package-1.0.0.apk"), []byte("server-bytes"), 0o640))
+	require.NoError(t, os.MkdirAll(filepath.Join(importDir, "subdir"), 0o750))
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/api/app-center/files", ListAppCenterServerFiles)
+	router.POST("/api/app-center/apps/:id/releases/:release_id/assets", UploadAppCenterAsset)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/app-center/files", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var listResponse struct {
+		Data []service.AppCenterServerFile `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &listResponse))
+	require.Len(t, listResponse.Data, 1)
+	assert.Equal(t, "server-package-1.0.0.apk", listResponse.Data[0].Name)
+	assert.Equal(t, int64(len("server-bytes")), listResponse.Data[0].Size)
+
+	form := url.Values{}
+	form.Set("platform", "linux")
+	form.Set("architecture", "amd64")
+	form.Set("server_file", "server-package-1.0.0.apk")
+	uploadRec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/app-center/apps/%d/releases/%d/assets", app.ID, release.ID), strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	router.ServeHTTP(uploadRec, req)
+	require.Equal(t, http.StatusCreated, uploadRec.Code)
+	var uploadResponse struct {
+		Data model.AppCenterAsset `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(uploadRec.Body.Bytes(), &uploadResponse))
+	assert.Equal(t, "server-package-1.0.0.apk", uploadResponse.Data.Filename)
+	assert.Equal(t, int64(len("server-bytes")), uploadResponse.Data.Size)
+	assert.Equal(t, "application/vnd.android.package-archive", uploadResponse.Data.ContentType)
+
+	missingRec := httptest.NewRecorder()
+	form.Set("server_file", "no-such-file.apk")
+	missingReq := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/app-center/apps/%d/releases/%d/assets", app.ID, release.ID), strings.NewReader(form.Encode()))
+	missingReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	router.ServeHTTP(missingRec, missingReq)
+	assert.Equal(t, http.StatusNotFound, missingRec.Code)
 }
 
 func TestGetAppCenterDownloadsFiltersHourWindowAndSortsAscending(t *testing.T) {

@@ -221,6 +221,11 @@ export function getDistributionAssetDownloadUrl(slug: string, id: number) {
 export function getManagedDistributionApps() {
   return get<DistributionApp[]>('/api/app-center/apps')
 }
+export function getAppCenterServerFiles() {
+  return get<Array<{ name: string; size: number; mod_time: number }>>(
+    '/api/app-center/files'
+  )
+}
 export function createManagedDistributionApp(input: {
   name: string
   slug: string
@@ -270,10 +275,16 @@ export function publishManagedDistributionRelease(
 export async function uploadManagedDistributionAsset(
   id: number,
   releaseID: number,
-  input: { file: File; platform: string; architecture: string }
+  input: {
+    file?: File
+    serverFile?: string
+    platform: string
+    architecture: string
+  }
 ) {
   const form = new FormData()
-  form.append('file', input.file)
+  if (input.file) form.append('file', input.file)
+  if (input.serverFile) form.append('server_file', input.serverFile)
   form.append('platform', input.platform)
   form.append('architecture', input.architecture)
   const response = await api.post<ApiResponse<DistributionAsset>>(

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -318,25 +320,63 @@ func PublishAppCenterRelease(c *gin.Context) {
 	}
 	appCenterJSON(c, 200, r)
 }
+func ListAppCenterServerFiles(c *gin.Context) {
+	files, err := service.ListAppCenterServerFiles()
+	if err != nil {
+		appCenterError(c, 500)
+		return
+	}
+	appCenterJSON(c, 200, files)
+}
+
 func UploadAppCenterAsset(c *gin.Context) {
 	appID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	rid, _ := strconv.ParseInt(c.Param("release_id"), 10, 64)
-	file, err := c.FormFile("file")
-	if err != nil {
-		common.SysError(fmt.Sprintf("app-center asset form failed: app_id=%d release_id=%d err=%v", appID, rid, err))
-		appCenterError(c, 400)
-		return
+	platform := c.PostForm("platform")
+	architecture := c.PostForm("architecture")
+	var (
+		src         io.Reader
+		filename    string
+		contentType string
+		sourceName  string
+	)
+	serverFile := strings.TrimSpace(c.PostForm("server_file"))
+	if serverFile != "" {
+		f, err := service.OpenAppCenterServerFile(serverFile)
+		if err != nil {
+			appCenterError(c, http.StatusNotFound)
+			return
+		}
+		defer f.Close()
+		src = f
+		filename = filepath.Base(serverFile)
+		contentType = mime.TypeByExtension(filepath.Ext(filename))
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		sourceName = serverFile
+	} else {
+		file, err := c.FormFile("file")
+		if err != nil {
+			common.SysError(fmt.Sprintf("app-center asset form failed: app_id=%d release_id=%d err=%v", appID, rid, err))
+			appCenterError(c, 400)
+			return
+		}
+		fileSrc, err := file.Open()
+		if err != nil {
+			common.SysError(fmt.Sprintf("app-center asset open failed: app_id=%d release_id=%d filename=%q err=%v", appID, rid, file.Filename, err))
+			appCenterError(c, 400)
+			return
+		}
+		defer fileSrc.Close()
+		src = fileSrc
+		filename = file.Filename
+		contentType = file.Header.Get("Content-Type")
+		sourceName = filename
 	}
-	src, err := file.Open()
+	a, err := service.UploadAppCenterAsset(appID, rid, platform, architecture, filename, contentType, src)
 	if err != nil {
-		common.SysError(fmt.Sprintf("app-center asset open failed: app_id=%d release_id=%d filename=%q err=%v", appID, rid, file.Filename, err))
-		appCenterError(c, 400)
-		return
-	}
-	defer src.Close()
-	a, err := service.UploadAppCenterAsset(appID, rid, c.PostForm("platform"), c.PostForm("architecture"), file.Filename, file.Header.Get("Content-Type"), src)
-	if err != nil {
-		common.SysError(fmt.Sprintf("app-center asset upload failed: app_id=%d release_id=%d platform=%q architecture=%q filename=%q size=%d err=%v", appID, rid, c.PostForm("platform"), c.PostForm("architecture"), file.Filename, file.Size, err))
+		common.SysError(fmt.Sprintf("app-center asset upload failed: app_id=%d release_id=%d platform=%q architecture=%q source=%q err=%v", appID, rid, platform, architecture, sourceName, err))
 		appCenterError(c, 400)
 		return
 	}

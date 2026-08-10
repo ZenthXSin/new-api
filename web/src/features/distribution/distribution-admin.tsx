@@ -40,6 +40,7 @@ import {
   getCustomEventTrend,
   getCustomEventRegions,
   getAppCenterDownloads,
+  getAppCenterServerFiles,
   getManagedDistributionAnnouncements,
   getManagedDistributionApps,
   getManagedDistributionReleases,
@@ -71,6 +72,18 @@ import {
   summarizeUsage,
 } from './telemetry-data'
 
+function formatFileSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes < 1024) return `${bytes || 0} B`
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes / 1024
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`
+}
+
 export function DistributionAdmin() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -94,10 +107,17 @@ export function DistributionAdmin() {
   const [platform, setPlatform] = useState('windows')
   const [architecture, setArchitecture] = useState('amd64')
   const [file, setFile] = useState<File | null>(null)
+  const [uploadMode, setUploadMode] = useState<'local' | 'server'>('local')
+  const [serverFile, setServerFile] = useState('')
   const [token, setToken] = useState('')
   const appsQuery = useQuery({
     queryKey: ['app-center-apps'],
     queryFn: getManagedDistributionApps,
+  })
+  const serverFilesQuery = useQuery({
+    queryKey: ['app-center-server-files'],
+    queryFn: getAppCenterServerFiles,
+    enabled: uploadMode === 'server',
   })
   const app = (appsQuery.data?.data ?? []).find(
     (item) => item.id === selectedID
@@ -226,9 +246,10 @@ export function DistributionAdmin() {
   })
   const upload = useMutation({
     mutationFn: () => {
-      if (!file || !releaseID) throw new Error('missing')
+      if ((!file && !serverFile) || !releaseID) throw new Error('missing')
       return uploadManagedDistributionAsset(selectedID, releaseID, {
-        file,
+        file: file ?? undefined,
+        serverFile: uploadMode === 'server' ? serverFile : undefined,
         platform,
         architecture,
       })
@@ -236,6 +257,7 @@ export function DistributionAdmin() {
     onSuccess: () => {
       invalidate()
       setFile(null)
+      setServerFile('')
       toast.success('安装包已上传')
     },
     onError: () => toast.error('上传失败，请确认版本仍为草稿'),
@@ -555,14 +577,43 @@ export function DistributionAdmin() {
                         onPlatformChange={setPlatform}
                         onArchitectureChange={setArchitecture}
                       />
+                      <select
+                        value={uploadMode}
+                        onChange={(e) => {
+                          setUploadMode(e.target.value as 'local' | 'server')
+                          setFile(null)
+                          setServerFile('')
+                        }}
+                        className='border-input bg-background h-9 rounded-md border px-2 text-sm'
+                      >
+                        <option value='local'>{'本地上传'}</option>
+                        <option value='server'>{'选择服务器文件'}</option>
+                      </select>
                       <div className='flex gap-2'>
-                        <Input
-                          type='file'
-                          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                        />
+                        {uploadMode === 'local' ? (
+                          <Input
+                            type='file'
+                            onChange={(e) =>
+                              setFile(e.target.files?.[0] ?? null)
+                            }
+                          />
+                        ) : (
+                          <select
+                            value={serverFile}
+                            onChange={(e) => setServerFile(e.target.value)}
+                            className='border-input bg-background h-9 min-w-0 flex-1 rounded-md border px-2 text-sm'
+                          >
+                            <option value=''>{'选择服务器文件'}</option>
+                            {(serverFilesQuery.data?.data ?? []).map((item) => (
+                              <option key={item.name} value={item.name}>
+                                {item.name} ({formatFileSize(item.size)})
+                              </option>
+                            ))}
+                          </select>
+                        )}
                         <Button
                           disabled={
-                            !file ||
+                            (uploadMode === 'local' ? !file : !serverFile) ||
                             !releaseID ||
                             !platform ||
                             !architecture ||

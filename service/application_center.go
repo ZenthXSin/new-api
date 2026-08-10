@@ -307,8 +307,7 @@ func AppCenterUpdateAvailable(current, available string) bool {
 	return leftErr == nil && rightErr == nil && right.GreaterThan(left)
 }
 
-func UploadAppCenterAsset(appID, releaseID int64, platform, arch, filename, contentType string, src io.Reader) (*model.AppCenterAsset, error) {
-	if !validCenterTag(platform) || !validCenterTag(arch) || src == nil || strings.TrimSpace(filename) == "" || len(filename) > 255 {
+func UploadAppCenterAsset(appID, releaseID int64, platform, arch, filename, contentType string, src io.Reader) (*model.AppCenterAsset, error) {	if !validCenterTag(platform) || !validCenterTag(arch) || src == nil || strings.TrimSpace(filename) == "" || len(filename) > 255 {
 		return nil, ErrAppCenterInvalid
 	}
 	var r model.AppCenterRelease
@@ -344,6 +343,49 @@ func UploadAppCenterAsset(appID, releaseID int64, platform, arch, filename, cont
 	}
 	return a, nil
 }
+
+// AppCenterImportDir 服务器文件导入目录:管理员把安装包放到该目录后,
+// 可经由 upload 的 server_file 字段直接导入,无需重新上传。
+func AppCenterImportDir() string {
+	return filepath.Join(AppCenterStorageRoot, "imports")
+}
+
+type AppCenterServerFile struct {
+	Name    string `json:"name"`
+	Size    int64  `json:"size"`
+	ModTime int64  `json:"mod_time"`
+}
+
+func ListAppCenterServerFiles() ([]AppCenterServerFile, error) {
+	entries, err := os.ReadDir(AppCenterImportDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []AppCenterServerFile{}, nil
+		}
+		return nil, err
+	}
+	files := make([]AppCenterServerFile, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, AppCenterServerFile{Name: entry.Name(), Size: info.Size(), ModTime: info.ModTime().Unix()})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
+	return files, nil
+}
+
+func OpenAppCenterServerFile(name string) (*os.File, error) {
+	if filepath.Base(name) != name {
+		return nil, ErrAppCenterInvalid
+	}
+	return os.Open(filepath.Join(AppCenterImportDir(), name))
+}
+
 func FindAppCenterAsset(appID, id int64) (*model.AppCenterAsset, error) {
 	var a model.AppCenterAsset
 	err := model.DB.Joins("JOIN app_center_releases ON app_center_releases.id = app_center_assets.release_id").Where("app_center_assets.id = ? AND app_center_releases.app_id = ? AND app_center_releases.status = ? AND app_center_releases.published_at <= ?", id, appID, model.AppCenterReleasePublished, time.Now().UTC()).First(&a).Error
