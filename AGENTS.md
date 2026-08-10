@@ -11,6 +11,7 @@ DO NOT send optional commentary
 - A change is "deployed" only when a freshly built image containing it is running in production and health checks pass. Committed+pushed code is NOT deployed.
 - After any delivery accepted for production, build the image, deploy it to `new-api-dev`, and verify health checks yourself — do not stop at "offer to deploy". If the change is not deployed, say so explicitly and do not imply otherwise.
 - Keep the deployment cycle self-contained per delivery: commit → push → build image → replace container → health check.
+- After each successful deployment, clean up stale Docker images yourself: prune dangling images (`docker image prune -f`) and remove all old `new-api-dev` tags except the currently running one (keep at most one rollback image if desired). Keep exactly one backup image (`new-api-backup`).
 
 ## Agent Delegation
 
