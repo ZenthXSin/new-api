@@ -22,6 +22,7 @@ import { SSRFSection } from '../request-limits/ssrf-section'
 import { TokenLimitSection } from '../request-limits/token-limit-section'
 import type { SecuritySettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { IPGuardSection } from './ipguard-section'
 
 const SECURITY_SECTIONS = [
   {
@@ -86,6 +87,34 @@ const SECURITY_SECTIONS = [
         defaultValues={{
           'token_setting.max_user_tokens':
             settings['token_setting.max_user_tokens'],
+        }}
+      />
+    ),
+  },
+  {
+    id: 'ip-guard',
+    titleKey: 'IP Attack Guard',
+    build: (settings: SecuritySettings) => (
+      <IPGuardSection
+        defaultValues={{
+          IPGuardEnabled: settings.IPGuardEnabled,
+          IPGuardLogDir: settings.IPGuardLogDir,
+          IPGuardIntervalSeconds: settings.IPGuardIntervalSeconds,
+          IPGuardScanWindowSeconds: settings.IPGuardScanWindowSeconds,
+          IPGuardWhitelist: settings.IPGuardWhitelist,
+          IPGuardDryRun: settings.IPGuardDryRun,
+          IPGuardEnforceReal: settings.IPGuardEnforceReal,
+          IPGuardEnforceCommand: settings.IPGuardEnforceCommand,
+          IPGuardBanDurations: settings.IPGuardBanDurations,
+          IPGuardHeuristics: settings.IPGuardHeuristics,
+          IPGuardLLMModel: settings.IPGuardLLMModel,
+          IPGuardLLMToken: settings.IPGuardLLMToken,
+          IPGuardLLMBaseURL: settings.IPGuardLLMBaseURL,
+          IPGuardLLMBatchSize: settings.IPGuardLLMBatchSize,
+          IPGuardLLMMaxCallsPerRun: settings.IPGuardLLMMaxCallsPerRun,
+          IPGuardLLMMaxCallsPerDay: settings.IPGuardLLMMaxCallsPerDay,
+          IPGuardLLMMaxTokens: settings.IPGuardLLMMaxTokens,
+          IPGuardLLMCorroborationRate: settings.IPGuardLLMCorroborationRate,
         }}
       />
     ),

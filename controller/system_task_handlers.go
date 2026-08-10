@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
 
@@ -22,6 +23,7 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(modelUpdateHandler{})
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
+	service.RegisterSystemTaskHandler(ipguardScanHandler{})
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and
@@ -149,6 +151,40 @@ func (asyncTaskPollHandler) NewPayload() any { return nil }
 
 func (asyncTaskPollHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
 	summary := service.RunTaskPollingOnce(ctx, service.NewSystemTaskProgressReporter(task, runnerID))
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
+}
+
+// ipguardScanHandler runs the scheduled (or on-demand) IPGuard scan pass.
+// Enablement comes from the IPGuard settings; the cadence is the configured
+// scan interval.
+type ipguardScanHandler struct{}
+
+func (ipguardScanHandler) Type() string { return model.SystemTaskTypeIPGuardScan }
+
+func (ipguardScanHandler) Enabled() bool { return setting.IPGuardEnabled() }
+
+func (ipguardScanHandler) Interval() time.Duration { return setting.IPGuardScanInterval() }
+
+func (ipguardScanHandler) NewPayload() any { return nil }
+
+func (ipguardScanHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	report, err := service.RunIPGuardScanOnce(ctx)
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	summary := map[string]any{
+		"total_events":      report.TotalEvents,
+		"parsed_count":      report.ParsedCount,
+		"profiles_count":    report.ProfilesCount,
+		"clear_cut_count":   report.ClearCutCount,
+		"llm_calls":         report.LLMCalls,
+		"actions":           len(report.Actions),
+		"skipped":           report.Skipped,
+		"window_start":      report.WindowStart,
+		"window_end":        report.WindowEnd,
+		"deferred_reassess": report.DeferredReassess,
+	}
 	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
 }
 

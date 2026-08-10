@@ -332,6 +332,14 @@ func SetApiRouter(router *gin.Engine) {
 		financeRoute.GET("/overview", middleware.AdminAuth(), controller.GetFinanceOverview)
 		financeRoute.GET("/trends", middleware.AdminAuth(), controller.GetFinanceTrends)
 
+		ipguardRoute := apiRouter.Group("/ipguard")
+		ipguardRoute.Use(middleware.RootAuth())
+		{
+			ipguardRoute.GET("/status", controller.GetIPGuardStatus)
+			ipguardRoute.POST("/unban", controller.UnbanIPGuard)
+			ipguardRoute.POST("/scan", controller.ScanIPGuardNow)
+		}
+
 		systemTaskRoute := apiRouter.Group("/system-task")
 		systemTaskRoute.Use(middleware.RootAuth())
 		{

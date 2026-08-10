@@ -21,6 +21,7 @@ import { api } from '@/lib/api'
 import type {
   ConfirmPaymentComplianceResponse,
   FetchUpstreamRatiosRequest,
+  IPGuardStatusResponse,
   LogCleanupTask,
   SystemOptionsResponse,
   SystemTaskListResponse,
@@ -95,6 +96,27 @@ export async function getUpstreamChannels() {
   const res = await api.get<UpstreamChannelsResponse>(
     '/api/ratio_sync/channels'
   )
+  return res.data
+}
+
+export async function getIPGuardStatus() {
+  const res = await api.get<IPGuardStatusResponse>('/api/ipguard/status')
+  return res.data
+}
+
+export async function unbanIPGuardIP(ip: string) {
+  const res = await api.post<UpdateOptionResponse>('/api/ipguard/unban', {
+    ip,
+  })
+  return res.data
+}
+
+export async function scanIPGuardNow() {
+  const res = await api.post<{
+    success: boolean
+    message: string
+    data: { task_id: string; created: boolean }
+  }>('/api/ipguard/scan')
   return res.data
 }
 

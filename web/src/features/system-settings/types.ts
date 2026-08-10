@@ -390,6 +390,53 @@ export type SecuritySettings = {
   'fetch_setting.allowed_ports': number[]
   'fetch_setting.apply_ip_filter_for_domain': boolean
   'token_setting.max_user_tokens': number
+  IPGuardEnabled: boolean
+  IPGuardLogDir: string
+  IPGuardIntervalSeconds: number
+  IPGuardScanWindowSeconds: number
+  IPGuardWhitelist: string
+  IPGuardDryRun: boolean
+  IPGuardEnforceReal: boolean
+  IPGuardEnforceCommand: string
+  IPGuardBanDurations: string
+  IPGuardHeuristics: string
+  IPGuardLLMModel: string
+  IPGuardLLMToken: string
+  IPGuardLLMBaseURL: string
+  IPGuardLLMBatchSize: number
+  IPGuardLLMMaxCallsPerRun: number
+  IPGuardLLMMaxCallsPerDay: number
+  IPGuardLLMMaxTokens: number
+  IPGuardLLMCorroborationRate: number
+}
+
+export type IPGuardBan = {
+  ip: string
+  action: string
+  reason: string
+  duration: number
+  ts: number
+  expires_at?: number
+}
+
+export type IPGuardStatusResponse = {
+  success: boolean
+  message: string
+  data: {
+    enabled: boolean
+    dry_run: boolean
+    enforce_real: boolean
+    real_armed: boolean
+    llm_configured: boolean
+    log_dir: string
+    active_bans: IPGuardBan[]
+    recent_bans: IPGuardBan[]
+    last_scan?: {
+      scan_ts: number
+      watermark: number
+      stats: Record<string, unknown>
+    }
+  }
 }
 
 export type UpstreamChannel = {

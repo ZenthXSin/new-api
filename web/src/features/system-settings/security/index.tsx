@@ -42,6 +42,25 @@ const defaultSecuritySettings: SecuritySettings = {
   'fetch_setting.allowed_ports': [],
   'fetch_setting.apply_ip_filter_for_domain': false,
   'token_setting.max_user_tokens': 1000,
+  IPGuardEnabled: false,
+  IPGuardLogDir: '/var/log',
+  IPGuardIntervalSeconds: 3600,
+  IPGuardScanWindowSeconds: 3600,
+  IPGuardWhitelist: '["127.0.0.1"]',
+  IPGuardDryRun: true,
+  IPGuardEnforceReal: false,
+  IPGuardEnforceCommand: 'iptables',
+  IPGuardBanDurations:
+    '{"suspect": 900, "malicious": 21600, "critical": 86400}',
+  IPGuardHeuristics: '{}',
+  IPGuardLLMModel: '',
+  IPGuardLLMToken: '',
+  IPGuardLLMBaseURL: '',
+  IPGuardLLMBatchSize: 5,
+  IPGuardLLMMaxCallsPerRun: 20,
+  IPGuardLLMMaxCallsPerDay: 500,
+  IPGuardLLMMaxTokens: 256,
+  IPGuardLLMCorroborationRate: 3,
 }
 
 export function SecuritySettings() {

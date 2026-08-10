@@ -218,8 +218,8 @@ func GetWeChatPayOrder(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "success",
 		"data": gin.H{
-			"order_id":          tradeNo,
-			"status":            topUp.Status,
+			"order_id":           tradeNo,
+			"status":             topUp.Status,
 			"verification_error": verificationError,
 		},
 	})

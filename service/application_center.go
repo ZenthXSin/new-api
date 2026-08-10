@@ -25,6 +25,7 @@ import (
 )
 
 var AppCenterStorageRoot = "/data/app-center"
+
 const AppCenterMaxAssetBytes int64 = 512 << 20
 const AppCenterMaxEventBuckets int64 = 10000
 
@@ -307,7 +308,8 @@ func AppCenterUpdateAvailable(current, available string) bool {
 	return leftErr == nil && rightErr == nil && right.GreaterThan(left)
 }
 
-func UploadAppCenterAsset(appID, releaseID int64, platform, arch, filename, contentType string, src io.Reader) (*model.AppCenterAsset, error) {	if !validCenterTag(platform) || !validCenterTag(arch) || src == nil || strings.TrimSpace(filename) == "" || len(filename) > 255 {
+func UploadAppCenterAsset(appID, releaseID int64, platform, arch, filename, contentType string, src io.Reader) (*model.AppCenterAsset, error) {
+	if !validCenterTag(platform) || !validCenterTag(arch) || src == nil || strings.TrimSpace(filename) == "" || len(filename) > 255 {
 		return nil, ErrAppCenterInvalid
 	}
 	var r model.AppCenterRelease
