@@ -18,9 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { VChart } from '@visactor/react-vchart'
 import { LineChart } from 'lucide-react'
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { formatLogQuota } from '@/lib/format'
 import { useChartTheme } from '@/lib/use-chart-theme'
 import { VCHART_OPTION } from '@/lib/vchart'
 
@@ -83,7 +84,16 @@ export function RevenueTrendChart({
   const { t } = useTranslation()
   const { resolvedTheme, themeReady } = useChartTheme()
   const tokens = useMemo(() => chartTokens(resolvedTheme), [resolvedTheme])
-  const points = data ?? []
+  const points = useMemo(() => data ?? [], [data])
+
+  const seriesLabel = useCallback(
+    (series: string) => {
+      if (series === 'revenue') return t('Revenue')
+      if (series === 'cost') return t('Cost')
+      return t('Gross Profit')
+    },
+    [t]
+  )
 
   const spec = useMemo(() => {
     if (points.length === 0) return null
@@ -105,9 +115,10 @@ export function RevenueTrendChart({
       tooltip: {
         dimension: {
           content: [
-            { key: t('Revenue'), value: 'value' },
-            { key: t('Cost'), value: 'value' },
-            { key: t('Gross Profit'), value: 'value' },
+            {
+              key: (datum: { series: string }) => seriesLabel(datum.series),
+              value: (datum: { value: number }) => formatLogQuota(datum.value),
+            },
           ],
         },
       },
@@ -128,7 +139,7 @@ export function RevenueTrendChart({
       ],
       animationAppear: { duration: 350 },
     }
-  }, [points, t, tokens])
+  }, [points, seriesLabel, tokens])
 
   if (loading) {
     return (

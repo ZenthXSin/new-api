@@ -75,7 +75,7 @@ export function Finance() {
               'Last 30 Days',
           ]}
           onValueChange={(value) => {
-            const selected = value[value.length - 1]
+            const selected = value.at(-1)
             const option = RANGE_OPTIONS.find(
               (item) => item.labelKey === selected
             )

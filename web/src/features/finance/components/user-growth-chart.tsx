@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { VChart } from '@visactor/react-vchart'
 import { UserPlus } from 'lucide-react'
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useChartTheme } from '@/lib/use-chart-theme'
@@ -54,7 +54,7 @@ export function UserGrowthChart({
   const { t } = useTranslation()
   const { resolvedTheme, themeReady } = useChartTheme()
   const tokens = useMemo(() => chartTokens(resolvedTheme), [resolvedTheme])
-  const points = data ?? []
+  const points = useMemo(() => data ?? [], [data])
 
   const flat = useMemo(
     () =>
@@ -63,6 +63,14 @@ export function UserGrowthChart({
         { date: point.date, series: 'paid', value: point.paid_users },
       ]),
     [points]
+  )
+
+  const seriesLabel = useCallback(
+    (series: string) => {
+      if (series === 'new') return t('New Users')
+      return t('Paid Users')
+    },
+    [t]
   )
 
   const spec = useMemo(() => {
@@ -80,8 +88,10 @@ export function UserGrowthChart({
       tooltip: {
         dimension: {
           content: [
-            { key: t('New Users'), value: 'value' },
-            { key: t('Paid Users'), value: 'value' },
+            {
+              key: (datum: { series: string }) => seriesLabel(datum.series),
+              value: (datum: { value: number }) => String(datum.value),
+            },
           ],
         },
       },
@@ -102,7 +112,44 @@ export function UserGrowthChart({
       ],
       animationAppear: { duration: 350 },
     }
-  }, [flat, points.length, t, tokens])
+  }, [flat, points.length, seriesLabel, tokens])
+
+  let body: React.ReactNode
+  if (loading) {
+    body = (
+      <div className='text-muted-foreground flex h-40 items-center justify-center text-sm'>
+        {t('Loading')}
+      </div>
+    )
+  } else if (error) {
+    body = (
+      <div className='text-destructive flex h-40 items-center justify-center text-sm'>
+        {t('Failed to load finance overview')}
+      </div>
+    )
+  } else if (points.length === 0) {
+    body = (
+      <div className='text-muted-foreground flex h-40 items-center justify-center text-sm'>
+        {t('No Data')}
+      </div>
+    )
+  } else {
+    body = (
+      <div className='h-64 sm:h-72'>
+        {themeReady && spec && (
+          <VChart
+            key={`user-growth-${resolvedTheme}`}
+            spec={{
+              ...spec,
+              theme: resolvedTheme === 'dark' ? 'dark' : 'light',
+              background: 'transparent',
+            }}
+            option={VCHART_OPTION}
+          />
+        )}
+      </div>
+    )
+  }
 
   return (
     <section className='border-border bg-card rounded-lg border p-4'>
@@ -112,33 +159,7 @@ export function UserGrowthChart({
         </span>
         <h3 className='text-sm font-semibold'>{t('User Growth')}</h3>
       </header>
-      {loading ? (
-        <div className='text-muted-foreground flex h-40 items-center justify-center text-sm'>
-          {t('Loading')}
-        </div>
-      ) : error ? (
-        <div className='text-destructive flex h-40 items-center justify-center text-sm'>
-          {t('Failed to load finance overview')}
-        </div>
-      ) : points.length === 0 ? (
-        <div className='text-muted-foreground flex h-40 items-center justify-center text-sm'>
-          {t('No Data')}
-        </div>
-      ) : (
-        <div className='h-64 sm:h-72'>
-          {themeReady && spec && (
-            <VChart
-              key={`user-growth-${resolvedTheme}`}
-              spec={{
-                ...spec,
-                theme: resolvedTheme === 'dark' ? 'dark' : 'light',
-                background: 'transparent',
-              }}
-              option={VCHART_OPTION}
-            />
-          )}
-        </div>
-      )}
+      {body}
     </section>
   )
 }
