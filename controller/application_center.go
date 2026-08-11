@@ -321,12 +321,21 @@ func PublishAppCenterRelease(c *gin.Context) {
 	appCenterJSON(c, 200, r)
 }
 func ListAppCenterServerFiles(c *gin.Context) {
-	files, err := service.ListAppCenterServerFiles()
+	path := strings.TrimSpace(c.Query("path"))
+	files, err := service.ListAppCenterServerDir(path)
 	if err != nil {
-		appCenterError(c, 500)
+		if errors.Is(err, service.ErrAppCenterInvalid) {
+			appCenterError(c, http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, service.ErrAppCenterNotFound) {
+			appCenterError(c, http.StatusNotFound)
+			return
+		}
+		appCenterError(c, http.StatusInternalServerError)
 		return
 	}
-	appCenterJSON(c, 200, files)
+	appCenterJSON(c, http.StatusOK, files)
 }
 
 func UploadAppCenterAsset(c *gin.Context) {
@@ -344,6 +353,10 @@ func UploadAppCenterAsset(c *gin.Context) {
 	if serverFile != "" {
 		f, err := service.OpenAppCenterServerFile(serverFile)
 		if err != nil {
+			if errors.Is(err, service.ErrAppCenterInvalid) {
+				appCenterError(c, http.StatusBadRequest)
+				return
+			}
 			appCenterError(c, http.StatusNotFound)
 			return
 		}

@@ -222,16 +222,20 @@ func TestDownloadAppCenterAssetSetsContentDisposition(t *testing.T) {
 
 func TestListAppCenterServerFilesAndServerFileUpload(t *testing.T) {
 	previousDB, previousSecret := model.DB, common.CryptoSecret
-	previousRoot := service.AppCenterStorageRoot
+	previousStorageRoot := service.AppCenterStorageRoot
+	previousBrowseRoot := service.AppCenterBrowseRoot
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.AppCenterApp{}, &model.AppCenterRelease{}, &model.AppCenterAsset{}))
 	model.DB, common.CryptoSecret = db, "controller-app-center-secret"
-	root := t.TempDir()
-	service.AppCenterStorageRoot = root
+	storageRoot := t.TempDir()
+	browseRoot := t.TempDir()
+	service.AppCenterStorageRoot = storageRoot
+	service.AppCenterBrowseRoot = browseRoot
 	t.Cleanup(func() {
 		model.DB, common.CryptoSecret = previousDB, previousSecret
-		service.AppCenterStorageRoot = previousRoot
+		service.AppCenterStorageRoot = previousStorageRoot
+		service.AppCenterBrowseRoot = previousBrowseRoot
 	})
 
 	app, _, err := service.CreateAppCenterApp("Server", "server-app", "", true, true)
@@ -239,50 +243,145 @@ func TestListAppCenterServerFilesAndServerFileUpload(t *testing.T) {
 	release, err := service.CreateAppCenterRelease(app.ID, service.AppCenterReleaseInput{Version: "1.0.0", Channel: "stable"})
 	require.NoError(t, err)
 
-	importDir := filepath.Join(root, "imports")
-	require.NoError(t, os.MkdirAll(importDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(importDir, "server-package-1.0.0.apk"), []byte("server-bytes"), 0o640))
-	require.NoError(t, os.MkdirAll(filepath.Join(importDir, "subdir"), 0o750))
+	require.NoError(t, os.MkdirAll(filepath.Join(browseRoot, "sub"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(browseRoot, "a.bin"), []byte("root-bytes"), 0o640))
+	require.NoError(t, os.WriteFile(filepath.Join(browseRoot, "sub", "b.bin"), []byte("sub-bytes"), 0o640))
+	outside := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("top-secret"), 0o640))
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.GET("/api/app-center/files", ListAppCenterServerFiles)
 	router.POST("/api/app-center/apps/:id/releases/:release_id/assets", UploadAppCenterAsset)
 
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/app-center/files", nil))
-	require.Equal(t, http.StatusOK, rec.Code)
-	var listResponse struct {
-		Data []service.AppCenterServerFile `json:"data"`
+	list := func(queryPath string) []service.AppCenterServerFile {
+		rec := httptest.NewRecorder()
+		target := "/api/app-center/files"
+		if queryPath != "" {
+			target += "?path=" + queryPath
+		}
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+		require.Equal(t, http.StatusOK, rec.Code)
+		var response struct {
+			Data []service.AppCenterServerFile `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+		return response.Data
 	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &listResponse))
-	require.Len(t, listResponse.Data, 1)
-	assert.Equal(t, "server-package-1.0.0.apk", listResponse.Data[0].Name)
-	assert.Equal(t, int64(len("server-bytes")), listResponse.Data[0].Size)
+	upload := func(serverFile string) *httptest.ResponseRecorder {
+		form := url.Values{}
+		form.Set("platform", "linux")
+		form.Set("architecture", "amd64")
+		form.Set("server_file", serverFile)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/app-center/apps/%d/releases/%d/assets", app.ID, release.ID), strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		router.ServeHTTP(rec, req)
+		return rec
+	}
 
-	form := url.Values{}
-	form.Set("platform", "linux")
-	form.Set("architecture", "amd64")
-	form.Set("server_file", "server-package-1.0.0.apk")
-	uploadRec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/app-center/apps/%d/releases/%d/assets", app.ID, release.ID), strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	router.ServeHTTP(uploadRec, req)
+	// 根目录列举:目录在前,文件在后,同类型按名称排序
+	files := list("")
+	require.Len(t, files, 2)
+	assert.Equal(t, "sub", files[0].Name)
+	assert.True(t, files[0].IsDir)
+	assert.Equal(t, int64(0), files[0].Size)
+	assert.Equal(t, "a.bin", files[1].Name)
+	assert.False(t, files[1].IsDir)
+	assert.Equal(t, int64(len("root-bytes")), files[1].Size)
+
+	// 子目录列举
+	subFiles := list("sub")
+	require.Len(t, subFiles, 1)
+	assert.Equal(t, "b.bin", subFiles[0].Name)
+	assert.False(t, subFiles[0].IsDir)
+	assert.Equal(t, int64(len("sub-bytes")), subFiles[0].Size)
+
+	// server_file 导入子目录文件
+	uploadRec := upload("sub/b.bin")
 	require.Equal(t, http.StatusCreated, uploadRec.Code)
 	var uploadResponse struct {
 		Data model.AppCenterAsset `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(uploadRec.Body.Bytes(), &uploadResponse))
-	assert.Equal(t, "server-package-1.0.0.apk", uploadResponse.Data.Filename)
-	assert.Equal(t, int64(len("server-bytes")), uploadResponse.Data.Size)
-	assert.Equal(t, "application/vnd.android.package-archive", uploadResponse.Data.ContentType)
+	assert.Equal(t, "b.bin", uploadResponse.Data.Filename)
+	assert.Equal(t, int64(len("sub-bytes")), uploadResponse.Data.Size)
 
-	missingRec := httptest.NewRecorder()
-	form.Set("server_file", "no-such-file.apk")
-	missingReq := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/app-center/apps/%d/releases/%d/assets", app.ID, release.ID), strings.NewReader(form.Encode()))
-	missingReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	router.ServeHTTP(missingRec, missingReq)
+	// server_file 携带浏览根前缀(前缀与注入的浏览根一致)
+	prefixedRec := upload(browseRoot + "/sub/b.bin")
+	require.Equal(t, http.StatusCreated, prefixedRec.Code)
+	require.NoError(t, json.Unmarshal(prefixedRec.Body.Bytes(), &uploadResponse))
+	assert.Equal(t, "b.bin", uploadResponse.Data.Filename)
+
+	// server_file 逃逸浏览根(..)应被拒绝
+	escapeRec := upload("../evil.bin")
+	assert.Equal(t, http.StatusBadRequest, escapeRec.Code)
+
+	// server_file 经由浏览根内指向根外的符号链接也应被拒绝
+	require.NoError(t, os.Symlink(outside, filepath.Join(browseRoot, "linkdir")))
+	symlinkRec := upload("linkdir/secret.txt")
+	assert.Equal(t, http.StatusBadRequest, symlinkRec.Code)
+
+	// 不存在的 server_file
+	missingRec := upload("no-such-file.apk")
 	assert.Equal(t, http.StatusNotFound, missingRec.Code)
+}
+
+func TestListAppCenterServerFilesRejectsEscapeAndMissingPaths(t *testing.T) {
+	previousBrowseRoot := service.AppCenterBrowseRoot
+	browseRoot := t.TempDir()
+	service.AppCenterBrowseRoot = browseRoot
+	t.Cleanup(func() { service.AppCenterBrowseRoot = previousBrowseRoot })
+
+	require.NoError(t, os.MkdirAll(filepath.Join(browseRoot, "sub"), 0o750))
+	outside := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("top-secret"), 0o640))
+	require.NoError(t, os.Symlink(outside, filepath.Join(browseRoot, "linkdir")))
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/api/app-center/files", ListAppCenterServerFiles)
+
+	for _, p := range []string{"..", "../../etc", "/etc", "%2e%2e%2fetc", "linkdir", "linkdir/secret.txt"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/app-center/files?path="+p, nil))
+		assert.NotEqual(t, http.StatusOK, rec.Code, "path %q must not be served", p)
+		assert.Contains(t, []int{http.StatusBadRequest, http.StatusNotFound}, rec.Code, "path %q", p)
+		assert.NotContains(t, rec.Body.String(), "top-secret")
+	}
+
+	// 浏览根内不存在的目录
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/app-center/files?path=nope", nil))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestListAppCenterServerFilesSkipsSymlinks(t *testing.T) {
+	previousBrowseRoot := service.AppCenterBrowseRoot
+	browseRoot := t.TempDir()
+	service.AppCenterBrowseRoot = browseRoot
+	t.Cleanup(func() { service.AppCenterBrowseRoot = previousBrowseRoot })
+
+	require.NoError(t, os.WriteFile(filepath.Join(browseRoot, "real.bin"), []byte("real"), 0o640))
+	outside := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret.bin"), []byte("secret"), 0o640))
+	require.NoError(t, os.Symlink(filepath.Join(outside, "secret.bin"), filepath.Join(browseRoot, "link.bin")))
+	require.NoError(t, os.Symlink(outside, filepath.Join(browseRoot, "linkdir")))
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/api/app-center/files", ListAppCenterServerFiles)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/app-center/files", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response struct {
+		Data []service.AppCenterServerFile `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Len(t, response.Data, 1)
+	assert.Equal(t, "real.bin", response.Data[0].Name)
+	assert.NotContains(t, rec.Body.String(), "link.bin")
+	assert.NotContains(t, rec.Body.String(), "linkdir")
 }
 
 func TestGetAppCenterDownloadsFiltersHourWindowAndSortsAscending(t *testing.T) {

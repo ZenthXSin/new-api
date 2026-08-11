@@ -221,10 +221,14 @@ export function getDistributionAssetDownloadUrl(slug: string, id: number) {
 export function getManagedDistributionApps() {
   return get<DistributionApp[]>('/api/app-center/apps')
 }
-export function getAppCenterServerFiles() {
-  return get<Array<{ name: string; size: number; mod_time: number }>>(
-    '/api/app-center/files'
-  )
+export type AppCenterServerFile = {
+  name: string
+  size: number
+  mod_time: number
+  is_dir: boolean
+}
+export function getAppCenterServerFiles(path?: string) {
+  return get<AppCenterServerFile[]>('/api/app-center/files', { path })
 }
 export function createManagedDistributionApp(input: {
   name: string

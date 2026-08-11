@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Copy,
   FileUp,
+  FolderOpen,
   KeyRound,
   Megaphone,
   PackagePlus,
@@ -40,7 +41,6 @@ import {
   getCustomEventTrend,
   getCustomEventRegions,
   getAppCenterDownloads,
-  getAppCenterServerFiles,
   getManagedDistributionAnnouncements,
   getManagedDistributionApps,
   getManagedDistributionReleases,
@@ -53,7 +53,12 @@ import {
   uploadManagedDistributionAsset,
   distributionErrorMessage,
 } from './api'
+import { ServerFileBrowserDialog } from './components/server-file-browser-dialog'
 import { DistributionTargetSelects } from './distribution-target-selects'
+import {
+  clearBrowserSelection,
+  displayServerPath,
+} from './lib/server-file-browser'
 import {
   DownloadsTrendChart,
   TelemetryBarChart,
@@ -71,18 +76,6 @@ import {
   summarizeEvents,
   summarizeUsage,
 } from './telemetry-data'
-
-function formatFileSize(bytes: number) {
-  if (!Number.isFinite(bytes) || bytes < 1024) return `${bytes || 0} B`
-  const units = ['KB', 'MB', 'GB']
-  let value = bytes / 1024
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit += 1
-  }
-  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`
-}
 
 export function DistributionAdmin() {
   const { t } = useTranslation()
@@ -109,15 +102,11 @@ export function DistributionAdmin() {
   const [file, setFile] = useState<File | null>(null)
   const [uploadMode, setUploadMode] = useState<'local' | 'server'>('local')
   const [serverFile, setServerFile] = useState('')
+  const [serverFileBrowserOpen, setServerFileBrowserOpen] = useState(false)
   const [token, setToken] = useState('')
   const appsQuery = useQuery({
     queryKey: ['app-center-apps'],
     queryFn: getManagedDistributionApps,
-  })
-  const serverFilesQuery = useQuery({
-    queryKey: ['app-center-server-files'],
-    queryFn: getAppCenterServerFiles,
-    enabled: uploadMode === 'server',
   })
   const app = (appsQuery.data?.data ?? []).find(
     (item) => item.id === selectedID
@@ -587,7 +576,9 @@ export function DistributionAdmin() {
                         className='border-input bg-background h-9 rounded-md border px-2 text-sm'
                       >
                         <option value='local'>{'本地上传'}</option>
-                        <option value='server'>{'选择服务器文件'}</option>
+                        <option value='server'>
+                          {t('Select server file')}
+                        </option>
                       </select>
                       <div className='flex gap-2'>
                         {uploadMode === 'local' ? (
@@ -598,18 +589,21 @@ export function DistributionAdmin() {
                             }
                           />
                         ) : (
-                          <select
-                            value={serverFile}
-                            onChange={(e) => setServerFile(e.target.value)}
-                            className='border-input bg-background h-9 min-w-0 flex-1 rounded-md border px-2 text-sm'
+                          <Button
+                            variant='outline'
+                            onClick={() => setServerFileBrowserOpen(true)}
+                            className='min-w-0 flex-1 justify-start'
                           >
-                            <option value=''>{'选择服务器文件'}</option>
-                            {(serverFilesQuery.data?.data ?? []).map((item) => (
-                              <option key={item.name} value={item.name}>
-                                {item.name} ({formatFileSize(item.size)})
-                              </option>
-                            ))}
-                          </select>
+                            <FolderOpen
+                              className='mr-1 size-4 shrink-0'
+                              aria-hidden
+                            />
+                            <span className='min-w-0 truncate'>
+                              {serverFile
+                                ? displayServerPath(serverFile)
+                                : t('Select server file')}
+                            </span>
+                          </Button>
                         )}
                         <Button
                           disabled={
@@ -659,6 +653,16 @@ export function DistributionAdmin() {
               )}
             </>
           )}
+          <ServerFileBrowserDialog
+            open={serverFileBrowserOpen}
+            onOpenChange={setServerFileBrowserOpen}
+            selectedPath={serverFile}
+            onSelect={(relPath) => {
+              setServerFile(relPath)
+              setServerFileBrowserOpen(false)
+              clearBrowserSelection()
+            }}
+          />
         </div>
       </SectionPageLayout.Content>
     </SectionPageLayout>

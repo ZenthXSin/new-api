@@ -346,46 +346,122 @@ func UploadAppCenterAsset(appID, releaseID int64, platform, arch, filename, cont
 	return a, nil
 }
 
-// AppCenterImportDir 服务器文件导入目录:管理员把安装包放到该目录后,
-// 可经由 upload 的 server_file 字段直接导入,无需重新上传。
-func AppCenterImportDir() string {
-	return filepath.Join(AppCenterStorageRoot, "imports")
-}
+// AppCenterBrowseRoot 服务器文件浏览根目录:管理员可在该目录内按相对路径
+// 浏览文件树,并把其中任意文件(含子目录内文件)作为 server_file 直接导入。
+var AppCenterBrowseRoot = "/root"
 
 type AppCenterServerFile struct {
 	Name    string `json:"name"`
 	Size    int64  `json:"size"`
 	ModTime int64  `json:"mod_time"`
+	IsDir   bool   `json:"is_dir"`
 }
 
-func ListAppCenterServerFiles() ([]AppCenterServerFile, error) {
-	entries, err := os.ReadDir(AppCenterImportDir())
+// resolveAppCenterServerPath 将调用方传入的路径归一化为浏览根内的绝对路径。
+// 兼容 "/root/foo"、"foo"、"/root"、"foo/bar" 等写法,拒绝任何逃逸浏览根的路径。
+func resolveAppCenterServerPath(relPath string) (string, error) {
+	p := strings.TrimPrefix(relPath, AppCenterBrowseRoot+string(os.PathSeparator))
+	p = strings.TrimPrefix(p, AppCenterBrowseRoot)
+	p = strings.TrimPrefix(p, string(os.PathSeparator))
+	p = filepath.Clean(p)
+	if p == ".." || strings.HasPrefix(p, ".."+string(os.PathSeparator)) || filepath.IsAbs(p) {
+		return "", ErrAppCenterInvalid
+	}
+	root := filepath.Join(AppCenterBrowseRoot, p)
+	if root != AppCenterBrowseRoot && !strings.HasPrefix(root, AppCenterBrowseRoot+string(os.PathSeparator)) {
+		return "", ErrAppCenterInvalid
+	}
+	return root, nil
+}
+
+// resolveBrowseContained 解析符号链接后再次确认路径仍位于浏览根内,防止
+// 中间路径组件是符号链接时越过浏览根,返回解析后的绝对路径。
+func resolveBrowseContained(root string) (string, error) {
+	realRoot, err := filepath.EvalSymlinks(AppCenterBrowseRoot)
+	if err != nil {
+		return "", ErrAppCenterInvalid
+	}
+	real, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return []AppCenterServerFile{}, nil
+			return "", ErrAppCenterNotFound
+		}
+		return "", ErrAppCenterInvalid
+	}
+	if real != realRoot && !strings.HasPrefix(real, realRoot+string(os.PathSeparator)) {
+		return "", ErrAppCenterInvalid
+	}
+	return real, nil
+}
+
+// ListAppCenterServerDir 列出浏览根下 relPath 目录的内容(文件与子目录,目录在前)。
+// relPath 为空或 "/" 表示根目录;目录不存在返回 ErrAppCenterNotFound,
+// 路径逃逸浏览根或不是目录返回 ErrAppCenterInvalid。
+func ListAppCenterServerDir(relPath string) ([]AppCenterServerFile, error) {
+	root, err := resolveAppCenterServerPath(relPath)
+	if err != nil {
+		return nil, err
+	}
+	real, err := resolveBrowseContained(root)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(real)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrAppCenterNotFound
+		}
+		return nil, ErrAppCenterInvalid
+	}
+	if !info.IsDir() {
+		return nil, ErrAppCenterInvalid
+	}
+	entries, err := os.ReadDir(real)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrAppCenterNotFound
 		}
 		return nil, err
 	}
 	files := make([]AppCenterServerFile, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
 		info, err := entry.Info()
 		if err != nil {
 			continue
 		}
-		files = append(files, AppCenterServerFile{Name: entry.Name(), Size: info.Size(), ModTime: info.ModTime().Unix()})
+		// 跳过符号链接,防止借助链接读取浏览根之外的文件
+		if info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		f := AppCenterServerFile{Name: entry.Name(), ModTime: info.ModTime().Unix()}
+		if entry.IsDir() {
+			f.IsDir = true
+		} else {
+			f.Size = info.Size()
+		}
+		files = append(files, f)
 	}
-	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].IsDir != files[j].IsDir {
+			return files[i].IsDir
+		}
+		return files[i].Name < files[j].Name
+	})
 	return files, nil
 }
 
-func OpenAppCenterServerFile(name string) (*os.File, error) {
-	if filepath.Base(name) != name {
-		return nil, ErrAppCenterInvalid
+// OpenAppCenterServerFile 打开浏览根内 relPath 指向的服务器文件(支持子目录),
+// 供 upload 的 server_file 字段直接导入;文件不存在时返回 error。
+func OpenAppCenterServerFile(relPath string) (*os.File, error) {
+	root, err := resolveAppCenterServerPath(relPath)
+	if err != nil {
+		return nil, err
 	}
-	return os.Open(filepath.Join(AppCenterImportDir(), name))
+	real, err := resolveBrowseContained(root)
+	if err != nil {
+		return nil, err
+	}
+	return os.Open(real)
 }
 
 func FindAppCenterAsset(appID, id int64) (*model.AppCenterAsset, error) {
