@@ -31,6 +31,7 @@ import {
   sideDrawerHeaderClassName,
   sideDrawerSwitchItemClassName,
 } from '@/components/drawer-layout'
+import { MultiSelect } from '@/components/multi-select'
 import { Button } from '@/components/ui/button'
 import {
   Form,
@@ -421,6 +422,33 @@ export function SubscriptionsMutateDrawer({
                           </SelectGroup>
                         </SelectContent>
                       </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='allowed_groups'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Allowed Groups')}</FormLabel>
+                      <FormControl>
+                        <MultiSelect
+                          options={groupOptions.map((g) => ({
+                            value: g,
+                            label: g,
+                          }))}
+                          selected={field.value || []}
+                          onChange={field.onChange}
+                          placeholder={t('No restriction')}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Restrict which groups may use this subscription. Leave empty to allow all groups.'
+                        )}
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}

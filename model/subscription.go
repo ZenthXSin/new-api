@@ -178,6 +178,9 @@ type SubscriptionPlan struct {
 	// Downgrade user group on expiry (empty = revert to the group held before purchase)
 	DowngradeGroup string `json:"downgrade_group" gorm:"type:varchar(64);default:''"`
 
+	// Allowed groups for using this plan's subscription quota (comma-separated group names, empty = no restriction)
+	AllowedGroups string `json:"allowed_groups" gorm:"type:varchar(255);default:''"`
+
 	// Total quota (amount in quota units, 0 = unlimited)
 	TotalAmount int64 `json:"total_amount" gorm:"type:bigint;not null;default:0"`
 
@@ -272,6 +275,9 @@ type UserSubscription struct {
 
 	// Downgrade target group on expiry (snapshot from plan; empty = revert to PrevUserGroup)
 	DowngradeGroup string `json:"downgrade_group" gorm:"type:varchar(64);default:''"`
+
+	// Allowed groups snapshot from plan (comma-separated group names, empty = no restriction)
+	AllowedGroups string `json:"allowed_groups" gorm:"type:varchar(255);default:''"`
 
 	// Whether wallet fallback is allowed after this subscription's quota is exhausted (snapshot from plan)
 	AllowWalletOverflow bool `json:"allow_wallet_overflow"`
@@ -547,6 +553,7 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 		UpgradeGroup:        upgradeGroup,
 		PrevUserGroup:       prevGroup,
 		DowngradeGroup:      strings.TrimSpace(plan.DowngradeGroup),
+		AllowedGroups:       strings.TrimSpace(plan.AllowedGroups),
 		AllowWalletOverflow: allowWalletOverflow,
 		CreatedAt:           common.GetTimestamp(),
 		UpdatedAt:           common.GetTimestamp(),
@@ -1285,7 +1292,9 @@ func maybeResetUserSubscriptionWithPlanTx(tx *gorm.DB, sub *UserSubscription, pl
 }
 
 // PreConsumeUserSubscription pre-consumes from any active subscription total quota.
-func PreConsumeUserSubscription(requestId string, userId int, modelName string, quotaType int, amount int64) (*SubscriptionPreConsumeResult, error) {
+// group is the request group: subscriptions whose non-empty allowed_groups restriction
+// does not include it are skipped.
+func PreConsumeUserSubscription(requestId string, userId int, modelName string, quotaType int, amount int64, group string) (*SubscriptionPreConsumeResult, error) {
 	if userId <= 0 {
 		return nil, errors.New("invalid userId")
 	}
@@ -1333,6 +1342,25 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 		}
 		for _, candidate := range subs {
 			sub := candidate
+			// Skip subscriptions restricted to other groups (empty allowed_groups = no restriction).
+			// Each comma-separated entry is trimmed and empty entries are ignored; an empty request
+			// group never matches a restriction.
+			if allowed := strings.TrimSpace(sub.AllowedGroups); allowed != "" {
+				matched := false
+				for _, entry := range strings.Split(allowed, ",") {
+					entry = strings.TrimSpace(entry)
+					if entry == "" {
+						continue
+					}
+					if entry == group {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					continue
+				}
+			}
 			plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
 			if err != nil {
 				return err
