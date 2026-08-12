@@ -129,6 +129,9 @@ function HubAppRow({
       </div>
       <div className='flex items-center gap-3 text-sm'>
         <span>v{latest.version}</span>
+        <span className='text-muted-foreground text-xs'>
+          {t('{{count}} downloads', { count: app.download_count })}
+        </span>
         <Link
           to='/distribution/$slug'
           params={{ slug: app.slug }}

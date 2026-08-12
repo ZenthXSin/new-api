@@ -107,6 +107,9 @@ export function DistributionPublicPage() {
           <p className='text-muted-foreground'>
             {t('下载稳定版本、查看版本说明并阅读最新公告。')}
           </p>
+          <p className='text-muted-foreground text-sm'>
+            {t('{{count}} downloads', { count: app.download_count })}
+          </p>
         </header>
 
         <section className='border-border bg-card rounded-lg border p-5 sm:p-6'>
@@ -152,6 +155,9 @@ export function DistributionPublicPage() {
                       {asset.platform} · {asset.architecture}
                       <span className='text-muted-foreground ml-2'>
                         {formatSize(asset.size)}
+                      </span>
+                      <span className='text-muted-foreground ml-2 text-xs'>
+                        {t('{{count}} downloads', { count: asset.downloads })}
                       </span>
                     </span>
                   </span>

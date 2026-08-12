@@ -28,7 +28,7 @@ func TestAppCenterPublicAndAdminRouteBoundaries(t *testing.T) {
 	previousDB, previousSecret := model.DB, common.CryptoSecret
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.AppCenterApp{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.AppCenterApp{}, &model.AppCenterRelease{}, &model.AppCenterAsset{}, &model.User{}))
 	model.DB, common.CryptoSecret = db, "controller-app-center-secret"
 	t.Cleanup(func() { model.DB, common.CryptoSecret = previousDB, previousSecret })
 	_, _, err = service.CreateAppCenterApp("Public", "public-app", "", true, true)
@@ -458,6 +458,78 @@ func TestIngestAppCenterCustomMessage(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, empty.Code)
 	badJSON := post(`{not json`, "Bearer "+token)
 	assert.Equal(t, http.StatusBadRequest, badJSON.Code)
+}
+
+func TestGetPublicAppCenterAppsAndAppDownloadCounts(t *testing.T) {
+	previousDB := model.DB
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.AppCenterApp{}, &model.AppCenterRelease{}, &model.AppCenterAsset{}))
+	model.DB = db
+	t.Cleanup(func() { model.DB = previousDB })
+
+	// Alpha: one release with one asset (5 downloads).
+	// Beta: one release with two assets (3 + 4 downloads), covering the sum
+	// across all assets of the app.
+	// Gamma: public app without any release or asset.
+	alpha := &model.AppCenterApp{Name: "Alpha", Slug: "alpha-app", Public: true, TelemetryKeyID: "key-alpha"}
+	beta := &model.AppCenterApp{Name: "Beta", Slug: "beta-app", Public: true, TelemetryKeyID: "key-beta"}
+	gamma := &model.AppCenterApp{Name: "Gamma", Slug: "gamma-app", Public: true, TelemetryKeyID: "key-gamma"}
+	require.NoError(t, db.Create(alpha).Error)
+	require.NoError(t, db.Create(beta).Error)
+	require.NoError(t, db.Create(gamma).Error)
+	alphaRelease := &model.AppCenterRelease{AppID: alpha.ID, Version: "1.0.0", Channel: "stable"}
+	betaRelease := &model.AppCenterRelease{AppID: beta.ID, Version: "1.0.0", Channel: "stable"}
+	require.NoError(t, db.Create(alphaRelease).Error)
+	require.NoError(t, db.Create(betaRelease).Error)
+	asset := func(releaseID, downloads int64) *model.AppCenterAsset {
+		return &model.AppCenterAsset{ReleaseID: releaseID, Platform: "linux", Architecture: "amd64", Filename: "app.bin", ContentType: "application/octet-stream", Size: 1, SHA256: fmt.Sprintf("%d-%d", releaseID, downloads), StoragePath: fmt.Sprintf("p%d-%d", releaseID, downloads), Downloads: downloads}
+	}
+	require.NoError(t, db.Create(asset(alphaRelease.ID, 5)).Error)
+	require.NoError(t, db.Create(asset(betaRelease.ID, 3)).Error)
+	require.NoError(t, db.Create(asset(betaRelease.ID, 4)).Error)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/api/public/apps", GetPublicAppCenterApps)
+	router.GET("/api/public/apps/:slug", GetPublicAppCenterApp)
+
+	// 公开列表:每个应用返回其全部资产 downloads 之和
+	listRec := httptest.NewRecorder()
+	router.ServeHTTP(listRec, httptest.NewRequest(http.MethodGet, "/api/public/apps", nil))
+	require.Equal(t, http.StatusOK, listRec.Code)
+	assert.Equal(t, "public, max-age=60", listRec.Header().Get("Cache-Control"))
+	var list struct {
+		Data []model.AppCenterApp `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(listRec.Body.Bytes(), &list))
+	require.Len(t, list.Data, 3)
+	bySlug := make(map[string]int64, len(list.Data))
+	for _, app := range list.Data {
+		bySlug[app.Slug] = app.DownloadCount
+	}
+	assert.Equal(t, int64(5), bySlug["alpha-app"])
+	assert.Equal(t, int64(7), bySlug["beta-app"])
+	assert.Equal(t, int64(0), bySlug["gamma-app"])
+	assert.Contains(t, listRec.Body.String(), `"download_count":5`)
+	assert.Contains(t, listRec.Body.String(), `"download_count":7`)
+	assert.Contains(t, listRec.Body.String(), `"download_count":0`)
+
+	// 公开详情:单个应用同样携带 download_count
+	detailRec := httptest.NewRecorder()
+	router.ServeHTTP(detailRec, httptest.NewRequest(http.MethodGet, "/api/public/apps/beta-app", nil))
+	require.Equal(t, http.StatusOK, detailRec.Code)
+	var detail struct {
+		Data model.AppCenterApp `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(detailRec.Body.Bytes(), &detail))
+	assert.Equal(t, int64(7), detail.Data.DownloadCount)
+
+	// 聚合查询失败(如关联表缺失)时公开列表返回 500 而非降级
+	require.NoError(t, db.Exec("DROP TABLE app_center_releases").Error)
+	failRec := httptest.NewRecorder()
+	router.ServeHTTP(failRec, httptest.NewRequest(http.MethodGet, "/api/public/apps", nil))
+	assert.Equal(t, http.StatusInternalServerError, failRec.Code)
 }
 
 func TestListAndClearAppCenterCustomMessages(t *testing.T) {

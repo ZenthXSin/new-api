@@ -56,9 +56,59 @@ func appCenterError(c *gin.Context, status int) {
 	c.Header("Cache-Control", "no-store")
 	c.JSON(status, gin.H{"success": false, "message": "应用中心操作失败"})
 }
+
+// fillAppCenterDownloadCounts fills DownloadCount for each app as the sum of
+// downloads across all of its assets, grouped through the releases table.
+// Apps without any release or asset keep the zero value. It returns an error
+// when the aggregation query fails so callers can fail with a 500.
+func fillAppCenterDownloadCounts(apps []*model.AppCenterApp) error {
+	ids := make([]int64, 0, len(apps))
+	for _, app := range apps {
+		if app != nil && app.ID != 0 {
+			ids = append(ids, app.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	var rows []struct {
+		AppID int64
+		Total int64
+	}
+	err := model.DB.Table("app_center_assets").
+		Select("app_center_releases.app_id AS app_id, SUM(app_center_assets.downloads) AS total").
+		Joins("INNER JOIN app_center_releases ON app_center_releases.id = app_center_assets.release_id").
+		Where("app_center_releases.app_id IN ?", ids).
+		Group("app_center_releases.app_id").
+		Scan(&rows).Error
+	if err != nil {
+		return err
+	}
+	totalByAppID := make(map[int64]int64, len(rows))
+	for _, row := range rows {
+		totalByAppID[row.AppID] = row.Total
+	}
+	for _, app := range apps {
+		if app == nil {
+			continue
+		}
+		app.DownloadCount = totalByAppID[app.ID]
+	}
+	return nil
+}
+
 func GetPublicAppCenterApps(c *gin.Context) {
 	var apps []model.AppCenterApp
 	if err := model.DB.Where("public = ?", true).Order("name ASC").Find(&apps).Error; err != nil {
+		appCenterError(c, 500)
+		return
+	}
+	ptrs := make([]*model.AppCenterApp, len(apps))
+	for i := range apps {
+		ptrs[i] = &apps[i]
+	}
+	if err := fillAppCenterDownloadCounts(ptrs); err != nil {
+		common.SysError(fmt.Sprintf("app-center download count aggregation failed: %v", err))
 		appCenterError(c, 500)
 		return
 	}
@@ -69,6 +119,11 @@ func GetPublicAppCenterApp(c *gin.Context) {
 	a, err := model.FindAppCenterBySlug(c.Param("slug"))
 	if err != nil {
 		appCenterError(c, 404)
+		return
+	}
+	if err := fillAppCenterDownloadCounts([]*model.AppCenterApp{a}); err != nil {
+		common.SysError(fmt.Sprintf("app-center download count aggregation failed: app_id=%d err=%v", a.ID, err))
+		appCenterError(c, 500)
 		return
 	}
 	c.Header("Cache-Control", "public, max-age=60")

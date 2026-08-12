@@ -55,6 +55,7 @@ export type DistributionApp = {
   name: string
   description?: string
   public: boolean
+  download_count: number
   telemetry_enabled?: boolean
   created_at?: string
   updated_at?: string

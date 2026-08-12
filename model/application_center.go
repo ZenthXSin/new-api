@@ -33,6 +33,7 @@ type AppCenterApp struct {
 	TelemetrySecretCiphertext string    `json:"-" gorm:"column:telemetry_secret_ciphertext;<-:false"`
 	CreatedAt                 time.Time `json:"created_at"`
 	UpdatedAt                 time.Time `json:"updated_at"`
+	DownloadCount             int64     `json:"download_count" gorm:"-"`
 }
 
 func (AppCenterApp) TableName() string { return "app_center_apps" }
