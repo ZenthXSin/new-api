@@ -1,11 +1,16 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
+	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -169,6 +174,66 @@ func GetStatus(c *gin.Context) {
 		"data":    data,
 	})
 	return
+}
+
+// apiNodeProbeResult 单个 API 节点的探活结果
+type apiNodeProbeResult struct {
+	URL       string `json:"url"`
+	LatencyMs int64  `json:"latency_ms"`
+	Error     string `json:"error"`
+}
+
+// ProbeApiNodes 服务器侧探测控制台配置的 API 节点连通性,供前端测速使用。
+// 浏览器从 HTTPS 页面无法直探 http 节点(混合内容会被拦截),由服务器代为探测;
+// 服务器到各节点的延迟差即隧道延迟差,可用于公平排序节点。
+// 节点 URL 仅来自管理员配置的 api_info(已校验 http/https),不接受任何客户端参数,避免 SSRF。
+func ProbeApiNodes(c *gin.Context) {
+	nodes := console_setting.GetApiInfo()
+	client := &http.Client{
+		Timeout: 3 * time.Second,
+		Transport: &http.Transport{
+			Proxy:             nil, // 禁用代理,与用户直连节点路径一致
+			DisableKeepAlives: true,
+		},
+	}
+	results := make([]apiNodeProbeResult, len(nodes))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for i, node := range nodes {
+		urlStr, _ := node["url"].(string)
+		if urlStr == "" {
+			results[i] = apiNodeProbeResult{URL: urlStr, Error: "unreachable"}
+			continue
+		}
+		wg.Add(1)
+		go func(index int, nodeURL string) {
+			defer wg.Done()
+			start := time.Now()
+			resp, err := client.Head(nodeURL)
+			if resp != nil {
+				resp.Body.Close()
+			}
+			result := apiNodeProbeResult{URL: nodeURL}
+			if err == nil {
+				latencyMs := int64(math.Ceil(time.Since(start).Seconds() * 1000))
+				if latencyMs < 1 {
+					latencyMs = 1
+				}
+				result.LatencyMs = latencyMs
+			} else {
+				if errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err) {
+					result.Error = "timeout"
+				} else {
+					result.Error = "unreachable"
+				}
+			}
+			mu.Lock()
+			results[index] = result
+			mu.Unlock()
+		}(i, urlStr)
+	}
+	wg.Wait()
+	common.ApiSuccess(c, results)
 }
 
 func GetNotice(c *gin.Context) {

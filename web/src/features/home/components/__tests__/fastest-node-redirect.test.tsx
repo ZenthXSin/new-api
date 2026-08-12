@@ -108,19 +108,42 @@ function node(url: string): ApiInfoItem {
 const NODE_A = 'https://node-a.example.com'
 const NODE_B = 'https://node-b.example.com'
 
-function installControllableFetch() {
+function installServerProbeFetch() {
   let fetchCalls = 0
-  const resolvers: Array<() => void> = []
+  const probeResolvers: Array<() => void> = []
   const originalFetch = globalThis.fetch
-  globalThis.fetch = (() =>
-    new Promise<void>((resolve) => {
-      fetchCalls += 1
-      resolvers.push(resolve)
-    })) as unknown as typeof fetch
+  globalThis.fetch = ((input: RequestInfo | URL) => {
+    fetchCalls += 1
+    let url: string
+    if (typeof input === 'string') {
+      url = input
+    } else if (input instanceof URL) {
+      url = input.href
+    } else {
+      url = input.url
+    }
+    if (url.includes('/api/api-nodes/probe')) {
+      return new Promise<Response>((resolve) => {
+        probeResolvers.push(() =>
+          resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                { url: NODE_A, latency_ms: 50, error: '' },
+                { url: NODE_B, latency_ms: 100, error: '' },
+              ],
+            }),
+          } as Response)
+        )
+      })
+    }
+    return Promise.resolve(undefined as unknown as Response)
+  }) as typeof fetch
   return {
     fetchCalls: () => fetchCalls,
-    resolveAll: () => {
-      for (const resolve of resolvers) resolve()
+    resolveProbe: () => {
+      for (const resolve of probeResolvers) resolve()
     },
     restore: () => {
       globalThis.fetch = originalFetch
@@ -144,27 +167,24 @@ describe('fastest node redirect', () => {
     domWindow.location.replace = ((url: string) => {
       replacedUrl = url
     }) as typeof domWindow.location.replace
-    const fetchControl = installControllableFetch()
+    const fetchControl = installServerProbeFetch()
 
     try {
       const rendered = await renderRedirect([node(NODE_A), node(NODE_B)])
-      assert.equal(fetchControl.fetchCalls(), 2)
+      assert.equal(fetchControl.fetchCalls(), 1)
 
       // Simulate react-query swapping placeholder status for fresh data:
       // the items array identity changes, which re-runs the effect.
       await act(async () => {
         rendered.root.render(<FastestNodeRedirect items={[node(NODE_A), node(NODE_B)]} />)
       })
-      assert.equal(fetchControl.fetchCalls(), 2, 'probe must not restart on data swap')
+      assert.equal(fetchControl.fetchCalls(), 1, 'probe must not restart on data swap')
 
-      fetchControl.resolveAll()
+      fetchControl.resolveProbe()
       await act(async () => {})
 
-      assert.ok(
-        replacedUrl === NODE_A || replacedUrl === NODE_B,
-        `expected redirect to a probed node, got ${replacedUrl}`
-      )
-      assert.equal(readProbeMemory()?.url, replacedUrl)
+      assert.equal(replacedUrl, NODE_A)
+      assert.equal(readProbeMemory()?.url, NODE_A)
 
       await unmountRedirect(rendered)
     } finally {
@@ -178,7 +198,7 @@ describe('fastest node redirect', () => {
     domWindow.location.replace = ((url: string) => {
       replacedUrl = url
     }) as typeof domWindow.location.replace
-    const fetchControl = installControllableFetch()
+    const fetchControl = installServerProbeFetch()
 
     try {
       const container = document.createElement('div')
@@ -194,16 +214,13 @@ describe('fastest node redirect', () => {
       })
 
       // StrictMode runs the mount effect twice but the probe must start once.
-      assert.equal(fetchControl.fetchCalls(), 2)
+      assert.equal(fetchControl.fetchCalls(), 1)
 
-      fetchControl.resolveAll()
+      fetchControl.resolveProbe()
       await act(async () => {})
 
-      assert.ok(
-        replacedUrl === NODE_A || replacedUrl === NODE_B,
-        `expected redirect to a probed node, got ${replacedUrl}`
-      )
-      assert.equal(readProbeMemory()?.url, replacedUrl)
+      assert.equal(replacedUrl, NODE_A)
+      assert.equal(readProbeMemory()?.url, NODE_A)
 
       await act(async () => root.unmount())
       container.remove()

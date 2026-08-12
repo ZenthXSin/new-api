@@ -20,7 +20,12 @@ import { useEffect, useRef } from 'react'
 
 import type { ApiInfoItem } from '@/features/dashboard/types'
 
-import { pickFastestNode, shouldProbe, writeProbeMemory } from '../lib/fastest-node'
+import {
+  fetchServerNodeProbe,
+  pickFastestNode,
+  shouldProbe,
+  writeProbeMemory,
+} from '../lib/fastest-node'
 
 interface FastestNodeRedirectProps {
   items: ApiInfoItem[]
@@ -48,7 +53,7 @@ export function FastestNodeRedirect(props: FastestNodeRedirectProps) {
     if (!shouldProbe()) return
     startedRef.current = true
 
-    pickFastestNode(props.items)
+    pickFastestNode(props.items, undefined, undefined, fetchServerNodeProbe)
       .then((node) => {
         // Only bail out on real unmount: a stale placeholder -> fresh status
         // data swap re-runs this effect, and cancelling then would swallow the

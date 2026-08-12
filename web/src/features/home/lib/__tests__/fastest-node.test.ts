@@ -24,6 +24,7 @@ import type { ApiInfoItem, PingStatus } from '@/features/dashboard/types'
 import {
   FASTEST_NODE_COOLDOWN_MS,
   FASTEST_NODE_STORAGE_KEY,
+  fetchServerNodeProbe,
   pickFastestNode,
   readProbeMemory,
   shouldProbe,
@@ -86,6 +87,7 @@ const originalStorage = Object.getOwnPropertyDescriptor(
   globalThis,
   'localStorage'
 )
+const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch')
 
 after(() => {
   if (originalStorage) {
@@ -93,7 +95,25 @@ after(() => {
   } else {
     Reflect.deleteProperty(globalThis, 'localStorage')
   }
+  if (originalFetch) {
+    Object.defineProperty(globalThis, 'fetch', originalFetch)
+  } else {
+    Reflect.deleteProperty(globalThis, 'fetch')
+  }
 })
+
+function installFetch(
+  handler: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+) {
+  const fetchMock = async (
+    input: RequestInfo | URL,
+    init?: RequestInit
+  ): Promise<Response> => handler(input, init)
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: fetchMock,
+  })
+}
 
 function probeWithLatencies(latencies: Record<string, number | null>) {
   const probedUrls: string[] = []
@@ -223,4 +243,159 @@ test('shouldProbe returns true for corrupted stored JSON', () => {
   storage.setItem(FASTEST_NODE_STORAGE_KEY, 'not-json{')
 
   assert.equal(shouldProbe(), true)
+})
+
+test('pickFastestNode prefers the server probe and never calls the browser probe when every candidate has a latency', async () => {
+  const { probe, probedUrls } = probeWithLatencies({
+    'https://node-a.example.com': 30,
+    'https://node-b.example.com': 120,
+  })
+  const serverProbe = async () => ({
+    'https://node-a.example.com': 15,
+    'https://node-b.example.com': 90,
+  })
+
+  const fastest = await pickFastestNode(
+    [fastItem, slowItem],
+    probe,
+    CURRENT_ORIGIN,
+    serverProbe
+  )
+
+  assert.equal(fastest, fastItem)
+  assert.deepEqual(probedUrls, [])
+})
+
+test('pickFastestNode skips candidates absent from the server probe and returns the fastest measured one', async () => {
+  const { probe, probedUrls } = probeWithLatencies({})
+  const serverProbe = async () => ({
+    // node-b absent: its server-side probe failed
+    'https://node-a.example.com': 40,
+  })
+
+  const fastest = await pickFastestNode(
+    [fastItem, slowItem],
+    probe,
+    CURRENT_ORIGIN,
+    serverProbe
+  )
+
+  assert.equal(fastest, fastItem)
+  assert.deepEqual(probedUrls, [])
+})
+
+test('pickFastestNode falls back to browser probing when the server probe returns null', async () => {
+  const { probe, probedUrls } = probeWithLatencies({
+    'https://node-a.example.com': 30,
+    'https://node-b.example.com': 120,
+  })
+  const serverProbe = async () => null
+
+  const fastest = await pickFastestNode(
+    [fastItem, slowItem],
+    probe,
+    CURRENT_ORIGIN,
+    serverProbe
+  )
+
+  assert.equal(fastest, fastItem)
+  assert.deepEqual(probedUrls, [
+    'https://node-a.example.com',
+    'https://node-b.example.com',
+  ])
+})
+
+test('pickFastestNode falls back to browser probing when the server probe throws', async () => {
+  const { probe, probedUrls } = probeWithLatencies({
+    'https://node-a.example.com': 30,
+    'https://node-b.example.com': 120,
+  })
+  const serverProbe = async (): Promise<Record<string, number> | null> => {
+    throw new Error('probe endpoint unreachable')
+  }
+
+  const fastest = await pickFastestNode(
+    [fastItem, slowItem],
+    probe,
+    CURRENT_ORIGIN,
+    serverProbe
+  )
+
+  assert.equal(fastest, fastItem)
+  assert.deepEqual(probedUrls, [
+    'https://node-a.example.com',
+    'https://node-b.example.com',
+  ])
+})
+
+test('pickFastestNode falls back to browser probing when the server probe misses every candidate', async () => {
+  const { probe, probedUrls } = probeWithLatencies({
+    'https://node-a.example.com': 30,
+    'https://node-b.example.com': 120,
+  })
+  const serverProbe = async () => ({
+    'https://unrelated.example.com': 5,
+  })
+
+  const fastest = await pickFastestNode(
+    [fastItem, slowItem],
+    probe,
+    CURRENT_ORIGIN,
+    serverProbe
+  )
+
+  assert.equal(fastest, fastItem)
+  assert.deepEqual(probedUrls, [
+    'https://node-a.example.com',
+    'https://node-b.example.com',
+  ])
+})
+
+test('fetchServerNodeProbe maps successful entries and skips errored or malformed ones', async () => {
+  installFetch(async () => {
+    const body = {
+      success: true,
+      data: [
+        { url: 'https://node-a.example.com', latency_ms: 15, error: '' },
+        { url: 'https://node-b.example.com', latency_ms: 90, error: 'timeout' },
+        { url: 'https://node-c.example.com', latency_ms: 0, error: '' },
+        { url: 'https://node-d.example.com', latency_ms: 60 },
+        { url: 'https://node-e.example.com', latency_ms: 'fast', error: '' },
+      ],
+    }
+    return new Response(JSON.stringify(body), { status: 200 })
+  })
+
+  const latencies = await fetchServerNodeProbe()
+
+  assert.deepEqual(latencies, {
+    'https://node-a.example.com': 15,
+    'https://node-d.example.com': 60,
+  })
+})
+
+test('fetchServerNodeProbe returns null when the response is not ok', async () => {
+  installFetch(async () => new Response('', { status: 500 }))
+
+  assert.equal(await fetchServerNodeProbe(), null)
+})
+
+test('fetchServerNodeProbe returns null when no entry is usable', async () => {
+  installFetch(async () => {
+    const body = {
+      success: true,
+      data: [{ url: 'https://node-a.example.com', latency_ms: 50, error: 'down' }],
+    }
+    return new Response(JSON.stringify(body), { status: 200 })
+  })
+
+  assert.equal(await fetchServerNodeProbe(), null)
+})
+
+test('fetchServerNodeProbe returns null when the fetch fails', async () => {
+  installFetch(async () => {
+    throw new Error('network failure')
+  })
+
+  assert.equal(await fetchServerNodeProbe(), null)
 })

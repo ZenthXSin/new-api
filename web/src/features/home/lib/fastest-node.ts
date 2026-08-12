@@ -44,14 +44,55 @@ export async function probeNodeLatency(url: string): Promise<PingStatus> {
 }
 
 /**
+ * Fetch the server-side probe results for every API node from the backend.
+ * Returns a map of node url -> latency in milliseconds, or null when the
+ * endpoint failed or reported no successful node at all. Nodes whose entry
+ * carries an error or an unusable latency are skipped.
+ */
+export async function fetchServerNodeProbe(): Promise<
+  Record<string, number> | null
+> {
+  try {
+    const res = await fetch('/api/api-nodes/probe', { cache: 'no-store' })
+    if (!res.ok) return null
+    const body: unknown = await res.json()
+    if (typeof body !== 'object' || body === null) return null
+    const data = (body as { data?: unknown }).data
+    if (!Array.isArray(data)) return null
+
+    const latencies: Record<string, number> = {}
+    for (const entry of data) {
+      if (typeof entry !== 'object' || entry === null) continue
+      const { url, latency_ms: latencyMs, error } = entry as {
+        url?: unknown
+        latency_ms?: unknown
+        error?: unknown
+      }
+      if (typeof url !== 'string') continue
+      if (typeof latencyMs !== 'number' || latencyMs <= 0) continue
+      if (error !== undefined && error !== '') continue
+      latencies[url] = latencyMs
+    }
+    if (Object.keys(latencies).length === 0) return null
+    return latencies
+  } catch {
+    return null
+  }
+}
+
+/**
  * Pick the fastest node among those hosted on a different origin than the
- * current one, probing all candidates in parallel.
+ * current one. When a serverProbe is provided, its server-side latencies are
+ * preferred (they also cover http:// nodes that mixed content would block in
+ * the browser); if it fails entirely or misses every candidate, fall back to
+ * probing all candidates in parallel from the browser.
  */
 export async function pickFastestNode(
   items: ApiInfoItem[],
   probe: (url: string) => Promise<PingStatus> = probeNodeLatency,
   currentOrigin: string =
-    typeof window === 'undefined' ? '' : window.location.origin
+    typeof window === 'undefined' ? '' : window.location.origin,
+  serverProbe?: () => Promise<Record<string, number> | null>
 ): Promise<ApiInfoItem | null> {
   if (items.length === 0) return null
 
@@ -73,6 +114,31 @@ export async function pickFastestNode(
   })
 
   if (candidates.length === 0) return null
+
+  if (serverProbe !== undefined) {
+    let serverLatencies: Record<string, number> | null
+    try {
+      serverLatencies = await serverProbe()
+    } catch {
+      serverLatencies = null
+    }
+
+    if (serverLatencies !== null) {
+      let fastest: ApiInfoItem | null = null
+      let fastestLatency = Number.POSITIVE_INFINITY
+      for (const item of candidates) {
+        const latency = serverLatencies[item.url]
+        if (latency === undefined || latency <= 0) continue
+        if (latency < fastestLatency) {
+          fastestLatency = latency
+          fastest = item
+        }
+      }
+      if (fastest !== null) return fastest
+      // No candidate passed the server-side probe; fall back to probing
+      // from the browser below.
+    }
+  }
 
   const results = await Promise.all(
     candidates.map(async (item) => {
