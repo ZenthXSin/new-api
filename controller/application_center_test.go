@@ -416,3 +416,101 @@ func TestGetAppCenterDownloadsFiltersHourWindowAndSortsAscending(t *testing.T) {
 	assert.Equal(t, current, response.Data[1].BucketTs)
 	assert.Equal(t, int64(5), response.Data[1].Count)
 }
+
+func TestIngestAppCenterCustomMessage(t *testing.T) {
+	previousDB, previousSecret := model.DB, common.CryptoSecret
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.AppCenterApp{}, &model.AppCenterCustomMessage{}))
+	model.DB, common.CryptoSecret = db, "controller-app-center-secret"
+	t.Cleanup(func() { model.DB, common.CryptoSecret = previousDB, previousSecret })
+
+	app, token, err := service.CreateAppCenterApp("Messages", "messages-app", "", true, true)
+	require.NoError(t, err)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/api/external/v1/telemetry/messages", IngestAppCenterCustomMessage)
+	post := func(body, auth string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/external/v1/telemetry/messages", strings.NewReader(body))
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	rec := post(`{"name":"crash","content":"boom","occurred_at":`+strconv.FormatInt(time.Now().Unix(), 10)+`}`, "Bearer "+token)
+	require.Equal(t, http.StatusAccepted, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"accepted":true`)
+	var msg model.AppCenterCustomMessage
+	require.NoError(t, model.DB.First(&msg).Error)
+	assert.Equal(t, app.ID, msg.AppID)
+	assert.Equal(t, "crash", msg.Name)
+	assert.Equal(t, "boom", msg.Content)
+
+	missing := post(`{"name":"crash","content":"boom"}`, "")
+	assert.Equal(t, http.StatusUnauthorized, missing.Code)
+	wrong := post(`{"name":"crash","content":"boom"}`, "Bearer app_v2.fake.secret")
+	assert.Equal(t, http.StatusUnauthorized, wrong.Code)
+	empty := post(`{"name":"crash","content":"  "}`, "Bearer "+token)
+	assert.Equal(t, http.StatusBadRequest, empty.Code)
+	badJSON := post(`{not json`, "Bearer "+token)
+	assert.Equal(t, http.StatusBadRequest, badJSON.Code)
+}
+
+func TestListAndClearAppCenterCustomMessages(t *testing.T) {
+	previousDB, previousSecret := model.DB, common.CryptoSecret
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.AppCenterApp{}, &model.AppCenterCustomMessage{}))
+	model.DB, common.CryptoSecret = db, "controller-app-center-secret"
+	t.Cleanup(func() { model.DB, common.CryptoSecret = previousDB, previousSecret })
+
+	app, _, err := service.CreateAppCenterApp("Messages", "messages-app", "", true, true)
+	require.NoError(t, err)
+	base := time.Now().UTC().Unix()
+	require.NoError(t, service.RecordAppCenterCustomMessage(app, service.AppCenterCustomMessageInput{Name: "m1", Content: "one", OccurredAt: base - 1800}))
+	require.NoError(t, service.RecordAppCenterCustomMessage(app, service.AppCenterCustomMessageInput{Name: "m2", Content: "two", OccurredAt: base - 900}))
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/api/app-center/apps/:id/messages", ListAppCenterCustomMessages)
+	router.DELETE("/api/app-center/apps/:id/messages", ClearAppCenterCustomMessages)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/app-center/apps/%d/messages?page=1&size=1", app.ID), nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response struct {
+		Data struct {
+			Items []model.AppCenterCustomMessage `json:"items"`
+			Total int64                          `json:"total"`
+			Page  int                            `json:"page"`
+			Size  int                            `json:"size"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	assert.Equal(t, int64(2), response.Data.Total)
+	require.Len(t, response.Data.Items, 1)
+	assert.Equal(t, "m2", response.Data.Items[0].Name)
+	assert.Equal(t, 1, response.Data.Page)
+	assert.Equal(t, 1, response.Data.Size)
+
+	del := httptest.NewRecorder()
+	router.ServeHTTP(del, httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/app-center/apps/%d/messages", app.ID), nil))
+	require.Equal(t, http.StatusNoContent, del.Code)
+
+	after := httptest.NewRecorder()
+	router.ServeHTTP(after, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/app-center/apps/%d/messages", app.ID), nil))
+	require.Equal(t, http.StatusOK, after.Code)
+	var afterResponse struct {
+		Data struct {
+			Items []model.AppCenterCustomMessage `json:"items"`
+			Total int64                          `json:"total"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(after.Body.Bytes(), &afterResponse))
+	assert.Empty(t, afterResponse.Data.Items)
+	assert.Zero(t, afterResponse.Data.Total)
+}

@@ -29,6 +29,10 @@ var AppCenterStorageRoot = "/data/app-center"
 const AppCenterMaxAssetBytes int64 = 512 << 20
 const AppCenterMaxEventBuckets int64 = 10000
 
+// AppCenterMaxCustomMessages is the per-app retention cap for raw custom
+// telemetry messages. It is a var (not const) so tests can shrink it.
+var AppCenterMaxCustomMessages int64 = 5000
+
 var appCenterTag = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,31}$`)
 var appCenterSemver = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
 var ErrAppCenterInvalid = errors.New("应用中心参数无效")
@@ -65,6 +69,11 @@ type AppCenterEvent struct {
 	OccurredAt int64             `json:"occurred_at"`
 	Count      int64             `json:"count"`
 	Dimensions map[string]string `json:"dimensions"`
+}
+type AppCenterCustomMessageInput struct {
+	Name       string `json:"name"`
+	Content    string `json:"content"`
+	OccurredAt int64  `json:"occurred_at"`
 }
 
 var appCenterGeoIPMu sync.Mutex
@@ -787,6 +796,86 @@ func RecordAppCenterEvents(app *model.AppCenterApp, events []AppCenterEvent, sou
 	return accepted, err
 }
 
+// RecordAppCenterCustomMessage stores one raw custom telemetry message for an
+// app, pruning the oldest rows once the per-app retention cap is reached. The
+// message keeps the canonical source address supplied by the trusted proxy
+// chain; GeoIP lookup failure degrades to empty values.
+func RecordAppCenterCustomMessage(app *model.AppCenterApp, in AppCenterCustomMessageInput, sourceIPs ...string) error {
+	if app == nil {
+		return ErrAppCenterInvalid
+	}
+	content := strings.TrimSpace(in.Content)
+	if content == "" || len(content) > 4096 {
+		return ErrAppCenterInvalid
+	}
+	name := strings.TrimSpace(in.Name)
+	if len(name) > 64 {
+		return ErrAppCenterInvalid
+	}
+	now := time.Now().UTC()
+	occurredAt := in.OccurredAt
+	if occurredAt <= 0 {
+		occurredAt = now.Unix()
+	}
+	if now.Sub(time.Unix(occurredAt, 0)) > 7*24*time.Hour || time.Unix(occurredAt, 0).After(now.Add(5*time.Minute)) {
+		return ErrAppCenterInvalid
+	}
+	sourceIP := ""
+	sourceCountry, sourceRegion, sourceCity := "", "", ""
+	if len(sourceIPs) > 0 {
+		var sourceNetIP net.IP
+		sourceIP, sourceNetIP = normalizeAppCenterSourceIP(sourceIPs[0])
+		if sourceIP != "" {
+			sourceCountry, sourceRegion, sourceCity = appCenterGeoIP(sourceNetIP)
+		}
+	}
+	return model.DB.Transaction(func(tx *gorm.DB) error {
+		var lockedApp model.AppCenterApp
+		if err := model.LockAppCenterForUpdate(tx).Select("id").First(&lockedApp, app.ID).Error; err != nil {
+			return ErrAppCenterNotFound
+		}
+		var count int64
+		if err := tx.Model(&model.AppCenterCustomMessage{}).Where("app_id = ?", app.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count >= AppCenterMaxCustomMessages {
+			excess := count - AppCenterMaxCustomMessages + 1
+			var ids []int64
+			if err := tx.Model(&model.AppCenterCustomMessage{}).Where("app_id = ?", app.ID).Order("created_at ASC, id ASC").Limit(int(excess)).Pluck("id", &ids).Error; err != nil {
+				return err
+			}
+			if len(ids) > 0 {
+				if err := tx.Where("app_id = ? AND id IN ?", app.ID, ids).Delete(&model.AppCenterCustomMessage{}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		msg := &model.AppCenterCustomMessage{AppID: app.ID, Name: name, Content: content, SourceIP: sourceIP, Country: sourceCountry, Region: sourceRegion, City: sourceCity, CreatedAt: occurredAt}
+		return tx.Create(msg).Error
+	})
+}
+
+// ListAppCenterCustomMessages returns one page of an app's custom telemetry
+// messages, newest first (id desc), together with the total row count.
+func ListAppCenterCustomMessages(appID int64, page int, size int) ([]model.AppCenterCustomMessage, int64, error) {
+	var total int64
+	if err := model.DB.Model(&model.AppCenterCustomMessage{}).Where("app_id = ?", appID).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var items []model.AppCenterCustomMessage
+	if err := model.DB.Where("app_id = ?", appID).Order("id DESC").Limit(size).Offset((page - 1) * size).Find(&items).Error; err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+// ClearAppCenterCustomMessages removes all custom telemetry messages of an app
+// and returns the number of deleted rows.
+func ClearAppCenterCustomMessages(appID int64) (int64, error) {
+	res := model.DB.Where("app_id = ?", appID).Delete(&model.AppCenterCustomMessage{})
+	return res.RowsAffected, res.Error
+}
+
 func DeleteAppCenterData(appID int64) error {
 	paths := make([]string, 0)
 	err := model.DB.Transaction(func(tx *gorm.DB) error {
@@ -816,6 +905,9 @@ func DeleteAppCenterData(appID int64) error {
 			return err
 		}
 		if err := tx.Where("app_id = ?", appID).Delete(&model.AppCenterEventIPReceipt{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("app_id = ?", appID).Delete(&model.AppCenterCustomMessage{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("app_id = ?", appID).Delete(&model.AppCenterUsageSession{}).Error; err != nil {

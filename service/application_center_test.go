@@ -1,6 +1,8 @@
 package service
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +22,7 @@ func setupAppCenterServiceTest(t *testing.T) (*model.AppCenterApp, string) {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&model.AppCenterSchemaState{}, &model.AppCenterApp{}, &model.AppCenterRelease{}, &model.AppCenterAsset{}, &model.AppCenterAnnouncement{}, &model.AppCenterUsageSession{}, &model.AppCenterUsageBucket{}, &model.AppCenterUsageActiveBucket{}, &model.AppCenterDownloadBucket{}, &model.AppCenterCustomEventBucket{}, &model.AppCenterEventReceipt{}, &model.AppCenterEventIPReceipt{}))
+	require.NoError(t, db.AutoMigrate(&model.AppCenterSchemaState{}, &model.AppCenterApp{}, &model.AppCenterRelease{}, &model.AppCenterAsset{}, &model.AppCenterAnnouncement{}, &model.AppCenterUsageSession{}, &model.AppCenterUsageBucket{}, &model.AppCenterUsageActiveBucket{}, &model.AppCenterDownloadBucket{}, &model.AppCenterCustomEventBucket{}, &model.AppCenterEventReceipt{}, &model.AppCenterEventIPReceipt{}, &model.AppCenterCustomMessage{}))
 	model.DB, common.CryptoSecret = db, "app-center-test-secret"
 	t.Cleanup(func() { model.DB, common.CryptoSecret = previousDB, previousSecret; _ = sqlDB.Close() })
 	app, token, err := CreateAppCenterApp("Test", "test-app", "", true, true)
@@ -248,4 +250,89 @@ func TestAppCenterDeleteCleansDownloadBuckets(t *testing.T) {
 	var apps int64
 	require.NoError(t, model.DB.Model(&model.AppCenterApp{}).Count(&apps).Error)
 	assert.Zero(t, apps)
+}
+
+func TestAppCenterCustomMessageRecordsContentAndSourceIP(t *testing.T) {
+	app, _ := setupAppCenterServiceTest(t)
+	occurredAt := time.Now().UTC().Unix()
+	in := AppCenterCustomMessageInput{Name: "crash", Content: "boom at startup", OccurredAt: occurredAt}
+	require.NoError(t, RecordAppCenterCustomMessage(app, in, "203.0.113.9"))
+	var msg model.AppCenterCustomMessage
+	require.NoError(t, model.DB.First(&msg).Error)
+	assert.Equal(t, app.ID, msg.AppID)
+	assert.Equal(t, "crash", msg.Name)
+	assert.Equal(t, "boom at startup", msg.Content)
+	assert.Equal(t, "203.0.113.9", msg.SourceIP)
+	assert.Equal(t, occurredAt, msg.CreatedAt)
+}
+
+func TestAppCenterCustomMessageValidation(t *testing.T) {
+	app, _ := setupAppCenterServiceTest(t)
+	cases := []struct {
+		name string
+		in   AppCenterCustomMessageInput
+	}{
+		{name: "empty content", in: AppCenterCustomMessageInput{Name: "crash", Content: "   "}},
+		{name: "content too long", in: AppCenterCustomMessageInput{Name: "crash", Content: strings.Repeat("x", 4097)}},
+		{name: "name too long", in: AppCenterCustomMessageInput{Name: strings.Repeat("n", 65), Content: "ok"}},
+		{name: "too old", in: AppCenterCustomMessageInput{Name: "crash", Content: "ok", OccurredAt: time.Now().Add(-8 * 24 * time.Hour).Unix()}},
+	}
+	for _, tc := range cases {
+		assert.ErrorIs(t, RecordAppCenterCustomMessage(app, tc.in), ErrAppCenterInvalid, tc.name)
+	}
+	assert.ErrorIs(t, RecordAppCenterCustomMessage(nil, AppCenterCustomMessageInput{Name: "crash", Content: "ok"}), ErrAppCenterInvalid)
+	var count int64
+	require.NoError(t, model.DB.Model(&model.AppCenterCustomMessage{}).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
+func TestAppCenterCustomMessagePrunesOldestBeyondCap(t *testing.T) {
+	app, _ := setupAppCenterServiceTest(t)
+	previous := AppCenterMaxCustomMessages
+	AppCenterMaxCustomMessages = 3
+	t.Cleanup(func() { AppCenterMaxCustomMessages = previous })
+	base := time.Now().UTC().Unix()
+	require.NoError(t, RecordAppCenterCustomMessage(app, AppCenterCustomMessageInput{Name: "m1", Content: "first", OccurredAt: base - 3600}))
+	require.NoError(t, RecordAppCenterCustomMessage(app, AppCenterCustomMessageInput{Name: "m2", Content: "second", OccurredAt: base - 2700}))
+	require.NoError(t, RecordAppCenterCustomMessage(app, AppCenterCustomMessageInput{Name: "m3", Content: "third", OccurredAt: base - 1800}))
+	require.NoError(t, RecordAppCenterCustomMessage(app, AppCenterCustomMessageInput{Name: "m4", Content: "fourth", OccurredAt: base - 900}))
+
+	var rows []model.AppCenterCustomMessage
+	require.NoError(t, model.DB.Where("app_id = ?", app.ID).Order("created_at ASC, id ASC").Find(&rows).Error)
+	require.Len(t, rows, 3)
+	assert.Equal(t, "m2", rows[0].Name)
+	assert.Equal(t, "m3", rows[1].Name)
+	assert.Equal(t, "m4", rows[2].Name)
+}
+
+func TestAppCenterCustomMessageListPaginationDescending(t *testing.T) {
+	app, _ := setupAppCenterServiceTest(t)
+	base := time.Now().UTC().Unix()
+	for i := 0; i < 5; i++ {
+		require.NoError(t, RecordAppCenterCustomMessage(app, AppCenterCustomMessageInput{Name: fmt.Sprintf("m%d", i), Content: "payload", OccurredAt: base - int64(5-i)*600}))
+	}
+	items, total, err := ListAppCenterCustomMessages(app.ID, 1, 2)
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), total)
+	require.Len(t, items, 2)
+	assert.Equal(t, "m4", items[0].Name)
+	assert.Equal(t, "m3", items[1].Name)
+	items, total, err = ListAppCenterCustomMessages(app.ID, 3, 2)
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), total)
+	require.Len(t, items, 1)
+	assert.Equal(t, "m0", items[0].Name)
+}
+
+func TestAppCenterCustomMessageClear(t *testing.T) {
+	app, _ := setupAppCenterServiceTest(t)
+	require.NoError(t, RecordAppCenterCustomMessage(app, AppCenterCustomMessageInput{Name: "a", Content: "one"}))
+	require.NoError(t, RecordAppCenterCustomMessage(app, AppCenterCustomMessageInput{Name: "b", Content: "two"}))
+	deleted, err := ClearAppCenterCustomMessages(app.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), deleted)
+	items, total, err := ListAppCenterCustomMessages(app.ID, 1, 50)
+	require.NoError(t, err)
+	assert.Empty(t, items)
+	assert.Zero(t, total)
 }

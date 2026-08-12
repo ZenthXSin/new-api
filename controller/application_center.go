@@ -528,6 +528,60 @@ func IngestAppCenterEvents(c *gin.Context) {
 	}
 	appCenterJSON(c, 202, gin.H{"accepted": n})
 }
+func IngestAppCenterCustomMessage(c *gin.Context) {
+	body, _ := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20))
+	a, err := service.VerifyAppCenterBearer(c.ClientIP(), c.GetHeader("Authorization"))
+	if err != nil {
+		if errors.Is(err, service.ErrTelemetryRateLimited) {
+			appCenterError(c, http.StatusTooManyRequests)
+			return
+		}
+		appCenterError(c, 401)
+		return
+	}
+	var in service.AppCenterCustomMessageInput
+	if common.DecodeJsonStrict(bytes.NewReader(body), &in) != nil {
+		appCenterError(c, 400)
+		return
+	}
+	if err := service.RecordAppCenterCustomMessage(a, in, c.ClientIP()); err != nil {
+		appCenterError(c, 400)
+		return
+	}
+	appCenterJSON(c, 202, gin.H{"accepted": true})
+}
+func ListAppCenterCustomMessages(c *gin.Context) {
+	appID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	page := 1
+	if raw := c.Query("page"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 1 {
+			page = parsed
+		}
+	}
+	size := 50
+	if raw := c.Query("size"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 1 {
+			size = parsed
+		}
+	}
+	if size > 200 {
+		size = 200
+	}
+	items, total, err := service.ListAppCenterCustomMessages(appID, page, size)
+	if err != nil {
+		appCenterError(c, http.StatusInternalServerError)
+		return
+	}
+	appCenterJSON(c, http.StatusOK, gin.H{"items": items, "total": total, "page": page, "size": size})
+}
+func ClearAppCenterCustomMessages(c *gin.Context) {
+	appID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	if _, err := service.ClearAppCenterCustomMessages(appID); err != nil {
+		appCenterError(c, http.StatusInternalServerError)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
 func GetAppCenterUsageDashboard(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	hours := 720
@@ -751,6 +805,10 @@ func ResetAppCenterTelemetry(c *gin.Context) {
 		return
 	}
 	if err := model.DB.Where("app_id = ?", id).Delete(&model.AppCenterEventReceipt{}).Error; err != nil {
+		appCenterError(c, 500)
+		return
+	}
+	if err := model.DB.Where("app_id = ?", id).Delete(&model.AppCenterCustomMessage{}).Error; err != nil {
 		appCenterError(c, 500)
 		return
 	}

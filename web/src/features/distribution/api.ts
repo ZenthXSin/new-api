@@ -7,6 +7,7 @@ published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
 */
 import { api } from '@/lib/api'
+import { formatTimestampToDate } from '@/lib/format'
 
 export type DistributionAsset = {
   id: number
@@ -137,6 +138,51 @@ export type EventRegion = {
 export type EventRegionSummary = {
   regions: EventRegion[]
   events: Array<{ name: string; unique_users: number }>
+}
+
+export type CustomMessage = {
+  id: number
+  name?: string
+  content: string
+  source_ip?: string
+  country?: string
+  region?: string
+  city?: string
+  created_at: number
+}
+
+export type CustomMessagePage = {
+  items: CustomMessage[]
+  total: number
+  page: number
+  size: number
+}
+
+// ============================================================================
+// Custom message panel display helpers (pure, unit-tested)
+// ============================================================================
+
+export const MESSAGE_PAGE_SIZE = 50
+
+export function formatMessageTime(createdAt: number): string {
+  return formatTimestampToDate(createdAt)
+}
+
+export function joinMessageRegion(
+  message: Pick<CustomMessage, 'country' | 'region' | 'city'>
+): string {
+  return [message.country, message.region, message.city]
+    .filter((part) => part && part.trim() !== '')
+    .join(' / ')
+}
+
+export function getMessagePageBounds(total: number, page: number, size: number) {
+  const totalPages = Math.max(1, Math.ceil(total / size))
+  return {
+    totalPages,
+    hasPrevious: page > 1,
+    hasNext: page < totalPages,
+  }
 }
 
 type ApiResponse<T> = { success: boolean; message?: string; data: T }
@@ -357,4 +403,21 @@ export function getCustomEventRegions(id: number, hours: number) {
   return get<EventRegionSummary>(`${adminPath(id)}/events/regions`, {
     hours: String(hours),
   })
+}
+export function getAppCenterCustomMessages(
+  id: number,
+  page: number,
+  size: number
+) {
+  return get<CustomMessagePage>(`${adminPath(id)}/messages`, {
+    page: String(page),
+    size: String(size),
+  })
+}
+export async function clearAppCenterCustomMessages(id: number) {
+  const response = await api.delete<ApiResponse<null>>(
+    `${adminPath(id)}/messages`,
+    { skipErrorHandler: true }
+  )
+  return response.data
 }

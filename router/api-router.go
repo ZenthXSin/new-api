@@ -77,6 +77,7 @@ func SetApiRouter(router *gin.Engine) {
 		}
 		apiRouter.POST("/external/v1/telemetry/usage", anonymousRequestBodyLimit, controller.IngestAppCenterUsage)
 		apiRouter.POST("/external/v1/telemetry/events", anonymousRequestBodyLimit, controller.IngestAppCenterEvents)
+		apiRouter.POST("/external/v1/telemetry/messages", anonymousRequestBodyLimit, controller.IngestAppCenterCustomMessage)
 
 		// Universal secure verification routes
 		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), middleware.DisableCache(), controller.UniversalVerify)
@@ -266,6 +267,8 @@ func SetApiRouter(router *gin.Engine) {
 			appCenterRoute.GET("/apps/:id/events/trend", controller.GetAppCenterEventTrendDashboard)
 			appCenterRoute.GET("/apps/:id/events/regions", controller.GetAppCenterEventRegionsDashboard)
 			appCenterRoute.DELETE("/apps/:id/telemetry-data", controller.ResetAppCenterTelemetry)
+			appCenterRoute.GET("/apps/:id/messages", controller.ListAppCenterCustomMessages)
+			appCenterRoute.DELETE("/apps/:id/messages", controller.ClearAppCenterCustomMessages)
 		}
 		performanceRoute := apiRouter.Group("/performance")
 		performanceRoute.Use(middleware.RootAuth())

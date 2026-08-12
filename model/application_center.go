@@ -192,6 +192,24 @@ type AppCenterEventIPReceipt struct {
 
 func (AppCenterEventIPReceipt) TableName() string { return "app_center_event_ip_receipts" }
 
+// AppCenterCustomMessage stores the raw custom telemetry messages reported by
+// clients (authenticated with the app telemetry key). It is an admin-only
+// business table; CreatedAt is an int64 unix timestamp consistent with the
+// other app-center aggregation tables.
+type AppCenterCustomMessage struct {
+	ID        int64  `json:"id" gorm:"primaryKey"`
+	AppID     int64  `json:"app_id" gorm:"index"`
+	Name      string `json:"name" gorm:"size:64"`
+	Content   string `json:"content" gorm:"type:text"`
+	SourceIP  string `json:"source_ip,omitempty" gorm:"size:45"`
+	Country   string `json:"country,omitempty" gorm:"size:64"`
+	Region    string `json:"region,omitempty" gorm:"size:64"`
+	City      string `json:"city,omitempty" gorm:"size:64"`
+	CreatedAt int64  `json:"created_at" gorm:"bigint;index"`
+}
+
+func (AppCenterCustomMessage) TableName() string { return "app_center_custom_messages" }
+
 func EnsureAppCenterSchemaState() error {
 	if DB == nil {
 		return errors.New("database unavailable")

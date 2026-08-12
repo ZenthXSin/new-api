@@ -54,6 +54,7 @@ import {
   distributionErrorMessage,
 } from './api'
 import { ServerFileBrowserDialog } from './components/server-file-browser-dialog'
+import { CustomMessagesPanel } from './components/custom-messages-panel'
 import { DistributionTargetSelects } from './distribution-target-selects'
 import {
   clearBrowserSelection,
@@ -474,14 +475,17 @@ export function DistributionAdmin() {
                 />
               )}
               {tab === 'events' && (
-                <TelemetryEventsView
-                  data={eventsQuery.data?.summary}
-                  regions={eventsQuery.data?.regions.regions}
-                  loading={eventsQuery.isLoading}
-                  error={eventsQuery.isError}
-                  metric={eventMetric}
-                  onMetricChange={setEventMetric}
-                />
+                <>
+                  <TelemetryEventsView
+                    data={eventsQuery.data?.summary}
+                    regions={eventsQuery.data?.regions.regions}
+                    loading={eventsQuery.isLoading}
+                    error={eventsQuery.isError}
+                    metric={eventMetric}
+                    onMetricChange={setEventMetric}
+                  />
+                  <CustomMessagesPanel appId={selectedID} />
+                </>
               )}
               {tab === 'content' && (
                 <>
