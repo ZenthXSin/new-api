@@ -28,6 +28,7 @@ import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 import { useEffect } from 'react'
 
 import { NavigationProgress } from '@/components/navigation-progress'
+import { RegionReminder } from '@/components/region-reminder'
 import { Toaster } from '@/components/ui/sonner'
 import { ThemeCustomizationProvider } from '@/context/theme-customization-provider'
 import { saveAffiliateCode } from '@/features/auth/lib/storage'
@@ -97,6 +98,7 @@ function RootComponent() {
       <NavigationProgress />
       <Outlet />
       <Toaster closeButton duration={5000} position='top-center' richColors />
+      <RegionReminder />
       {import.meta.env.MODE === 'development' && (
         <>
           <ReactQueryDevtools buttonPosition='bottom-left' />

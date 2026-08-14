@@ -81,6 +81,33 @@ export async function getNotice(): Promise<{
   return res.data
 }
 
+export type GeoCheckResult = {
+  enabled: boolean
+  country_code: string
+  country_name: string
+  matched: boolean
+  message: string
+}
+
+/**
+ * Check whether the visitor's region matches the region reminder list.
+ * Returns null on failure so callers can silently skip the reminder.
+ */
+export async function getGeoCheck(): Promise<GeoCheckResult | null> {
+  try {
+    const res = await api.get<{
+      success: boolean
+      message?: string
+      data?: GeoCheckResult
+    }>('/api/geo/check', {
+      skipErrorHandler: true,
+    })
+    return res.data?.data ?? null
+  } catch {
+    return null
+  }
+}
+
 // ============================================================================
 // 2FA Management APIs
 // ============================================================================

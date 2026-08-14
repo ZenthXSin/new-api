@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -234,6 +235,45 @@ func ProbeApiNodes(c *gin.Context) {
 	}
 	wg.Wait()
 	common.ApiSuccess(c, results)
+}
+
+// geoCountryName 内置的国家码 → 中文名映射,供地区提醒展示。
+// 只收录常见国家/地区;未收录的 ISO 码原样返回。
+func geoCountryName(code string) string {
+	switch code {
+	case "CN":
+		return "中国大陆"
+	default:
+		return code
+	}
+}
+
+// GeoCheck 按请求 IP 查询 GeoIP 地区,供前端判断是否弹出地区访问提醒。
+// 只提醒不拦截:本接口仅返回查询结果与提醒文案,不拒绝任何请求。
+func GeoCheck(c *gin.Context) {
+	// 按 IP 的结果不可缓存
+	c.Header("Cache-Control", "no-store")
+	setting := operation_setting.GetRegionReminderSetting()
+	countryCode := ""
+	if ip := net.ParseIP(c.ClientIP()); ip != nil {
+		countryCode, _ = common.LookupCountryCode(ip)
+	}
+	matched := setting.Enabled && countryCode != "" && operation_setting.IsRegionReminderCountry(countryCode)
+	message := ""
+	if matched {
+		message = setting.Message
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data": gin.H{
+			"enabled":      setting.Enabled,
+			"country_code": countryCode,
+			"country_name": geoCountryName(countryCode),
+			"matched":      matched,
+			"message":      message,
+		},
+	})
 }
 
 func GetNotice(c *gin.Context) {

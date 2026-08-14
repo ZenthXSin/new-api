@@ -24,6 +24,7 @@ import { ChatSettingsSection } from './chat-settings-section'
 import { DashboardSection } from './dashboard-section'
 import { DrawingSettingsSection } from './drawing-settings-section'
 import { FAQSection } from './faq-section'
+import { RegionReminderSection } from './region-reminder-section'
 import { UptimeKumaSection } from './uptime-kuma-section'
 
 /**
@@ -113,6 +114,17 @@ const CONTENT_SECTIONS = [
           MjModeClearEnabled: settings.MjModeClearEnabled,
           MjActionCheckSuccessEnabled: settings.MjActionCheckSuccessEnabled,
         }}
+      />
+    ),
+  },
+  {
+    id: 'region-reminder',
+    titleKey: 'Region Reminder',
+    build: (settings: ContentSettings) => (
+      <RegionReminderSection
+        enabled={settings['region_reminder.enabled']}
+        countries={settings['region_reminder.countries']}
+        message={settings['region_reminder.message']}
       />
     ),
   },

@@ -174,6 +174,9 @@ export type ContentSettings = {
   'console_setting.announcements_enabled': boolean
   'console_setting.faq_enabled': boolean
   'console_setting.uptime_kuma_enabled': boolean
+  'region_reminder.enabled': boolean
+  'region_reminder.countries': string
+  'region_reminder.message': string
   DataExportEnabled: boolean
   DataExportDefaultTime: string
   DataExportInterval: number

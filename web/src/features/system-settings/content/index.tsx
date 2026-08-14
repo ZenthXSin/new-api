@@ -33,6 +33,10 @@ const defaultContentSettings: ContentSettings = {
   'console_setting.announcements_enabled': true,
   'console_setting.faq_enabled': true,
   'console_setting.uptime_kuma_enabled': false,
+  'region_reminder.enabled': true,
+  'region_reminder.countries': 'CN',
+  'region_reminder.message':
+    '请注意,本站不向中国大陆地区提供服务,受相关法律法规及合规要求限制,来自该地区的访问可能无法使用本站服务。命中国家/地区:CN',
   DataExportEnabled: false,
   DataExportDefaultTime: 'hour',
   DataExportInterval: 5,
