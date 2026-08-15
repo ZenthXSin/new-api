@@ -33,9 +33,7 @@ func cfStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Res
 	scanner := helper.NewStreamScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
 
-	if info.TextPollingAttemptTimeout == 0 {
-		helper.SetEventStreamHeaders(c)
-	}
+	helper.SetEventStreamHeaders(c)
 	id := helper.GetResponseID(c)
 	var responseText string
 	isFirst := true
@@ -56,9 +54,6 @@ func cfStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Res
 		err := json.Unmarshal([]byte(data), &response)
 		if err != nil {
 			logger.LogError(c, "error_unmarshalling_stream_response: "+err.Error())
-			if readErr := helper.PollingStreamReadError(c, info, err); readErr != nil {
-				return types.NewError(readErr, types.ErrorCodeBadResponseBody), nil
-			}
 			continue
 		}
 		for _, choice := range response.Choices {
@@ -67,13 +62,10 @@ func cfStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Res
 		}
 		response.Id = id
 		response.Model = info.UpstreamModelName
-		helper.PreparePollingStreamOutput(c, resp, info)
-		validEventAt := time.Now()
 		err = helper.ObjectData(c, response)
-		helper.CommitPollingStreamOutput(c, resp, info)
-		if err == nil && isFirst {
+		if isFirst {
 			isFirst = false
-			info.SetFirstResponseTimeAt(validEventAt)
+			info.SetFirstResponseTimeAt(time.Now())
 		}
 		if err != nil {
 			logger.LogError(c, "error_rendering_stream_response: "+err.Error())
@@ -82,12 +74,6 @@ func cfStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Res
 
 	if err := scanner.Err(); err != nil {
 		logger.LogError(c, "error_scanning_stream_response: "+err.Error())
-		if err = helper.PollingStreamReadError(c, info, err); err != nil {
-			return types.NewError(err, types.ErrorCodeReadResponseBodyFailed), nil
-		}
-	}
-	if info.TextPollingAttemptTimeout > 0 && !c.Writer.Written() {
-		return types.NewError(io.ErrUnexpectedEOF, types.ErrorCodeReadResponseBodyFailed), nil
 	}
 	usage := service.ResponseText2Usage(c, responseText, info.UpstreamModelName, info.GetEstimatePromptTokens())
 	if info.ShouldIncludeUsage {

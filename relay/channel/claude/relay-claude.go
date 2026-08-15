@@ -200,16 +200,19 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		Usage:        &dto.Usage{},
 	}
 	var err *types.NewAPIError
-	streamReadErr := helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		// 首字终点定制:事件未产出新文本(如 usage 事件)则标记为空事件,
+		// 不计入首字响应。
+		beforeLen := claudeInfo.ResponseText.Len()
 		err = HandleStreamResponseData(c, info, claudeInfo, data)
+		if claudeInfo.ResponseText.Len() == beforeLen {
+			sr.MarkEmpty()
+		}
 		if err != nil {
 			sr.Stop(err)
 		}
 	})
-	if streamReadErr != nil && !c.Writer.Written() {
-		return nil, types.NewError(streamReadErr, types.ErrorCodeReadResponseBodyFailed)
-	}
-	if err != nil && !c.Writer.Written() {
+	if err != nil {
 		return nil, err
 	}
 

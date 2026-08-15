@@ -85,7 +85,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	imageCounter := &relaycommon.ImageGenerationCallCounter{}
 	imageCommitted := false
 
-	streamReadErr := helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
 		// 检查当前数据是否包含 completed 状态和 usage 信息
 		var streamResponse dto.ResponsesStreamResponse
@@ -157,9 +157,6 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 	})
-	if streamReadErr != nil && !c.Writer.Written() {
-		return nil, types.NewOpenAIError(streamReadErr, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
-	}
 
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量

@@ -58,8 +58,12 @@ func ollamaToolCallsToOpenAI(toolCalls []OllamaToolCall, startIndex int, include
 				argBytes = []byte("{}")
 			}
 		}
+		toolCallID := tc.ID
+		if toolCallID == "" {
+			toolCallID = fmt.Sprintf("call_%d", startIndex)
+		}
 		tr := dto.ToolCallResponse{
-			ID:   fmt.Sprintf("call_%d", startIndex),
+			ID:   toolCallID,
 			Type: "function",
 			Function: dto.FunctionResponse{
 				Name:      tc.Function.Name,
@@ -97,15 +101,18 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	}
 	defer service.CloseResponseBodyGracefully(resp)
 
-	if info.TextPollingAttemptTimeout == 0 {
-		helper.SetEventStreamHeaders(c)
-	}
+	helper.SetEventStreamHeaders(c)
 	scanner := helper.NewStreamScanner(resp.Body)
 	usage := &dto.Usage{}
 	var model = info.UpstreamModelName
 	var responseId = common.GetUUID()
 	var created = time.Now().Unix()
 	var toolCallIndex int
+	start := helper.GenerateStartEmptyResponse(responseId, created, model, nil)
+	if data, err := common.Marshal(start); err == nil {
+		_ = helper.StringData(c, string(data))
+	}
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		line = strings.TrimSpace(line)
@@ -115,10 +122,7 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		var chunk ollamaChatStreamChunk
 		if err := common.Unmarshal([]byte(line), &chunk); err != nil {
 			logger.LogError(c, "ollama stream json decode error: "+err.Error()+" line="+line)
-			if readErr := helper.PollingStreamReadError(c, info, err); readErr != nil {
-				return usage, types.NewOpenAIError(readErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
-			}
-			continue
+			return usage, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
 		if chunk.Model != "" {
 			model = chunk.Model
@@ -164,9 +168,7 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 				delta.Choices[0].Delta.ToolCalls, toolCallIndex = ollamaToolCallsToOpenAI(chunk.Message.ToolCalls, toolCallIndex, true)
 			}
 			if data, err := common.Marshal(delta); err == nil {
-				helper.PreparePollingStreamOutput(c, resp, info)
 				_ = helper.StringData(c, string(data))
-				helper.CommitPollingStreamOutput(c, resp, info)
 			}
 			continue
 		}
@@ -185,17 +187,13 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		// emit stop delta
 		if stop := helper.GenerateStopResponse(responseId, created, model, finishReason); stop != nil {
 			if data, err := common.Marshal(stop); err == nil {
-				helper.PreparePollingStreamOutput(c, resp, info)
 				_ = helper.StringData(c, string(data))
-				helper.CommitPollingStreamOutput(c, resp, info)
 			}
 		}
 		// emit usage frame
 		if final := helper.GenerateFinalUsageResponse(responseId, created, model, *usage); final != nil {
 			if data, err := common.Marshal(final); err == nil {
-				helper.PreparePollingStreamOutput(c, resp, info)
 				_ = helper.StringData(c, string(data))
-				helper.CommitPollingStreamOutput(c, resp, info)
 			}
 		}
 		// send [DONE]
@@ -204,12 +202,6 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	}
 	if err := scanner.Err(); err != nil && err != io.EOF {
 		logger.LogError(c, "ollama stream scan error: "+err.Error())
-		if readErr := helper.PollingStreamReadError(c, info, err); readErr != nil {
-			return usage, types.NewOpenAIError(readErr, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
-		}
-	}
-	if info.TextPollingAttemptTimeout > 0 && !c.Writer.Written() {
-		return usage, types.NewOpenAIError(io.ErrUnexpectedEOF, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
 	}
 	return usage, nil
 }

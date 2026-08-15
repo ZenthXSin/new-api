@@ -1,13 +1,11 @@
 package ollama
 
 import (
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -19,44 +17,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type failingPollingBody struct {
-	err     error
-	stopped bool
-}
-
-func (b *failingPollingBody) Read([]byte) (int, error) { return 0, b.err }
-func (b *failingPollingBody) Close() error             { return nil }
-func (b *failingPollingBody) StopPollingTimeout()      { b.stopped = true }
-
-func TestOllamaPollingDoesNotCommitBeforeFirstUpstreamEvent(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	body := &failingPollingBody{err: errors.New("attempt timeout")}
-
-	usage, apiErr := ollamaStreamHandler(c, &relaycommon.RelayInfo{
-		ChannelMeta:               &relaycommon.ChannelMeta{UpstreamModelName: "llama"},
-		TextPollingAttemptTimeout: time.Second,
-	}, &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body})
-
-	require.NotNil(t, usage)
-	require.NotNil(t, apiErr)
-	assert.False(t, c.Writer.Written())
-	assert.Empty(t, w.Body.String())
-	assert.False(t, body.stopped)
-}
-
 func TestOllamaChatHandlerNonStreamToolCalls(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
-		name string
-		raw  string
+		name   string
+		raw    string
+		wantID string
 	}{
 		{
-			name: "compact json per-line parse path",
-			raw:  `{"model":"llama3.1","created_at":"2026-05-27T12:00:00Z","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"get_weather","arguments":{"city":"Paris","days":0}}}]},"done":true,"done_reason":"stop","prompt_eval_count":5,"eval_count":7}`,
+			name:   "compact json per-line parse path",
+			raw:    `{"model":"llama3.1","created_at":"2026-05-27T12:00:00Z","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_upstream","function":{"name":"get_weather","arguments":{"city":"Paris","days":0}}}]},"done":true,"done_reason":"stop","prompt_eval_count":5,"eval_count":7}`,
+			wantID: "call_upstream",
 		},
 		{
 			name: "pretty json fallback parse path",
@@ -83,6 +55,7 @@ func TestOllamaChatHandlerNonStreamToolCalls(t *testing.T) {
   "prompt_eval_count": 5,
   "eval_count": 7
 }`,
+			wantID: "call_0",
 		},
 	}
 
@@ -112,7 +85,7 @@ func TestOllamaChatHandlerNonStreamToolCalls(t *testing.T) {
 			var toolCalls []dto.ToolCallResponse
 			require.NoError(t, common.Unmarshal(out.Choices[0].Message.ToolCalls, &toolCalls))
 			require.Len(t, toolCalls, 1)
-			assert.NotEmpty(t, toolCalls[0].ID)
+			assert.Equal(t, tt.wantID, toolCalls[0].ID)
 			assert.Equal(t, "function", toolCalls[0].Type)
 			assert.Equal(t, "get_weather", toolCalls[0].Function.Name)
 			assert.Nil(t, toolCalls[0].Index)

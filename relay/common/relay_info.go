@@ -127,7 +127,7 @@ type RelayInfo struct {
 	// 必须在提交前锁定全额。
 	ForcePreConsume bool
 	// Billing 是计费会话，封装了预扣费/结算/退款的统一生命周期。
-	// 免费模型时为 nil。
+	// 初始免费组可为 nil；若 auto 重试切换到付费组，会在发送前创建。
 	Billing BillingSettler
 	// BillingSource indicates whether this request is billed from wallet quota or subscription.
 	// "" or "wallet" => wallet; "subscription" => subscription
@@ -149,19 +149,12 @@ type RelayInfo struct {
 	IsClaudeBetaQuery                     bool // /v1/messages?beta=true
 	IsChannelTest                         bool // channel test request
 	RetryIndex                            int
+	LastError                             *types.NewAPIError
 	TextPollingTier                       int
 	TextPollingAttemptTimeout             time.Duration
-	LastError                             *types.NewAPIError
 	RuntimeHeadersOverride                map[string]interface{}
 	UseRuntimeHeadersOverride             bool
 	ParamOverrideAudit                    []string
-
-	// UpstreamRequestBodySize is the byte size of the marshaled upstream request
-	// body. It is set when the body is wrapped in a BodyStorage (see
-	// relay/common/outbound_body.go), so that DoApiRequest can populate
-	// http.Request.ContentLength manually (net/http only auto-detects it for
-	// *bytes.Reader/Buffer/strings.Reader). 0 means "let net/http decide".
-	UpstreamRequestBodySize int64
 
 	PriceData hosttypes.PriceData
 
@@ -170,8 +163,9 @@ type RelayInfo struct {
 	// It is surfaced onto the consume/task log's admin_info for auditing.
 	QuotaClamp *common.QuotaClamp
 
-	// TieredBillingSnapshot is a frozen snapshot of tiered billing rules
-	// captured at pre-consume time. Non-nil only when billing mode is "tiered_expr".
+	// TieredBillingSnapshot captures tiered billing rules at pre-consume time.
+	// Auto-group retries refresh its group-dependent fields before each attempt
+	// and again before settlement. Non-nil only when billing mode is "tiered_expr".
 	TieredBillingSnapshot *billingexpr.BillingSnapshot
 	BillingRequestInput   *billingexpr.RequestInput
 
@@ -255,6 +249,11 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	// Channel identity feeds the converter options snapshot (e.g.
 	// OpenRouterDialect); drop the cache so a cross-channel retry rebuilds it.
 	info.convOptions = nil
+	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || channelMeta.ChannelSetting.PassThroughBodyEnabled {
+		info.ReasoningEffort = ""
+	} else {
+		info.ReasoningEffort = reasoningEffortFromRequest(info.Request)
+	}
 
 	// reset some fields based on channel meta
 	// 重置某些字段，例如模型名称等
@@ -456,6 +455,36 @@ func GenRelayInfoOpenAI(c *gin.Context, request dto.Request) *RelayInfo {
 	return info
 }
 
+func reasoningEffortFromRequest(request dto.Request) string {
+	var effort string
+	switch req := request.(type) {
+	case *dto.GeneralOpenAIRequest:
+		if req == nil {
+			return ""
+		}
+		effort = req.ReasoningEffort
+		if strings.TrimSpace(effort) == "" && len(req.Reasoning) > 0 {
+			value := gjson.GetBytes(req.Reasoning, "effort")
+			if value.Type == gjson.String {
+				effort = value.String()
+			}
+		}
+	case *dto.OpenAIResponsesRequest:
+		if req != nil && req.Reasoning != nil {
+			effort = req.Reasoning.Effort
+		}
+	case *dto.ClaudeRequest:
+		if req != nil {
+			effort = req.GetEfforts()
+		}
+	case *dto.GeminiChatRequest:
+		if req != nil && req.GenerationConfig.ThinkingConfig != nil {
+			effort = req.GenerationConfig.ThinkingConfig.ThinkingLevel
+		}
+	}
+	return strings.TrimSpace(effort)
+}
+
 func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 
 	//channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
@@ -487,9 +516,11 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		reqId = common.NewRequestId()
 	}
 	timing, _ := common.GetContextKeyType[*common.RelayTiming](c, constant.ContextKeyRelayTiming)
+	reasoningEffort := reasoningEffortFromRequest(request)
 	info := &RelayInfo{
-		Timing:  timing,
-		Request: request,
+		Timing:          timing,
+		Request:         request,
+		ReasoningEffort: reasoningEffort,
 
 		RequestId:  reqId,
 		UserId:     common.GetContextKeyInt(c, constant.ContextKeyUserId),
@@ -505,11 +536,12 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		TokenUnlimited:    common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
 		TokenGroup:        tokenGroup,
 		ExcludeProfitStat: common.GetContextKeyBool(c, constant.ContextKeyTokenExcludeProfitStat),
-		isFirstResponse:   true,
-		RelayMode:         relayconstant.Path2RelayMode(c.Request.URL.Path),
-		RequestURLPath:    c.Request.URL.String(),
-		RequestHeaders:    cloneRequestHeaders(c),
-		IsStream:          isStream,
+
+		isFirstResponse: true,
+		RelayMode:       relayconstant.Path2RelayMode(c.Request.URL.Path),
+		RequestURLPath:  c.Request.URL.String(),
+		RequestHeaders:  cloneRequestHeaders(c),
+		IsStream:        isStream,
 
 		StartTime:         startTime,
 		FirstResponseTime: startTime.Add(-time.Second),
@@ -763,7 +795,7 @@ func (info *RelayInfo) SetReasoningEffort(effort string) {
 	if info == nil {
 		return
 	}
-	info.ReasoningEffort = effort
+	info.ReasoningEffort = strings.TrimSpace(effort)
 }
 
 func (info *RelayInfo) EnsureClaudeConvertInfo() *convmeta.ClaudeConvertInfo {

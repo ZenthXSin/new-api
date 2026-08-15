@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
@@ -26,6 +25,38 @@ type ChannelSettings struct {
 	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
 	SystemPrompt           string `json:"system_prompt,omitempty"`
 	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
+	// HTTPProtocol controls outbound HTTP version negotiation for this channel.
+	// Accepted values: "", "auto" (default), "http1".
+	HTTPProtocol string `json:"http_protocol,omitempty"`
+	// HTTP2ConnectionShards spreads HTTP/2 traffic across N independent transports
+	// (1-8). Zero/unset means 1. Ignored when HTTPProtocol is "http1".
+	HTTP2ConnectionShards int `json:"http2_connection_shards,omitempty"`
+}
+
+const (
+	HTTPProtocolAuto         = "auto"
+	HTTPProtocolHTTP1        = "http1"
+	MaxHTTP2ConnectionShards = 8
+)
+
+// ValidateHTTPTransport validates save-time HTTP transport channel settings.
+func (s *ChannelSettings) ValidateHTTPTransport() error {
+	if s == nil {
+		return nil
+	}
+	protocol := strings.ToLower(strings.TrimSpace(s.HTTPProtocol))
+	switch protocol {
+	case "", HTTPProtocolAuto, HTTPProtocolHTTP1:
+	default:
+		return fmt.Errorf("invalid http_protocol: %s", s.HTTPProtocol)
+	}
+	if s.HTTP2ConnectionShards < 0 || s.HTTP2ConnectionShards > MaxHTTP2ConnectionShards {
+		return fmt.Errorf("invalid http2_connection_shards: %d", s.HTTP2ConnectionShards)
+	}
+	if protocol == HTTPProtocolHTTP1 && s.HTTP2ConnectionShards > 1 {
+		return fmt.Errorf("http2_connection_shards must be 1 when http_protocol is http1")
+	}
+	return nil
 }
 
 type VertexKeyType string
@@ -43,24 +74,24 @@ const (
 )
 
 type ChannelOtherSettings struct {
-	TextPollingEnabled                    bool `json:"text_polling_enabled,omitempty"`
-	TextPollingTimeoutTier1Seconds        int  `json:"text_polling_timeout_tier1_seconds,omitempty"`
-	TextPollingTimeoutTier2Seconds        int  `json:"text_polling_timeout_tier2_seconds,omitempty"`
-	TextPollingTimeoutTier3Seconds        int  `json:"text_polling_timeout_tier3_seconds,omitempty"`
+	AzureResponsesVersion                 string        `json:"azure_responses_version,omitempty"`
+	VertexKeyType                         VertexKeyType `json:"vertex_key_type,omitempty"` // "json" or "api_key"
+	OpenRouterEnterprise                  *bool         `json:"openrouter_enterprise,omitempty"`
+	ClaudeBetaQuery                       bool          `json:"claude_beta_query,omitempty"`          // Claude 渠道是否强制追加 ?beta=true
+	AllowServiceTier                      bool          `json:"allow_service_tier,omitempty"`         // 是否允许 service_tier 透传（默认过滤以避免额外计费）
+	AllowInferenceGeo                     bool          `json:"allow_inference_geo,omitempty"`        // 是否允许 inference_geo 透传（仅 Claude，默认过滤以满足数据驻留合规
+	AllowSpeed                            bool          `json:"allow_speed,omitempty"`                // 是否允许 speed 透传（仅 Claude，默认过滤以避免意外切换推理速度模式）
+	AllowSafetyIdentifier                 bool          `json:"allow_safety_identifier,omitempty"`    // 是否允许 safety_identifier 透传（默认过滤以保护用户隐私）
+	DisableStore                          bool          `json:"disable_store,omitempty"`              // 是否禁用 store 透传（默认允许透传，禁用后可能导致 Codex 无法使用）
+	AllowIncludeObfuscation               bool          `json:"allow_include_obfuscation,omitempty"`  // 是否允许 stream_options.include_obfuscation 透传（默认过滤以避免关闭流混淆保护）
+	DisableTaskPollingSleep               bool          `json:"disable_task_polling_sleep,omitempty"` // 是否跳过异步任务轮询间隔
+	TextPollingEnabled                    bool          `json:"text_polling_enabled,omitempty"`
+	TextPollingTimeoutTier1Seconds        int           `json:"text_polling_timeout_tier1_seconds,omitempty"`
+	TextPollingTimeoutTier2Seconds        int           `json:"text_polling_timeout_tier2_seconds,omitempty"`
+	TextPollingTimeoutTier3Seconds        int           `json:"text_polling_timeout_tier3_seconds,omitempty"`
 	textPollingTimeoutTier1Set            bool
 	textPollingTimeoutTier2Set            bool
 	textPollingTimeoutTier3Set            bool
-	AzureResponsesVersion                 string                `json:"azure_responses_version,omitempty"`
-	VertexKeyType                         VertexKeyType         `json:"vertex_key_type,omitempty"` // "json" or "api_key"
-	OpenRouterEnterprise                  *bool                 `json:"openrouter_enterprise,omitempty"`
-	ClaudeBetaQuery                       bool                  `json:"claude_beta_query,omitempty"`          // Claude 渠道是否强制追加 ?beta=true
-	AllowServiceTier                      bool                  `json:"allow_service_tier,omitempty"`         // 是否允许 service_tier 透传（默认过滤以避免额外计费）
-	AllowInferenceGeo                     bool                  `json:"allow_inference_geo,omitempty"`        // 是否允许 inference_geo 透传（仅 Claude，默认过滤以满足数据驻留合规
-	AllowSpeed                            bool                  `json:"allow_speed,omitempty"`                // 是否允许 speed 透传（仅 Claude，默认过滤以避免意外切换推理速度模式）
-	AllowSafetyIdentifier                 bool                  `json:"allow_safety_identifier,omitempty"`    // 是否允许 safety_identifier 透传（默认过滤以保护用户隐私）
-	DisableStore                          bool                  `json:"disable_store,omitempty"`              // 是否禁用 store 透传（默认允许透传，禁用后可能导致 Codex 无法使用）
-	AllowIncludeObfuscation               bool                  `json:"allow_include_obfuscation,omitempty"`  // 是否允许 stream_options.include_obfuscation 透传（默认过滤以避免关闭流混淆保护）
-	DisableTaskPollingSleep               bool                  `json:"disable_task_polling_sleep,omitempty"` // 是否跳过异步任务轮询间隔
 	AwsKeyType                            AwsKeyType            `json:"aws_key_type,omitempty"`
 	UpstreamModelUpdateCheckEnabled       bool                  `json:"upstream_model_update_check_enabled,omitempty"`        // 是否检测上游模型更新
 	UpstreamModelUpdateAutoSyncEnabled    bool                  `json:"upstream_model_update_auto_sync_enabled,omitempty"`    // 是否自动同步上游模型更新
@@ -71,19 +102,26 @@ type ChannelOtherSettings struct {
 	AdvancedCustom                        *AdvancedCustomConfig `json:"advanced_custom,omitempty"`
 }
 
+func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {
+	if s == nil || s.OpenRouterEnterprise == nil {
+		return false
+	}
+	return *s.OpenRouterEnterprise
+}
+
 type channelOtherSettingsAlias ChannelOtherSettings
 
 // UnmarshalJSON tracks timeout field presence so legacy settings can retain
 // their defaults while an explicitly supplied zero remains invalid.
 func (s *ChannelOtherSettings) UnmarshalJSON(data []byte) error {
 	var settings channelOtherSettingsAlias
-	if err := common.Unmarshal(data, &settings); err != nil {
+	if err := json.Unmarshal(data, &settings); err != nil {
 		return err
 	}
 	*s = ChannelOtherSettings(settings)
 
 	var fields map[string]json.RawMessage
-	if err := common.Unmarshal(data, &fields); err != nil {
+	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
 	_, s.textPollingTimeoutTier1Set = fields["text_polling_timeout_tier1_seconds"]
@@ -137,13 +175,6 @@ func (s ChannelOtherSettings) TextPollingTimeoutSeconds(tier int) int {
 	default:
 		return 0
 	}
-}
-
-func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {
-	if s == nil || s.OpenRouterEnterprise == nil {
-		return false
-	}
-	return *s.OpenRouterEnterprise
 }
 
 const (

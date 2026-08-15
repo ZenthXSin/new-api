@@ -1,6 +1,7 @@
 package cohere
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -97,72 +98,76 @@ func cohereStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		}
 		return 0, nil, nil
 	})
-	if info.TextPollingAttemptTimeout == 0 {
-		helper.SetEventStreamHeaders(c)
-	}
-	for scanner.Scan() {
-		data := strings.TrimSuffix(scanner.Text(), "\r")
-		var cohereResp CohereResponse
-		if err := common.Unmarshal([]byte(data), &cohereResp); err != nil {
-			common.SysLog("error unmarshalling stream response: " + err.Error())
-			if readErr := helper.PollingStreamReadError(c, info, err); readErr != nil {
-				return nil, types.NewError(readErr, types.ErrorCodeBadResponseBody)
+	dataChan := make(chan string)
+	stopChan := make(chan bool)
+	go func() {
+		for scanner.Scan() {
+			data := scanner.Text()
+			dataChan <- data
+		}
+		if err := scanner.Err(); err != nil {
+			common.SysLog("error reading stream: " + err.Error())
+		}
+		stopChan <- true
+	}()
+	helper.SetEventStreamHeaders(c)
+	isFirst := true
+	c.Stream(func(w io.Writer) bool {
+		select {
+		case data := <-dataChan:
+			if isFirst {
+				isFirst = false
+				info.SetFirstResponseTimeAt(time.Now())
 			}
-			continue
-		}
-		var openaiResp dto.ChatCompletionsStreamResponse
-		openaiResp.Id = responseId
-		openaiResp.Created = createdTime
-		openaiResp.Object = "chat.completion.chunk"
-		openaiResp.Model = info.UpstreamModelName
-		if cohereResp.IsFinished {
-			finishReason := stopReasonCohere2OpenAI(cohereResp.FinishReason)
-			openaiResp.Choices = []dto.ChatCompletionsStreamResponseChoice{{
-				Delta:        dto.ChatCompletionsStreamResponseChoiceDelta{},
-				Index:        0,
-				FinishReason: &finishReason,
-			}}
-			if cohereResp.Response != nil {
-				usage.PromptTokens = cohereResp.Response.Meta.BilledUnits.InputTokens
-				usage.CompletionTokens = cohereResp.Response.Meta.BilledUnits.OutputTokens
+			data = strings.TrimSuffix(data, "\r")
+			var cohereResp CohereResponse
+			err := json.Unmarshal([]byte(data), &cohereResp)
+			if err != nil {
+				common.SysLog("error unmarshalling stream response: " + err.Error())
+				return true
 			}
-		} else {
-			openaiResp.Choices = []dto.ChatCompletionsStreamResponseChoice{{
-				Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
-					Role:    "assistant",
-					Content: &cohereResp.Text,
-				},
-				Index: 0,
-			}}
-			responseText += cohereResp.Text
-		}
-		jsonStr, err := common.Marshal(openaiResp)
-		if err != nil {
-			common.SysLog("error marshalling stream response: " + err.Error())
-			if readErr := helper.PollingStreamReadError(c, info, err); readErr != nil {
-				return nil, types.NewError(readErr, types.ErrorCodeBadResponseBody)
+			var openaiResp dto.ChatCompletionsStreamResponse
+			openaiResp.Id = responseId
+			openaiResp.Created = createdTime
+			openaiResp.Object = "chat.completion.chunk"
+			openaiResp.Model = info.UpstreamModelName
+			if cohereResp.IsFinished {
+				finishReason := stopReasonCohere2OpenAI(cohereResp.FinishReason)
+				openaiResp.Choices = []dto.ChatCompletionsStreamResponseChoice{
+					{
+						Delta:        dto.ChatCompletionsStreamResponseChoiceDelta{},
+						Index:        0,
+						FinishReason: &finishReason,
+					},
+				}
+				if cohereResp.Response != nil {
+					usage.PromptTokens = cohereResp.Response.Meta.BilledUnits.InputTokens
+					usage.CompletionTokens = cohereResp.Response.Meta.BilledUnits.OutputTokens
+				}
+			} else {
+				openaiResp.Choices = []dto.ChatCompletionsStreamResponseChoice{
+					{
+						Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
+							Role:    "assistant",
+							Content: &cohereResp.Text,
+						},
+						Index: 0,
+					},
+				}
+				responseText += cohereResp.Text
 			}
-			continue
+			jsonStr, err := json.Marshal(openaiResp)
+			if err != nil {
+				common.SysLog("error marshalling stream response: " + err.Error())
+				return true
+			}
+			c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonStr)})
+			return true
+		case <-stopChan:
+			c.Render(-1, common.CustomEvent{Data: "data: [DONE]"})
+			return false
 		}
-		helper.PreparePollingStreamOutput(c, resp, info)
-		validEventAt := time.Now()
-		c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonStr)})
-		if helper.CommitPollingStreamOutput(c, resp, info) {
-			info.SetFirstResponseTimeAt(validEventAt)
-		}
-		c.Writer.Flush()
-	}
-	if err := scanner.Err(); err != nil {
-		common.SysLog("error reading stream: " + err.Error())
-		if readErr := helper.PollingStreamReadError(c, info, err); readErr != nil {
-			return nil, types.NewError(readErr, types.ErrorCodeReadResponseBodyFailed)
-		}
-	}
-	if info.TextPollingAttemptTimeout > 0 && !c.Writer.Written() {
-		return nil, types.NewError(io.ErrUnexpectedEOF, types.ErrorCodeReadResponseBodyFailed)
-	}
-	helper.Done(c)
-	c.Writer.Flush()
+	})
 	if usage.PromptTokens == 0 {
 		usage = service.ResponseText2Usage(c, responseText, info.UpstreamModelName, info.GetEstimatePromptTokens())
 	}
@@ -177,7 +182,7 @@ func cohereHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	}
 	service.CloseResponseBodyGracefully(resp)
 	var cohereResp CohereResponseResult
-	err = common.Unmarshal(responseBody, &cohereResp)
+	err = json.Unmarshal(responseBody, &cohereResp)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
@@ -201,7 +206,7 @@ func cohereHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		},
 	}
 
-	jsonResponse, err := common.Marshal(openaiResp)
+	jsonResponse, err := json.Marshal(openaiResp)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
@@ -218,7 +223,7 @@ func cohereRerankHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 	}
 	service.CloseResponseBodyGracefully(resp)
 	var cohereResp CohereRerankResponseResult
-	err = common.Unmarshal(responseBody, &cohereResp)
+	err = json.Unmarshal(responseBody, &cohereResp)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
@@ -237,7 +242,7 @@ func cohereRerankHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 	rerankResp.Results = cohereResp.Results
 	rerankResp.Usage = usage
 
-	jsonResponse, err := common.Marshal(rerankResp)
+	jsonResponse, err := json.Marshal(rerankResp)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}

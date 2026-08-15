@@ -172,16 +172,16 @@ export function getMinTopupAmount(topupInfo: TopupInfo | null): number {
     return topupInfo.stripe_min_topup
   }
 
-  if (topupInfo.enable_wechatpay_topup) {
-    return topupInfo.wechatpay_min_topup || DEFAULT_MIN_TOPUP
-  }
-
   if (topupInfo.enable_waffo_topup) {
     return topupInfo.waffo_min_topup || DEFAULT_MIN_TOPUP
   }
 
   if (topupInfo.enable_waffo_pancake_topup) {
     return topupInfo.waffo_pancake_min_topup || DEFAULT_MIN_TOPUP
+  }
+
+  if (topupInfo.enable_wechatpay_topup) {
+    return topupInfo.wechatpay_min_topup || DEFAULT_MIN_TOPUP
   }
 
   return DEFAULT_MIN_TOPUP

@@ -154,7 +154,11 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	if strings.HasPrefix(requestPath, "/v1/responses/compact") {
 		testModel = ratio_setting.WithCompactModelSuffix(testModel)
 	}
-
+	// Gemini 原生流式通过 URL action（:streamGenerateContent）表达而非请求体字段，
+	// GeminiChatRequest.IsStream 依据请求 URL 判定，合成请求路径需与生产入口保持一致
+	if isStream && constant.EndpointType(endpointType) == constant.EndpointTypeGemini {
+		requestPath = strings.Replace(requestPath, ":generateContent", ":streamGenerateContent", 1)
+	}
 	c.Request = httptest.NewRequestWithContext(ctx, http.MethodPost, requestPath, nil)
 
 	cache, err := model.GetUserCache(testUserID)
@@ -272,7 +276,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 
 	apiType, _ := common.ChannelType2APIType(channel.Type)
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact &&
-		!common.IsResponsesCompactAPIType(apiType) {
+		!common.SupportsResponsesCompact(channel.Type, apiType) {
 		return testResult{
 			context:     c,
 			localErr:    fmt.Errorf("responses compaction test is not supported for api type %d", apiType),
@@ -371,14 +375,18 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 			}
 		}
 	default:
-		// Chat/Completion 等其他请求类型
-		if generalReq, ok := request.(*dto.GeneralOpenAIRequest); ok {
-			convertedRequest, err = adaptor.ConvertOpenAIRequest(c, info, generalReq)
-		} else {
+		switch req := request.(type) {
+		case *dto.GeneralOpenAIRequest:
+			convertedRequest, err = adaptor.ConvertOpenAIRequest(c, info, req)
+		case *dto.ClaudeRequest:
+			convertedRequest, err = adaptor.ConvertClaudeRequest(c, info, req)
+		case *dto.GeminiChatRequest:
+			convertedRequest, err = adaptor.ConvertGeminiRequest(c, info, req)
+		default:
 			return testResult{
 				context:     c,
-				localErr:    errors.New("invalid general request type"),
-				newAPIError: types.NewError(errors.New("invalid general request type"), types.ErrorCodeConvertRequestFailed),
+				localErr:    errors.New("invalid chat request type"),
+				newAPIError: types.NewError(errors.New("invalid chat request type"), types.ErrorCodeConvertRequestFailed),
 			}
 		}
 	}
@@ -498,18 +506,17 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	consumedTime := float64(milliseconds) / 1000.0
 	other := buildTestLogOther(c, info, priceData, usage, tieredResult)
 	model.RecordConsumeLog(c, testUserID, model.RecordConsumeLogParams{
-		ChannelId:         channel.Id,
-		PromptTokens:      usage.PromptTokens,
-		CompletionTokens:  usage.CompletionTokens,
-		ModelName:         info.OriginModelName,
-		TokenName:         "模型测试",
-		Quota:             quota,
-		Content:           "模型测试",
-		UseTimeSeconds:    int(consumedTime),
-		IsStream:          info.IsStream,
-		Group:             info.UsingGroup,
-		Other:             other,
-		ExcludeProfitStat: info.ExcludeProfitStat,
+		ChannelId:        channel.Id,
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		ModelName:        info.OriginModelName,
+		TokenName:        "模型测试",
+		Quota:            quota,
+		Content:          "模型测试",
+		UseTimeSeconds:   int(consumedTime),
+		IsStream:         info.IsStream,
+		Group:            info.UsingGroup,
+		Other:            other,
 	})
 	common.SysLog(fmt.Sprintf("testing channel #%d, response: \n%s", channel.Id, string(respBody)))
 	return testResult{
@@ -734,12 +741,31 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 				Model: model,
 				Input: testResponsesInput,
 			}
-		case constant.EndpointTypeAnthropic, constant.EndpointTypeGemini, constant.EndpointTypeOpenAI:
-			// 返回 GeneralOpenAIRequest
-			maxTokens := uint(16)
-			if constant.EndpointType(endpointType) == constant.EndpointTypeGemini {
-				maxTokens = 3000
+		case constant.EndpointTypeAnthropic:
+			return &dto.ClaudeRequest{
+				Model:     model,
+				Stream:    lo.ToPtr(isStream),
+				MaxTokens: lo.ToPtr(uint(16)),
+				Messages: []dto.ClaudeMessage{
+					{
+						Role:    "user",
+						Content: "hi",
+					},
+				},
 			}
+		case constant.EndpointTypeGemini:
+			return &dto.GeminiChatRequest{
+				Contents: []dto.GeminiChatContent{
+					{
+						Role:  "user",
+						Parts: []dto.GeminiPart{{Text: "hi"}},
+					},
+				},
+				GenerationConfig: dto.GeminiChatGenerationConfig{
+					MaxOutputTokens: lo.ToPtr(uint(3000)),
+				},
+			}
+		case constant.EndpointTypeOpenAI:
 			req := &dto.GeneralOpenAIRequest{
 				Model:  model,
 				Stream: lo.ToPtr(isStream),
@@ -749,7 +775,7 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 						Content: "hi",
 					},
 				},
-				MaxTokens: lo.ToPtr(maxTokens),
+				MaxTokens: lo.ToPtr(uint(16)),
 			}
 			if isStream {
 				req.StreamOptions = &dto.StreamOptions{IncludeUsage: true}
@@ -1020,6 +1046,9 @@ func selectChannelsForAutomaticTest(channels []*model.Channel, mode string) []*m
 	selected := make([]*model.Channel, 0, len(channels))
 	for _, channel := range channels {
 		if channel.Status == common.ChannelStatusManuallyDisabled {
+			continue
+		}
+		if mode == operation_setting.ChannelTestModeAutoBanOnly && !channel.GetAutoBan() {
 			continue
 		}
 		if mode == operation_setting.ChannelTestModePassiveRecovery && channel.Status != common.ChannelStatusAutoDisabled {

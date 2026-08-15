@@ -1,17 +1,11 @@
 package channel
 
 import (
-	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
-	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/relay/helper"
-	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -196,51 +190,4 @@ func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.
 	require.Equal(t, "Codex CLI", upstreamReq.Header.Get("Originator"))
 	require.Equal(t, "sess-123", upstreamReq.Header.Get("Session_id"))
 	require.Empty(t, upstreamReq.Header.Get("X-Codex-Beta-Features"))
-}
-
-func TestDoRequest_PollingAttemptTimeoutCancelsUnreadResponse(t *testing.T) {
-	service.InitHttpClient()
-	oldStreamingTimeout := constant.StreamingTimeout
-	constant.StreamingTimeout = 30
-	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
-
-	upstreamCanceled := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
-		<-r.Context().Done()
-		close(upstreamCanceled)
-	}))
-	defer server.Close()
-
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	c.Request.Body = http.NoBody
-	req, err := http.NewRequest(http.MethodPost, server.URL, nil)
-	require.NoError(t, err)
-	req.Body = http.NoBody
-
-	info := &relaycommon.RelayInfo{
-		IsStream:                  true,
-		TextPollingAttemptTimeout: 50 * time.Millisecond,
-		ChannelMeta:               &relaycommon.ChannelMeta{},
-	}
-	resp, err := DoRequest(c, req, info)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-
-	streamErr := helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {})
-	require.Error(t, streamErr)
-	require.True(t, errors.Is(streamErr, context.Canceled) || errors.Is(streamErr, context.DeadlineExceeded))
-	require.False(t, c.Writer.Written())
-
-	select {
-	case <-upstreamCanceled:
-	case <-time.After(2 * time.Second):
-		t.Fatal("upstream request context was not canceled")
-	}
 }

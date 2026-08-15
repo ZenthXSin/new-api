@@ -2,27 +2,6 @@
 
 DO NOT send optional commentary
 
-## Deployment Verification
-
-- At the end of any delivery (feature, fix, or change that affects the running product), verify whether the change has been deployed to the production environment, and state the result explicitly.
-- Production deployment facts: production runs as Docker container `new-api-dev` (compose at `/root/new-api-prod/compose.yml`) built from this repo; the running image tag embeds a date+time stamp (e.g. `release-YYYYMMDD-HHMM`). Check with `docker ps` / `docker images` and compare against the latest commit: an image tag older than the commit date, or a commit present in git but in no image, means "not deployed".
-- Frontend is ALSO deployed to Nginx: `web/dist` is synced to `/var/www/new-api` (old copy kept as `/var/www/new-api.previous-<TAG>`), then `nginx -t && systemctl reload nginx`. A backend-only deploy is incomplete — the Nginx-hosted frontend must be rebuilt and synced too.
-- One-click script: `/root/new-api-prod/deploy.sh` handles the full cycle (frontend build + backend image build + compose replace + nginx sync + health checks). Docker network needs the local proxy for module downloads: `--network=host` with `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:7890` (script detects proxy availability automatically). Repo commit messages should keep the existing style.
-- A change is "deployed" only when a freshly built image containing it is running in production and health checks pass. Committed+pushed code is NOT deployed.
-- After any delivery accepted for production, build the image, deploy it to `new-api-dev`, and verify health checks yourself — do not stop at "offer to deploy". If the change is not deployed, say so explicitly and do not imply otherwise.
-- Keep the deployment cycle self-contained per delivery: commit → push → build image → replace container → health check.
-- After each successful deployment, clean up stale Docker images yourself: prune dangling images (`docker image prune -f`) and remove all old `new-api-dev` tags except the currently running one (keep at most one rollback image if desired). Keep exactly one backup image (`new-api-backup`).
-
-## Agent Delegation
-
-- Use `sol-advisor:orchestration` for delegated implementation work.
-- Use only Sol Advisor's native lane. Do not use `luna_worker` or the Luna task lane.
-- Keep requirements, architecture, decomposition, diff inspection, verification, and final acceptance in the primary Sol / High session.
-- Delegate implementation to `sol_advisor_terra_implementer` with `fork_turns: none`; its installed profile pins Terra / High.
-- **Subagent model rule (mandatory):** ALL subagents (`sol-advisor-routine`, `sol-advisor-high`, `sol-advisor-advisor`, `general`, `explore`) run on the default model (do NOT pin an explicit model in subagent specs or configs) with reasoning effort `max`. Never substitute a lower effort for subagent work; never accept a report produced at a lower effort; re-spawn if a spawned agent falls back to a lower effort.
-- After primary-session verification, require a fresh `sol_advisor_sol_reviewer` with `fork_turns: none` and accept completion only after a `ship` verdict.
-- Follow the installed Sol Advisor skill's preflight, ownership, verification, runtime-routing, sandbox-observation, correction, and no-fallback requirements exactly.
-
 ## Overview
 
 This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI providers (OpenAI, Claude, Gemini, Azure, AWS Bedrock, etc.) behind a unified API, with user management, billing, rate limiting, and an admin dashboard.
@@ -84,6 +63,11 @@ web/           — Frontend (React 19, Rsbuild, Base UI, Tailwind)
 - If a single-use helper is kept, its name must describe a durable domain concept rather than a mechanical step extracted only to shorten the caller.
 
 ### Backend Rules
+
+**relaykit module independence:** The `relaykit/` Go module MUST remain independently buildable.
+
+- Code under `relaykit/` MUST NOT import or depend on packages from the root `new-api` module, or rely on root-only configuration, generated files, or workspace wiring.
+- Any change affecting `relaykit/` or its public APIs MUST be verified with `cd relaykit && GOWORK=off go build ./...`; a successful root-module build is not sufficient.
 
 **JSON package:** All JSON marshal/unmarshal operations MUST use the wrapper functions in `common/json.go`:
 

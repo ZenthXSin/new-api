@@ -245,6 +245,11 @@ export const ERROR_MESSAGES = {
   INVALID_MODEL_MAPPING: 'Invalid model mapping format',
   INVALID_PROXY:
     'Proxy address must use HTTP, HTTPS, SOCKS5, or SOCKS5H and include a valid host',
+  INVALID_HTTP_PROTOCOL: 'HTTP protocol must be Auto or HTTP/1.1',
+  INVALID_HTTP2_CONNECTION_SHARDS:
+    'HTTP/2 connection shards must be between 1 and 8',
+  INVALID_HTTP1_WITH_SHARDS:
+    'HTTP/2 connection shards must be 1 when HTTP/1.1 is selected',
   CREATE_FAILED: 'Failed to create channel',
   UPDATE_FAILED: 'Failed to update channel',
   DELETE_FAILED: 'Failed to delete channel',
@@ -385,6 +390,30 @@ export const FIELD_DESCRIPTIONS = {
 export const MODEL_FETCHABLE_TYPES = new Set([
   1, 4, 14, 17, 20, 23, 24, 25, 26, 27, 31, 34, 35, 40, 42, 43, 47, 48, 57, 58,
   59, 60,
+])
+
+export const FIELD_PASSTHROUGH_TYPES = new Set([
+  1,
+  14,
+  57,
+  58,
+  59,
+  CHANNEL_TYPE_NEW_API,
+])
+
+export const OPENAI_FIELD_PASSTHROUGH_TYPES = new Set([
+  1,
+  57,
+  58,
+  59,
+  CHANNEL_TYPE_NEW_API,
+])
+
+export const CLAUDE_FIELD_PASSTHROUGH_TYPES = new Set([
+  14,
+  58,
+  59,
+  CHANNEL_TYPE_NEW_API,
 ])
 
 export const TYPE_TO_KEY_PROMPT: Record<number, string> = {

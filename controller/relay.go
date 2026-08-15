@@ -249,48 +249,78 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		relayInfo.TextPollingAttemptTimeout = 0
 	}
 
-	if !textPolling || (newAPIError != nil && time.Now().Before(pollingDeadline) && c.Request.Context().Err() == nil && !c.Writer.Written() && shouldRetry(c, newAPIError, 1)) {
-		retryParam.Excluded = nil
-		retryParam.SetRetry(0)
-		resetTextPollingAutoGroup(c)
-		if textPolling {
+	if textPolling {
+		// The legacy fallback remains available after tier 3, but its
+		// pre-commit attempt may only use the polling budget that remains.
+		if newAPIError != nil && time.Now().Before(pollingDeadline) && c.Request.Context().Err() == nil && !c.Writer.Written() && shouldRetry(c, newAPIError, 1) {
 			retryParam.Excluded = make(map[int]struct{})
-		}
-		for fallbackAttempt := 0; ; fallbackAttempt++ {
-			retryIndex := retryParam.GetRetry()
-			if textPolling {
-				if fallbackAttempt > common.RetryTimes {
+			resetTextPollingAutoGroup(c)
+			for fallbackAttempt := 0; fallbackAttempt <= common.RetryTimes; fallbackAttempt++ {
+				remaining, withinBudget := textPollingRemainingTimeout(pollingDeadline, time.Now())
+				if !withinBudget || c.Writer.Written() || c.Request.Context().Err() != nil {
 					break
 				}
-				retryIndex = fallbackAttempt
-			} else if retryIndex > common.RetryTimes {
-				break
+				relayInfo.TextPollingAttemptTimeout = remaining
+				relayInfo.RetryIndex = fallbackAttempt
+				channel, channelErr := getTextPollingFallbackChannel(c, relayInfo, retryParam, retryParam.Excluded)
+				if channelErr != nil {
+					logger.LogError(c, channelErr.Error())
+					newAPIError = channelErr
+					break
+				}
+				addUsedChannel(c, channel.Id)
+				newAPIError = executeRelayAttempt(c, relayFormat, relayInfo)
+				if newAPIError == nil {
+					relayInfo.LastError = nil
+					return
+				}
+
+				newAPIError = service.NormalizeViolationFeeError(newAPIError)
+				relayInfo.LastError = newAPIError
+				processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+				if c.Request.Context().Err() != nil || c.Writer.Written() || !shouldRetry(c, newAPIError, common.RetryTimes-fallbackAttempt) {
+					break
+				}
 			}
-			relayInfo.RetryIndex = retryIndex
-			var channel *model.Channel
-			var channelErr *types.NewAPIError
-			if textPolling {
-				channel, channelErr = getTextPollingFallbackChannel(c, relayInfo, retryParam, retryParam.Excluded)
-			} else {
-				channel, channelErr = getChannel(c, relayInfo, retryParam)
-			}
+		}
+	} else {
+		for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+			relayInfo.RetryIndex = retryParam.GetRetry()
+			channel, channelErr := getChannel(c, relayInfo, retryParam)
 			if channelErr != nil {
 				logger.LogError(c, channelErr.Error())
 				newAPIError = channelErr
 				break
 			}
-
-			if textPolling {
-				remaining, withinBudget := textPollingRemainingTimeout(pollingDeadline, time.Now())
-				if !withinBudget || c.Writer.Written() || c.Request.Context().Err() != nil {
-					break
-				}
-				// The legacy fallback remains available after tier 3, but its
-				// pre-commit attempt may only use the polling budget that remains.
-				relayInfo.TextPollingAttemptTimeout = remaining
-			}
 			addUsedChannel(c, channel.Id)
-			newAPIError = executeRelayAttempt(c, relayFormat, relayInfo)
+			if billingErr := service.PrepareTieredBillingForSelectedGroup(c, relayInfo); billingErr != nil {
+				newAPIError = billingErr
+				break
+			}
+
+			bodyStorage, bodyErr := common.GetBodyStorage(c)
+			if bodyErr != nil {
+				// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
+				if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {
+					newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
+				} else {
+					newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+				}
+				break
+			}
+			c.Request.Body = io.NopCloser(bodyStorage)
+
+			switch relayFormat {
+			case types.RelayFormatOpenAIRealtime:
+				newAPIError = relay.WssHelper(c, relayInfo)
+			case types.RelayFormatClaude:
+				newAPIError = relay.ClaudeHelper(c, relayInfo)
+			case types.RelayFormatGemini:
+				newAPIError = geminiRelayHandler(c, relayInfo)
+			default:
+				newAPIError = relayHandler(c, relayInfo)
+			}
+
 			if newAPIError == nil {
 				relayInfo.LastError = nil
 				return
@@ -298,12 +328,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 			newAPIError = service.NormalizeViolationFeeError(newAPIError)
 			relayInfo.LastError = newAPIError
+
 			processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
-			if c.Request.Context().Err() != nil || c.Writer.Written() || !shouldRetry(c, newAPIError, common.RetryTimes-retryIndex) {
+
+			if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
 				break
-			}
-			if !textPolling {
-				retryParam.IncreaseRetry()
 			}
 		}
 	}
@@ -363,6 +392,9 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 }
 
 func executeRelayAttempt(c *gin.Context, relayFormat types.RelayFormat, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+	if billingErr := service.PrepareTieredBillingForSelectedGroup(c, relayInfo); billingErr != nil {
+		return billingErr
+	}
 	bodyStorage, bodyErr := common.GetBodyStorage(c)
 	if bodyErr != nil {
 		if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {

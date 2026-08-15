@@ -150,7 +150,9 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	var hasBillableUsageMetadata bool
 	responseText := strings.Builder{}
 
-	streamReadErr := helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		// 首字终点定制:记录事件开始前的文本长度,用于判定该事件是否为空事件
+		beforeLen := responseText.Len()
 		var geminiResponse dto.GeminiChatResponse
 		if err := common.UnmarshalJsonStr(data, &geminiResponse); err != nil {
 			sr.Stop(fmt.Errorf("unmarshal: %w", err))
@@ -175,6 +177,11 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			}
 		}
 
+		// 首字终点定制:事件未产出新文本且无图片,则标记为空事件,不计入首字响应
+		if responseText.Len() == beforeLen && imageCount == 0 {
+			sr.MarkEmpty()
+		}
+
 		// 更新使用量统计
 		if metadata := geminiResponse.GetUsageMetadata(); dto.HasGeminiUsageMetadataTokens(metadata) {
 			mappedUsage := buildUsageFromGeminiMetadata(metadata, info.GetEstimatePromptTokens())
@@ -186,12 +193,12 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			sr.Stop(fmt.Errorf("gemini callback stopped"))
 		}
 	})
-	if streamReadErr != nil && !c.Writer.Written() {
-		return nil, types.NewOpenAIError(streamReadErr, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
-	}
 
 	if !hasBillableUsageMetadata {
-		if info.ReceivedResponseCount > 0 {
+		// 首字终点定制:usage 回退条件与首字判定解耦——只要实际产生了文本或
+		// 图片即回退估算,而不是依赖 ReceivedResponseCount(空事件不再计数,
+		// 该计数已与"首字"语义绑定)。
+		if responseText.Len() > 0 || imageCount > 0 {
 			usage = service.ResponseText2Usage(c, responseText.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		} else {
 			usage = &dto.Usage{}

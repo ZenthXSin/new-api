@@ -129,11 +129,6 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	if isLocalCountTokens {
 		adminInfo["local_count_tokens"] = isLocalCountTokens
 	}
-	if relayInfo.TextPollingTier >= 1 && relayInfo.TextPollingTier <= 3 {
-		other["text_polling_tier"] = relayInfo.TextPollingTier
-	} else if relayInfo.TextPollingTier == 0 && relayInfo.TextPollingAttemptTimeout > 0 {
-		other["text_polling_fallback"] = true
-	}
 
 	AppendChannelAffinityAdminInfo(ctx, adminInfo)
 
@@ -350,5 +345,8 @@ func InjectTieredBillingInfo(other map[string]interface{}, relayInfo *relaycommo
 	other["expr_b64"] = base64.StdEncoding.EncodeToString([]byte(snap.ExprString))
 	if result != nil {
 		other["matched_tier"] = result.MatchedTier
+		if len(result.RequestRules) > 0 {
+			other["request_rules"] = result.RequestRules
+		}
 	}
 }

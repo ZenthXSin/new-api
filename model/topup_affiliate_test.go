@@ -136,18 +136,18 @@ func TestRechargeWeChatPay_AffiliateRewardSkipsWhenInviterMissing(t *testing.T) 
 }
 
 // 极端倍率与充值额度的乘积超过 int32 上限时饱和到上限,绝不回绕成负数。
+// 注:充值额度本身需在 int32 上限内(官方 int32 钱包上限保护会拒绝超额充值),
+// 由分红倍率制造溢出。
 func TestRechargeWeChatPay_AffiliateRewardSaturatesAtInt32Max(t *testing.T) {
 	truncateTables(t)
 	setTopUpAffiliateRatio(t, 1000.0)
 	insertUserForPaymentGuardTest(t, 613, 0)
 	insertUserWithInviterForTest(t, 614, 0, 613)
-	insertWeChatPayTopUp(t, "aff-saturate", 614, 9000, 45000.00)
+	insertWeChatPayTopUp(t, "aff-saturate", 614, 6, 30.00)
 
-	quotaToAdd := int64(9000) * int64(common.QuotaPerUnit)
-	require.NoError(t, RechargeWeChatPay("aff-saturate", 4500000, "wx-aff-7", "127.0.0.1"))
+	require.NoError(t, RechargeWeChatPay("aff-saturate", 3000, "wx-aff-7", "127.0.0.1"))
 
 	inviterQuota := getUserQuotaForAffiliateTest(t, 613)
 	assert.Equal(t, math.MaxInt32, inviterQuota)
 	assert.Positive(t, inviterQuota)
-	_ = quotaToAdd
 }

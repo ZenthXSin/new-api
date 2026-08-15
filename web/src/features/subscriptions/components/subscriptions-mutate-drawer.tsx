@@ -429,33 +429,6 @@ export function SubscriptionsMutateDrawer({
 
                 <FormField
                   control={form.control}
-                  name='allowed_groups'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('Allowed Groups')}</FormLabel>
-                      <FormControl>
-                        <MultiSelect
-                          options={groupOptions.map((g) => ({
-                            value: g,
-                            label: g,
-                          }))}
-                          selected={field.value || []}
-                          onChange={field.onChange}
-                          placeholder={t('No restriction')}
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        {t(
-                          'Restrict which groups may use this subscription. Leave empty to allow all groups.'
-                        )}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
                   name='downgrade_group'
                   render={({ field }) => (
                     <FormItem>
@@ -496,6 +469,33 @@ export function SubscriptionsMutateDrawer({
                       <FormDescription>
                         {t(
                           'Downgrade to this group after the subscription expires'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='allowed_groups'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Allowed Groups')}</FormLabel>
+                      <FormControl>
+                        <MultiSelect
+                          options={groupOptions.map((g) => ({
+                            value: g,
+                            label: g,
+                          }))}
+                          selected={field.value || []}
+                          onChange={field.onChange}
+                          placeholder={t('No restriction')}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Restrict which groups may use this subscription. Leave empty to allow all groups.'
                         )}
                       </FormDescription>
                       <FormMessage />

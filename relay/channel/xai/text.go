@@ -41,7 +41,9 @@ func xAIStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var toolCount int
 	var containStreamUsage bool
 
-	streamReadErr := helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+	helper.SetEventStreamHeaders(c)
+
+	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		var xAIResp *dto.ChatCompletionsStreamResponse
 		if err := common.UnmarshalJsonStr(data, &xAIResp); err != nil {
 			common.SysLog("error unmarshalling stream response: " + err.Error())
@@ -65,13 +67,6 @@ func xAIStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		}
 	})
 
-	if streamReadErr != nil && !c.Writer.Written() {
-		service.CloseResponseBodyGracefully(resp)
-		return nil, types.NewError(streamReadErr, types.ErrorCodeReadResponseBodyFailed)
-	}
-	if !c.Writer.Written() {
-		helper.SetEventStreamHeaders(c)
-	}
 	if !containStreamUsage {
 		usage = service.ResponseText2Usage(c, responseTextBuilder.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		usage.CompletionTokens += toolCount * 7

@@ -124,15 +124,15 @@ var TelegramBotName = ""
 var QuotaForNewUser = 0
 var QuotaForInviter = 0
 var QuotaForInvitee = 0
-
-// TopUpAffiliateRatio 充值分红倍率:被邀请人单次充值成功时,邀请人按其充值
-// 所得额度的该倍率获得分红(直接进入邀请人主余额)。0 表示关闭。
-var TopUpAffiliateRatio = 0.0
 var ChannelDisableThreshold = 5.0
 var AutomaticDisableChannelEnabled = false
 var AutomaticEnableChannelEnabled = false
 var QuotaRemindThreshold = 1000
 var PreConsumedQuota = 500
+
+// TopUpAffiliateRatio 充值分红倍率:被邀请人单次充值成功时,邀请人按其充值
+// 所得额度的该倍率获得分红(直接进入邀请人主余额)。0 表示关闭。
+var TopUpAffiliateRatio = 0.0
 
 var RetryTimes = 0
 

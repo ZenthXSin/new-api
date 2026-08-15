@@ -151,10 +151,6 @@ export interface TopupInfo {
   enable_creem_topup?: boolean
   /** Available Creem products */
   creem_products?: CreemProduct[]
-  /** Whether WeChat Pay topup is enabled */
-  enable_wechatpay_topup?: boolean
-  /** Minimum topup amount for WeChat Pay */
-  wechatpay_min_topup?: number
   /** Whether Waffo topup is enabled */
   enable_waffo_topup?: boolean
   /** Available Waffo payment methods */
@@ -165,6 +161,10 @@ export interface TopupInfo {
   enable_waffo_pancake_topup?: boolean
   /** Minimum topup amount for Waffo Pancake */
   waffo_pancake_min_topup?: number
+  /** Whether WeChat Pay topup is enabled */
+  enable_wechatpay_topup?: boolean
+  /** Minimum topup amount for WeChat Pay */
+  wechatpay_min_topup?: number
   /** Whether redemption code usage is enabled */
   enable_redemption?: boolean
   /** Whether compliance confirmation has been completed */

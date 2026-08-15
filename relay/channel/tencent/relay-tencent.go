@@ -95,9 +95,7 @@ func tencentStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *htt
 	scanner := helper.NewStreamScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
 
-	if info.TextPollingAttemptTimeout == 0 {
-		helper.SetEventStreamHeaders(c)
-	}
+	helper.SetEventStreamHeaders(c)
 
 	for scanner.Scan() {
 		data := scanner.Text()
@@ -110,9 +108,6 @@ func tencentStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *htt
 		err := common.Unmarshal([]byte(data), &tencentResponse)
 		if err != nil {
 			common.SysLog("error unmarshalling stream response: " + err.Error())
-			if readErr := helper.PollingStreamReadError(c, info, err); readErr != nil {
-				return nil, types.NewOpenAIError(readErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
-			}
 			continue
 		}
 
@@ -121,9 +116,7 @@ func tencentStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *htt
 			responseText += response.Choices[0].Delta.GetContentString()
 		}
 
-		helper.PreparePollingStreamOutput(c, resp, info)
 		err = helper.ObjectData(c, response)
-		helper.CommitPollingStreamOutput(c, resp, info)
 		if err != nil {
 			common.SysLog(err.Error())
 		}
@@ -131,12 +124,6 @@ func tencentStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *htt
 
 	if err := scanner.Err(); err != nil {
 		common.SysLog("error reading stream: " + err.Error())
-		if readErr := helper.PollingStreamReadError(c, info, err); readErr != nil {
-			return nil, types.NewOpenAIError(readErr, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
-		}
-	}
-	if info.TextPollingAttemptTimeout > 0 && !c.Writer.Written() {
-		return nil, types.NewOpenAIError(io.ErrUnexpectedEOF, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
 	}
 
 	helper.Done(c)

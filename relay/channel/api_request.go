@@ -26,20 +26,26 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// applyUpstreamContentLength populates req.ContentLength when the upstream
-// body is wrapped in a BodyStorage (see relay/common/outbound_body.go).
-//
-// net/http.NewRequest only auto-detects ContentLength for *bytes.Reader,
-// *bytes.Buffer and *strings.Reader. When the body is a type-erased io.Reader
-// (which is the case for ReaderOnly(BodyStorage)), the Content-Length header
-// would otherwise be omitted, forcing chunked transfer encoding and breaking
-// some upstreams that require an explicit Content-Length.
-func applyUpstreamContentLength(req *http.Request, info *common.RelayInfo) {
-	if info == nil {
+// ApplyUpstreamBodyMetadata restores metadata that net/http cannot infer from
+// a ReplayableBody. Callers must pass the original body because NewRequest
+// hides its dynamic type behind req.Body's io.ReadCloser wrapper.
+func ApplyUpstreamBodyMetadata(req *http.Request, body io.Reader) {
+	replayable, ok := body.(common2.ReplayableBody)
+	if !ok {
 		return
 	}
-	if info.UpstreamRequestBodySize > 0 && req.ContentLength <= 0 {
-		req.ContentLength = info.UpstreamRequestBodySize
+
+	// BodyStorage structurally satisfies ReplayableBody, but it also exposes
+	// io.Closer. If a caller passes the storage directly instead of using
+	// NewReplayableBodyReader, hide Close before the transport takes ownership
+	// of req.Body so the shared replay source remains available to GetBody.
+	if _, rawStorage := body.(common2.BodyStorage); rawStorage {
+		req.Body = io.NopCloser(body)
+	}
+
+	req.ContentLength = replayable.Size()
+	if req.GetBody == nil {
+		req.GetBody = replayable.NewReader
 	}
 }
 
@@ -315,7 +321,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
-	applyUpstreamContentLength(req, info)
+	ApplyUpstreamBodyMetadata(req, requestBody)
 	headers := req.Header
 	err = a.SetupRequestHeader(c, &headers, info)
 	if err != nil {
@@ -345,7 +351,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
-	applyUpstreamContentLength(req, info)
+	ApplyUpstreamBodyMetadata(req, requestBody)
 	// set form data
 	req.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
 	headers := req.Header
@@ -476,38 +482,37 @@ func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	return doRequest(c, req, info)
 }
 
-type pollingTimeoutBody struct {
-	io.ReadCloser
-	timer  *time.Timer
-	cancel context.CancelFunc
-	once   sync.Once
-}
-
-func (b *pollingTimeoutBody) StopPollingTimeout() {
-	b.once.Do(func() { b.timer.Stop() })
-}
-
-func (b *pollingTimeoutBody) Close() error {
-	b.once.Do(func() { b.timer.Stop() })
-	b.cancel()
-	return b.ReadCloser.Close()
+// keepUpstreamRedirectResponse stops net/http from following redirects while
+// returning the upstream 3xx response to the relay without an extra error.
+func keepUpstreamRedirectResponse(_ *http.Request, _ []*http.Request) error {
+	return http.ErrUseLastResponse
 }
 
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
-	var client *http.Client
-	var err error
-	if info.ChannelSetting.Proxy != "" {
-		client, err = service.GetHttpClientWithProxy(info.ChannelSetting.Proxy)
-		if err != nil {
-			return nil, fmt.Errorf("new proxy http client failed: %w", err)
-		}
-	} else {
-		client = service.GetHttpClient()
+	client, err := service.GetHttpClientWithProxySettings(info.ChannelSetting.Proxy, info.ChannelSetting)
+	if err != nil {
+		return nil, fmt.Errorf("new proxy http client failed: %w", err)
+	}
+	// Clients are cached and shared across channels, so override redirect
+	// behavior on a shallow copy instead of mutating the cached client. This
+	// still reuses its transport and connection pools, including HTTP/2's
+	// transparent stream retries.
+	relayClient := *client
+	relayClient.CheckRedirect = keepUpstreamRedirectResponse
+	if common2.DebugEnabled && req != nil && req.URL != nil {
+		policy := service.NormalizeHTTPTransportPolicy(info.ChannelSetting)
+		logger.LogDebug(c, fmt.Sprintf(
+			"http transport select: host=%s protocol=%s shards=%d policy=%s",
+			req.URL.Host,
+			policy.Protocol,
+			policy.Shards,
+			policy.String(),
+		))
 	}
 
 	var stopPinger context.CancelFunc
 	var pingerDone <-chan struct{}
-	if info.IsStream && info.TextPollingAttemptTimeout == 0 {
+	if info.IsStream {
 		helper.SetEventStreamHeaders(c)
 		// 处理流式请求的 ping 保活
 		generalSettings := operation_setting.GetGeneralSetting()
@@ -525,46 +530,34 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
-	var attemptCancel context.CancelFunc
-	var attemptTimer *time.Timer
-	if info.TextPollingAttemptTimeout > 0 {
-		attemptCtx, cancel := context.WithCancel(c.Request.Context())
-		attemptCancel = cancel
-		attemptTimer = time.AfterFunc(info.TextPollingAttemptTimeout, cancel)
-		req = req.WithContext(attemptCtx)
-	} else {
-		req = req.WithContext(c.Request.Context())
-	}
+	// 本地定制：给计时器挂载本次上游请求的 HTTP trace（DNS/TCP/TLS/首字节），
+	// 供消费日志的 "timing" 字段使用（common.RelayTiming）。
 	if info.Timing != nil {
 		attempt := info.Timing.BeginAttempt(time.Now())
 		req = req.WithContext(httptrace.WithClientTrace(req.Context(), info.Timing.Trace(attempt)))
 	}
 
-	resp, err := client.Do(req)
+	resp, err := relayClient.Do(req)
 	if err != nil {
-		if attemptTimer != nil {
-			attemptTimer.Stop()
-		}
-		if attemptCancel != nil {
-			attemptCancel()
-		}
 		logger.LogError(c, "do request failed: "+err.Error())
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {
-		if attemptTimer != nil {
-			attemptTimer.Stop()
-		}
-		if attemptCancel != nil {
-			attemptCancel()
-		}
 		return nil, errors.New("resp is nil")
 	}
 	if info.Timing != nil && !info.IsStream {
 		info.Timing.CommitValidEvent(time.Now())
 	}
-	if attemptTimer != nil {
-		resp.Body = &pollingTimeoutBody{ReadCloser: resp.Body, timer: attemptTimer, cancel: attemptCancel}
+	if common2.DebugEnabled {
+		policy := service.NormalizeHTTPTransportPolicy(info.ChannelSetting)
+		logger.LogDebug(c, fmt.Sprintf(
+			"http transport negotiated: host=%s protocol=%s shards=%d policy=%s negotiated=%s",
+			req.URL.Host,
+			policy.Protocol,
+			policy.Shards,
+			policy.String(),
+			resp.Proto,
+		))
 	}
 
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
@@ -585,10 +578,15 @@ func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, req
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
-	applyUpstreamContentLength(req, info)
-	req.GetBody = func() (io.ReadCloser, error) {
-		return io.NopCloser(requestBody), nil
-	}
+	ApplyUpstreamBodyMetadata(req, requestBody)
+	// Do NOT wrap requestBody in a GetBody closure here: returning the same
+	// (already consumed) reader would make any transport-level retry silently
+	// replay an empty body. http.NewRequest already derives a correct,
+	// snapshot-based GetBody for *bytes.Reader/Buffer/strings.Reader bodies
+	// (which most task adaptors pass in); ApplyUpstreamBodyMetadata wires the
+	// same contract for bodies that explicitly implement ReplayableBody.
+	// Otherwise GetBody stays nil so the transport fails the retry instead of
+	// sending a corrupted request.
 
 	err = a.BuildRequestHeader(c, req, info)
 	if err != nil {

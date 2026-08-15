@@ -159,53 +159,65 @@ func zhipuStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 	var usage *dto.Usage
 	scanner := helper.NewStreamScanner(resp.Body)
 	scanner.Split(bufio.ScanLines)
-	if info.TextPollingAttemptTimeout == 0 {
-		helper.SetEventStreamHeaders(c)
-	}
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if len(line) < 5 {
-			continue
-		}
-		var response *dto.ChatCompletionsStreamResponse
-		if strings.HasPrefix(line, "data:") {
-			response = streamResponseZhipu2OpenAI(strings.TrimSpace(line[5:]))
-		} else if strings.HasPrefix(line, "meta:") {
-			var zhipuResponse ZhipuStreamMetaResponse
-			if err := common.Unmarshal([]byte(strings.TrimSpace(line[5:])), &zhipuResponse); err != nil {
-				if readErr := helper.PollingStreamReadError(c, info, err); readErr != nil {
-					return nil, types.NewOpenAIError(readErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+	dataChan := make(chan string)
+	metaChan := make(chan string)
+	stopChan := make(chan bool)
+	go func() {
+		for scanner.Scan() {
+			data := scanner.Text()
+			lines := strings.Split(data, "\n")
+			for i, line := range lines {
+				if len(line) < 5 {
+					continue
 				}
-				continue
+				if line[:5] == "data:" {
+					dataChan <- line[5:]
+					if i != len(lines)-1 {
+						dataChan <- "\n"
+					}
+				} else if line[:5] == "meta:" {
+					metaChan <- line[5:]
+				}
 			}
-			var zhipuUsage *dto.Usage
-			response, zhipuUsage = streamMetaResponseZhipu2OpenAI(&zhipuResponse)
+		}
+		if err := scanner.Err(); err != nil {
+			common.SysLog("error reading stream: " + err.Error())
+		}
+		stopChan <- true
+	}()
+	helper.SetEventStreamHeaders(c)
+	c.Stream(func(w io.Writer) bool {
+		select {
+		case data := <-dataChan:
+			response := streamResponseZhipu2OpenAI(data)
+			jsonResponse, err := json.Marshal(response)
+			if err != nil {
+				common.SysLog("error marshalling stream response: " + err.Error())
+				return true
+			}
+			c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonResponse)})
+			return true
+		case data := <-metaChan:
+			var zhipuResponse ZhipuStreamMetaResponse
+			err := json.Unmarshal([]byte(data), &zhipuResponse)
+			if err != nil {
+				common.SysLog("error unmarshalling stream response: " + err.Error())
+				return true
+			}
+			response, zhipuUsage := streamMetaResponseZhipu2OpenAI(&zhipuResponse)
+			jsonResponse, err := json.Marshal(response)
+			if err != nil {
+				common.SysLog("error marshalling stream response: " + err.Error())
+				return true
+			}
 			usage = zhipuUsage
-		} else {
-			continue
+			c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonResponse)})
+			return true
+		case <-stopChan:
+			c.Render(-1, common.CustomEvent{Data: "data: [DONE]"})
+			return false
 		}
-		jsonResponse, err := common.Marshal(response)
-		if err != nil {
-			if readErr := helper.PollingStreamReadError(c, info, err); readErr != nil {
-				return nil, types.NewOpenAIError(readErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
-			}
-			continue
-		}
-		helper.PreparePollingStreamOutput(c, resp, info)
-		c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonResponse)})
-		helper.CommitPollingStreamOutput(c, resp, info)
-	}
-	if err := scanner.Err(); err != nil {
-		common.SysLog("error reading stream: " + err.Error())
-		if readErr := helper.PollingStreamReadError(c, info, err); readErr != nil {
-			return nil, types.NewOpenAIError(readErr, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
-		}
-	}
-	if info.TextPollingAttemptTimeout > 0 && !c.Writer.Written() {
-		return nil, types.NewOpenAIError(io.ErrUnexpectedEOF, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
-	}
-	helper.PreparePollingStreamOutput(c, resp, info)
-	c.Render(-1, common.CustomEvent{Data: "data: [DONE]"})
+	})
 	service.CloseResponseBodyGracefully(resp)
 	return usage, nil
 }

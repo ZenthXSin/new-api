@@ -61,7 +61,11 @@ interface BillingHistoryDialogProps {
   refreshRevision?: number
 }
 
-export function BillingHistoryDialog(props: BillingHistoryDialogProps) {
+export function BillingHistoryDialog({
+  open,
+  onOpenChange,
+  refreshRevision,
+}: BillingHistoryDialogProps) {
   const { t } = useTranslation()
   const {
     records,
@@ -80,16 +84,15 @@ export function BillingHistoryDialog(props: BillingHistoryDialogProps) {
   } = useBillingHistory()
 
   useEffect(() => {
-    if (props.refreshRevision) {
+    if (refreshRevision) {
       void refresh()
     }
-  }, [props.refreshRevision, refresh])
+  }, [refreshRevision, refresh])
 
   const [confirmTradeNo, setConfirmTradeNo] = useState<string | null>(null)
   const { copyToClipboard, copiedText } = useCopyToClipboard({ notify: false })
 
   const totalPages = Math.ceil(total / pageSize)
-  const skeletonKeys = ['one', 'two', 'three', 'four', 'five']
 
   const handleConfirmComplete = async () => {
     if (confirmTradeNo) {
@@ -103,8 +106,8 @@ export function BillingHistoryDialog(props: BillingHistoryDialogProps) {
   return (
     <>
       <Dialog
-        open={props.open}
-        onOpenChange={props.onOpenChange}
+        open={open}
+        onOpenChange={onOpenChange}
         title={t('Billing History')}
         description={t(
           'View your topup transaction records and payment history'
@@ -134,7 +137,7 @@ export function BillingHistoryDialog(props: BillingHistoryDialogProps) {
               ]}
               value={pageSize.toString()}
               onValueChange={(value) =>
-                value !== null && handlePageSizeChange(Number.parseInt(value))
+                value !== null && handlePageSizeChange(parseInt(value))
               }
             >
               <SelectTrigger className='h-9 w-[92px] sm:w-32'>
@@ -153,10 +156,10 @@ export function BillingHistoryDialog(props: BillingHistoryDialogProps) {
 
           {/* Records List */}
           <div className='max-h-[min(54vh,520px)] overflow-y-auto pr-1'>
-            {loading && (
+            {loading ? (
               <div className='space-y-3'>
-                {skeletonKeys.map((key) => (
-                  <div key={key} className='rounded-lg border p-3 sm:p-4'>
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className='rounded-lg border p-3 sm:p-4'>
                     <div className='flex items-start justify-between'>
                       <div className='flex-1 space-y-2'>
                         <Skeleton className='h-4 w-48' />
@@ -172,8 +175,7 @@ export function BillingHistoryDialog(props: BillingHistoryDialogProps) {
                   </div>
                 ))}
               </div>
-            )}
-            {!loading && records.length === 0 && (
+            ) : records.length === 0 ? (
               <div className='text-muted-foreground flex min-h-40 flex-col items-center justify-center py-10 text-center'>
                 <p className='text-sm font-medium'>
                   {t('No billing records found')}
@@ -184,8 +186,7 @@ export function BillingHistoryDialog(props: BillingHistoryDialogProps) {
                     : t('Your transaction history will appear here')}
                 </p>
               </div>
-            )}
-            {!loading && records.length > 0 && (
+            ) : (
               <div className='space-y-3'>
                 {records.map((record) => {
                   const statusConfig = getStatusConfig(record.status)
