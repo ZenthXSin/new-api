@@ -64,6 +64,10 @@ func WeChatPayPay(c *gin.Context) {
 	}
 
 	userID := c.GetInt("id")
+	// 与 epay/stripe 等路径一致:支付前校验 int32 钱包上限,避免结算被拒后订单滞留
+	if rejectInvalidTopUpQuota(c, userID, req.Amount) {
+		return
+	}
 	group, err := model.GetUserGroup(userID, true)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})

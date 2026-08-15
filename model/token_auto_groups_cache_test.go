@@ -66,3 +66,22 @@ func cacheSetTokenForTest(token Token) error {
 	_, err := cacheInitToken(token)
 	return err
 }
+
+// ExcludeProfitStat 必须经 Redis 哈希缓存往返(官方 Lua 脚本字段清单易遗漏
+// 本地新增字段,漏掉会导致该功能在 Redis 启用时静默失效)。
+func TestTokenExcludeProfitStatRoundTripThroughRedisHashCache(t *testing.T) {
+	useUserCacheMiniRedis(t)
+	token := Token{
+		Id:                43,
+		UserId:            7,
+		Key:               "token-exclude-profit-cache-key",
+		Name:              "exclude-cache",
+		Group:             "default",
+		ExcludeProfitStat: true,
+	}
+
+	require.NoError(t, cacheSetTokenForTest(token))
+	cached, err := cacheGetTokenByKey(token.Key)
+	require.NoError(t, err)
+	assert.True(t, cached.ExcludeProfitStat)
+}
