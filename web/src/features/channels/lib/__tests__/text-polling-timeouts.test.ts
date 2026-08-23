@@ -16,8 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { describe, expect, test } from 'vitest'
 
 import type { Channel } from '../../types'
 import {
@@ -65,11 +64,11 @@ describe('channel text polling timeout settings', () => {
     const payload = transformFormDataToUpdatePayload(values, 1)
     const settings = JSON.parse(payload.settings || '{}')
 
-    assert.equal(values.text_polling_timeout_tier1_seconds, 3)
-    assert.equal(values.text_polling_timeout_tier2_seconds, 6)
-    assert.equal(values.text_polling_timeout_tier3_seconds, 12)
-    assert.equal(values.text_polling_enabled, false)
-    assert.equal(settings.text_polling_enabled, false)
+    expect(values.text_polling_timeout_tier1_seconds).toBe(3)
+    expect(values.text_polling_timeout_tier2_seconds).toBe(6)
+    expect(values.text_polling_timeout_tier3_seconds).toBe(12)
+    expect(values.text_polling_enabled).toBe(false)
+    expect(settings.text_polling_enabled).toBe(false)
   })
 
   test('loads configured values and preserves unrelated settings on update', () => {
@@ -85,15 +84,15 @@ describe('channel text polling timeout settings', () => {
     const payload = transformFormDataToUpdatePayload(values, 1)
     const settings = JSON.parse(payload.settings || '{}')
 
-    assert.equal(values.text_polling_timeout_tier1_seconds, 4)
-    assert.equal(values.text_polling_timeout_tier2_seconds, 8)
-    assert.equal(values.text_polling_timeout_tier3_seconds, 16)
-    assert.equal(values.text_polling_enabled, true)
-    assert.equal(settings.custom_setting, 'preserved')
-    assert.equal(settings.text_polling_enabled, true)
-    assert.equal(settings.text_polling_timeout_tier1_seconds, 4)
-    assert.equal(settings.text_polling_timeout_tier2_seconds, 8)
-    assert.equal(settings.text_polling_timeout_tier3_seconds, 16)
+    expect(values.text_polling_timeout_tier1_seconds).toBe(4)
+    expect(values.text_polling_timeout_tier2_seconds).toBe(8)
+    expect(values.text_polling_timeout_tier3_seconds).toBe(16)
+    expect(values.text_polling_enabled).toBe(true)
+    expect(settings.custom_setting).toBe('preserved')
+    expect(settings.text_polling_enabled).toBe(true)
+    expect(settings.text_polling_timeout_tier1_seconds).toBe(4)
+    expect(settings.text_polling_timeout_tier2_seconds).toBe(8)
+    expect(settings.text_polling_timeout_tier3_seconds).toBe(16)
   })
 
   test('rejects fractional timeout tiers', () => {
@@ -104,10 +103,9 @@ describe('channel text polling timeout settings', () => {
       text_polling_timeout_tier1_seconds: 1.5,
     })
 
-    assert.equal(result.success, false)
+    expect(result.success).toBe(false)
     if (!result.success) {
-      assert.equal(
-        result.error.issues[0]?.message,
+      expect(result.error.issues[0]?.message).toBe(
         'Text polling timeout must be a whole number of seconds'
       )
     }
@@ -121,10 +119,9 @@ describe('channel text polling timeout settings', () => {
       text_polling_timeout_tier1_seconds: 0,
     })
 
-    assert.equal(result.success, false)
+    expect(result.success).toBe(false)
     if (!result.success) {
-      assert.equal(
-        result.error.issues[0]?.message,
+      expect(result.error.issues[0]?.message).toBe(
         'Text polling timeout must be at least 1 second'
       )
     }
@@ -138,10 +135,9 @@ describe('channel text polling timeout settings', () => {
       text_polling_timeout_tier3_seconds: 121,
     })
 
-    assert.equal(result.success, false)
+    expect(result.success).toBe(false)
     if (!result.success) {
-      assert.equal(
-        result.error.issues[0]?.message,
+      expect(result.error.issues[0]?.message).toBe(
         'Text polling timeout must not exceed 120 seconds'
       )
     }
@@ -156,10 +152,9 @@ describe('channel text polling timeout settings', () => {
       text_polling_timeout_tier2_seconds: 7,
     })
 
-    assert.equal(result.success, false)
+    expect(result.success).toBe(false)
     if (!result.success) {
-      assert.equal(
-        result.error.issues[0]?.message,
+      expect(result.error.issues[0]?.message).toBe(
         'Text polling timeout tier 2 must be greater than tier 1'
       )
     }
@@ -174,10 +169,9 @@ describe('channel text polling timeout settings', () => {
       text_polling_timeout_tier3_seconds: 7,
     })
 
-    assert.equal(result.success, false)
+    expect(result.success).toBe(false)
     if (!result.success) {
-      assert.equal(
-        result.error.issues[0]?.message,
+      expect(result.error.issues[0]?.message).toBe(
         'Text polling timeout tier 3 must be greater than tier 2'
       )
     }

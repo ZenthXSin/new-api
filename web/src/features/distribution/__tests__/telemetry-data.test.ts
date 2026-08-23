@@ -6,8 +6,7 @@ it under the terms of the GNU Affero General Public License as
 published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
 */
-import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { expect, test } from 'vitest'
 
 import type { CustomEventBucket, EventTrend, UsageBucket } from '../api'
 import {
@@ -54,15 +53,15 @@ test('aggregates usage dimensions into a complete hourly trend', () => {
 
   const result = summarizeUsage(rows, 3, 10800)
 
-  assert.equal(result.starts, 6)
-  assert.equal(result.online_seconds, 360)
-  assert.equal(result.active_users, 6)
-  assert.deepEqual(result.trend, [
+  expect(result.starts).toBe(6)
+  expect(result.online_seconds).toBe(360)
+  expect(result.active_users).toBe(6)
+  expect(result.trend).toEqual([
     { bucket_ts: 3600, starts: 5, online_seconds: 300, active_users: 5 },
     { bucket_ts: 7200, starts: 0, online_seconds: 0, active_users: 0 },
     { bucket_ts: 10800, starts: 1, online_seconds: 60, active_users: 1 },
   ])
-  assert.equal(result.versions?.[0].version, '1.1.0')
+  expect(result.versions?.[0].version).toBe('1.1.0')
 })
 
 test('keeps event counts and unique IP trend values separate', () => {
@@ -101,20 +100,20 @@ test('keeps event counts and unique IP trend values separate', () => {
     7200
   )
 
-  assert.deepEqual(result.events, [
+  expect(result.events).toEqual([
     { name: 'opened', count: 7, unique_users: 1 },
   ])
-  assert.deepEqual(result.trend, [
+  expect(result.trend).toEqual([
     { bucket_ts: 3600, name: 'opened', count: 7, unique_users: 1 },
     { bucket_ts: 7200, name: 'opened', count: 0, unique_users: 0 },
   ])
 })
 
 test('formats online seconds as a compact Chinese duration', () => {
-  assert.equal(formatOnlineDuration(0), '0秒')
-  assert.equal(formatOnlineDuration(1), '1秒')
-  assert.equal(formatOnlineDuration(65), '1分5秒')
-  assert.equal(formatOnlineDuration(3661), '1小时1分')
+  expect(formatOnlineDuration(0)).toBe('0秒')
+  expect(formatOnlineDuration(1)).toBe('1秒')
+  expect(formatOnlineDuration(65)).toBe('1分5秒')
+  expect(formatOnlineDuration(3661)).toBe('1小时1分')
 })
 
 test('ranks usage and event rows by the selected metric', () => {
@@ -122,25 +121,21 @@ test('ranks usage and event rows by the selected metric', () => {
     { name: 'starts-first', starts: 20, online_seconds: 30, active_users: 5 },
     { name: 'users-first', starts: 2, online_seconds: 300, active_users: 30 },
   ]
-  assert.deepEqual(
-    rankUsageRows(usageRows, 'starts').map((row) => row.name),
-    ['starts-first', 'users-first']
-  )
-  assert.deepEqual(
-    rankUsageRows(usageRows, 'active_users').map((row) => row.name),
-    ['users-first', 'starts-first']
-  )
+  expect(
+    rankUsageRows(usageRows, 'starts').map((row) => row.name)
+  ).toEqual(['starts-first', 'users-first'])
+  expect(
+    rankUsageRows(usageRows, 'active_users').map((row) => row.name)
+  ).toEqual(['users-first', 'starts-first'])
 
   const eventRows = [
     { name: 'count-first', count: 40, unique_users: 3 },
     { name: 'ip-first', count: 4, unique_users: 30 },
   ]
-  assert.deepEqual(
-    rankEventRows(eventRows, 'count').map((row) => row.name),
-    ['count-first', 'ip-first']
-  )
-  assert.deepEqual(
-    rankEventRows(eventRows, 'unique_users').map((row) => row.name),
-    ['ip-first', 'count-first']
-  )
+  expect(
+    rankEventRows(eventRows, 'count').map((row) => row.name)
+  ).toEqual(['count-first', 'ip-first'])
+  expect(
+    rankEventRows(eventRows, 'unique_users').map((row) => row.name)
+  ).toEqual(['ip-first', 'count-first'])
 })

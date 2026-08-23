@@ -16,46 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
+import { describe, expect, test } from 'vitest'
 
-import { Window } from 'happy-dom'
 import type React from 'react'
-
-const nodeTestApi = await import('node:test')
-const testGlobals = globalThis as typeof globalThis & {
-  after?: typeof nodeTestApi.after
-  describe?: typeof nodeTestApi.describe
-  test?: typeof nodeTestApi.test
-}
-const after = testGlobals.after ?? nodeTestApi.after
-const describe = testGlobals.describe ?? nodeTestApi.describe
-const test = testGlobals.test ?? nodeTestApi.test
-
-const domWindow = new Window()
-const domGlobals = [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'CustomEvent',
-  'MutationObserver',
-  'ResizeObserver',
-  'IntersectionObserver',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-] as const
-
-for (const key of domGlobals) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
 
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
@@ -123,10 +86,6 @@ async function unmountTiming(rendered: RenderedTiming) {
 }
 
 describe('timing metrics cell', () => {
-  after(() => {
-    domWindow.close()
-  })
-
   test('opens detailed timing and toggles the accessible expanded state', async () => {
     const rendered = await renderTiming({
       useTimeSec: 2.5,
@@ -150,21 +109,22 @@ describe('timing metrics cell', () => {
     })
 
     const button = rendered.container.querySelector('button')
-    assert.ok(button)
-    assert.equal(button.getAttribute('aria-label'), 'View detailed timing')
-    assert.equal(button.getAttribute('aria-expanded'), 'false')
-    assert.match(rendered.container.textContent ?? '', /First token/)
-    assert.match(rendered.container.textContent ?? '', /Duration/)
+    expect(button).not.toBeNull()
+    if (button === null) return
+    expect(button.getAttribute('aria-label')).toBe('View detailed timing')
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    expect(rendered.container.textContent ?? '').toMatch(/First token/)
+    expect(rendered.container.textContent ?? '').toMatch(/Duration/)
 
     await act(async () => button.click())
-    assert.equal(button.getAttribute('aria-expanded'), 'true')
-    assert.match(document.body.textContent ?? '', /Timing details/)
-    assert.match(document.body.textContent ?? '', /Site processing/)
-    assert.match(document.body.textContent ?? '', /DNS 4 ms/)
-    assert.match(document.body.textContent ?? '', /Sent bytes/)
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    expect(document.body.textContent ?? '').toMatch(/Timing details/)
+    expect(document.body.textContent ?? '').toMatch(/Site processing/)
+    expect(document.body.textContent ?? '').toMatch(/DNS 4 ms/)
+    expect(document.body.textContent ?? '').toMatch(/Sent bytes/)
 
     await act(async () => button.click())
-    assert.equal(button.getAttribute('aria-expanded'), 'false')
+    expect(button.getAttribute('aria-expanded')).toBe('false')
 
     await unmountTiming(rendered)
   })
@@ -177,9 +137,9 @@ describe('timing metrics cell', () => {
       isStream: true,
     })
 
-    assert.equal(rendered.container.querySelector('button'), null)
-    assert.match(rendered.container.textContent ?? '', /First token/)
-    assert.match(rendered.container.textContent ?? '', /Duration/)
+    expect(rendered.container.querySelector('button')).toBe(null)
+    expect(rendered.container.textContent ?? '').toMatch(/First token/)
+    expect(rendered.container.textContent ?? '').toMatch(/Duration/)
 
     await unmountTiming(rendered)
   })

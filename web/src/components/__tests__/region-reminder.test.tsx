@@ -16,27 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-
-import { Window } from 'happy-dom'
-
-const nodeTestApi = await import('node:test')
-const testGlobals = globalThis as typeof globalThis & {
-  after?: typeof nodeTestApi.after
-  beforeEach?: typeof nodeTestApi.beforeEach
-  describe?: typeof nodeTestApi.describe
-  test?: typeof nodeTestApi.test
-}
-const after = testGlobals.after ?? nodeTestApi.after
-const beforeEach = testGlobals.beforeEach ?? nodeTestApi.beforeEach
-const describe = testGlobals.describe ?? nodeTestApi.describe
-const test = testGlobals.test ?? nodeTestApi.test
-// 测试运行器（bun test）提供模块级 mock；静态引入类型解析不到
-// `bun:test`，这里运行时获取。
-const bunTestSpecifier = 'bun:test'
-const { mock } = (await import(bunTestSpecifier)) as unknown as {
-  mock: { module: (path: string, factory: () => unknown) => void }
-}
+import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 const REGION_REMINDER_DISMISSED_KEY = 'region-reminder-dismissed'
 
@@ -49,37 +29,13 @@ type GeoCheckData = {
 }
 
 // 每个用例通过修改该状态控制 getGeoCheck 的返回
-const geoCheckState: { current: GeoCheckData | null } = { current: null }
-
-mock.module('@/lib/api', () => ({
-  getGeoCheck: async () => geoCheckState.current,
+const { geoCheckState } = vi.hoisted(() => ({
+  geoCheckState: { current: null } as { current: GeoCheckData | null },
 }))
 
-const domWindow = new Window()
-const domGlobals = [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'CustomEvent',
-  'MutationObserver',
-  'ResizeObserver',
-  'IntersectionObserver',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-] as const
-
-for (const key of domGlobals) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
+vi.mock('@/lib/api', () => ({
+  getGeoCheck: async () => geoCheckState.current,
+}))
 
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
@@ -148,12 +104,8 @@ const matchedData: GeoCheckData = {
 
 describe('region reminder', () => {
   beforeEach(() => {
-    domWindow.localStorage.clear()
+    localStorage.clear()
     geoCheckState.current = null
-  })
-
-  after(() => {
-    domWindow.close()
   })
 
   test('shows the reminder dialog with the message and an OK button when the region matches and no dismissal marker exists', async () => {
@@ -162,13 +114,17 @@ describe('region reminder', () => {
     const rendered = await renderReminder()
 
     const content = openDialogContent()
-    assert.ok(content, 'dialog should be open')
-    assert.match(content.textContent ?? '', /Notice: access from your region is restricted\./)
-    assert.match(content.textContent ?? '', /Region Reminder/)
+    expect(content).not.toBeNull()
+    if (content === null) return
+    expect(content.textContent ?? '').toMatch(
+      /Notice: access from your region is restricted\./
+    )
+    expect(content.textContent ?? '').toMatch(/Region Reminder/)
 
     const okButton = content.querySelector('button')
-    assert.ok(okButton)
-    assert.match(okButton.textContent ?? '', /OK/)
+    expect(okButton).not.toBeNull()
+    if (okButton === null) return
+    expect(okButton.textContent ?? '').toMatch(/OK/)
 
     await unmountReminder(rendered)
   })
@@ -179,32 +135,33 @@ describe('region reminder', () => {
     const rendered = await renderReminder()
 
     const content = openDialogContent()
-    assert.ok(content, 'dialog should be open')
+    expect(content).not.toBeNull()
+    if (content === null) return
     const okButton = content.querySelector('button')
-    assert.ok(okButton)
+    expect(okButton).not.toBeNull()
+    if (okButton === null) return
 
     await act(async () => {
       okButton.click()
     })
     await act(async () => {})
 
-    assert.equal(
-      domWindow.localStorage.getItem(REGION_REMINDER_DISMISSED_KEY),
-      '1'
-    )
-    assert.equal(openDialogContent(), null, 'dialog should be closed')
+    expect(localStorage.getItem(REGION_REMINDER_DISMISSED_KEY)).toBe('1')
+    expect(openDialogContent(), 'dialog should be closed').toBeNull()
 
     await unmountReminder(rendered)
   })
 
   test('renders nothing when the dismissal marker already exists', async () => {
-    domWindow.localStorage.setItem(REGION_REMINDER_DISMISSED_KEY, '1')
+    localStorage.setItem(REGION_REMINDER_DISMISSED_KEY, '1')
     geoCheckState.current = matchedData
 
     const rendered = await renderReminder()
 
-    assert.equal(rendered.container.textContent, '')
-    assert.equal(document.body.querySelector('[data-slot="dialog-content"]'), null)
+    expect(rendered.container.textContent).toBe('')
+    expect(
+      document.body.querySelector('[data-slot="dialog-content"]')
+    ).toBeNull()
 
     await unmountReminder(rendered)
   })
@@ -220,8 +177,10 @@ describe('region reminder', () => {
 
     const rendered = await renderReminder()
 
-    assert.equal(rendered.container.textContent, '')
-    assert.equal(document.body.querySelector('[data-slot="dialog-content"]'), null)
+    expect(rendered.container.textContent).toBe('')
+    expect(
+      document.body.querySelector('[data-slot="dialog-content"]')
+    ).toBeNull()
 
     await unmountReminder(rendered)
   })
@@ -231,8 +190,10 @@ describe('region reminder', () => {
 
     const rendered = await renderReminder()
 
-    assert.equal(rendered.container.textContent, '')
-    assert.equal(document.body.querySelector('[data-slot="dialog-content"]'), null)
+    expect(rendered.container.textContent).toBe('')
+    expect(
+      document.body.querySelector('[data-slot="dialog-content"]')
+    ).toBeNull()
 
     await unmountReminder(rendered)
   })
@@ -248,8 +209,10 @@ describe('region reminder', () => {
 
     const rendered = await renderReminder()
 
-    assert.equal(rendered.container.textContent, '')
-    assert.equal(document.body.querySelector('[data-slot="dialog-content"]'), null)
+    expect(rendered.container.textContent).toBe('')
+    expect(
+      document.body.querySelector('[data-slot="dialog-content"]')
+    ).toBeNull()
 
     await unmountReminder(rendered)
   })

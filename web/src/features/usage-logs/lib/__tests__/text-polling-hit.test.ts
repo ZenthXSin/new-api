@@ -16,15 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { describe, expect, test } from 'vitest'
 
 import { getTextPollingHit } from '../format'
 
 describe('text polling hit parsing', () => {
   test('returns each explicit successful polling tier', () => {
     for (const tier of [1, 2, 3] as const) {
-      assert.deepEqual(getTextPollingHit({ text_polling_tier: tier }), {
+      expect(getTextPollingHit({ text_polling_tier: tier })).toEqual({
         kind: 'tier',
         tier,
       })
@@ -32,26 +31,25 @@ describe('text polling hit parsing', () => {
   })
 
   test('returns the hidden legacy fallback marker', () => {
-    assert.deepEqual(getTextPollingHit({ text_polling_fallback: true }), {
+    expect(getTextPollingHit({ text_polling_fallback: true })).toEqual({
       kind: 'fallback',
     })
   })
 
   test('returns null for non-polling metadata', () => {
-    assert.equal(getTextPollingHit({}), null)
-    assert.equal(getTextPollingHit(null), null)
-    assert.equal(getTextPollingHit(undefined), null)
+    expect(getTextPollingHit({})).toBe(null)
+    expect(getTextPollingHit(null)).toBe(null)
+    expect(getTextPollingHit(undefined)).toBe(null)
   })
 
   test('rejects malformed or contradictory polling metadata', () => {
-    assert.equal(getTextPollingHit({ text_polling_tier: 0 }), null)
-    assert.equal(getTextPollingHit({ text_polling_tier: 4 }), null)
-    assert.equal(
+    expect(getTextPollingHit({ text_polling_tier: 0 })).toBe(null)
+    expect(getTextPollingHit({ text_polling_tier: 4 })).toBe(null)
+    expect(
       getTextPollingHit({
         text_polling_tier: 1,
         text_polling_fallback: true,
-      }),
-      null
-    )
+      })
+    ).toBe(null)
   })
 })

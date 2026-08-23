@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, expect, it } from 'vitest'
 
 import {
   isValidBanDurationsJSON,
@@ -10,57 +9,54 @@ import {
 describe('ipguard validation', () => {
   describe('isValidStringArrayJSON', () => {
     it('accepts empty and a valid IP array', () => {
-      assert.equal(isValidStringArrayJSON(''), true)
-      assert.equal(isValidStringArrayJSON('["127.0.0.1", "10.0.0.1"]'), true)
+      expect(isValidStringArrayJSON('')).toBe(true)
+      expect(isValidStringArrayJSON('["127.0.0.1", "10.0.0.1"]')).toBe(true)
     })
 
     it('rejects malformed input', () => {
-      assert.equal(isValidStringArrayJSON('{'), false)
-      assert.equal(isValidStringArrayJSON('{"127.0.0.1": true}'), false)
-      assert.equal(isValidStringArrayJSON('[127.0.0.1]'), false)
-      assert.equal(isValidStringArrayJSON('[""]'), false)
+      expect(isValidStringArrayJSON('{')).toBe(false)
+      expect(isValidStringArrayJSON('{"127.0.0.1": true}')).toBe(false)
+      expect(isValidStringArrayJSON('[127.0.0.1]')).toBe(false)
+      expect(isValidStringArrayJSON('[""]')).toBe(false)
     })
   })
 
   describe('isValidBanDurationsJSON', () => {
     it('accepts empty and durations with all three verdicts', () => {
-      assert.equal(isValidBanDurationsJSON(''), true)
-      assert.equal(
+      expect(isValidBanDurationsJSON('')).toBe(true)
+      expect(
         isValidBanDurationsJSON(
           '{"suspect": 900, "malicious": 21600, "critical": 86400}'
-        ),
-        true
-      )
+        )
+      ).toBe(true)
     })
 
     it('rejects missing, non-positive or non-numeric verdicts', () => {
-      assert.equal(isValidBanDurationsJSON('{"suspect": 900}'), false)
-      assert.equal(
+      expect(isValidBanDurationsJSON('{"suspect": 900}')).toBe(false)
+      expect(
         isValidBanDurationsJSON(
           '{"suspect": 900, "malicious": 21600, "critical": 0}'
-        ),
-        false
-      )
-      assert.equal(
+        )
+      ).toBe(false)
+      expect(
         isValidBanDurationsJSON(
           '{"suspect": "900", "malicious": 21600, "critical": 86400}'
-        ),
-        false
-      )
-      assert.equal(isValidBanDurationsJSON('[900, 21600]'), false)
+        )
+      ).toBe(false)
+      expect(isValidBanDurationsJSON('[900, 21600]')).toBe(false)
     })
   })
 
   describe('isValidHeuristicsJSON', () => {
     it('accepts empty and an object of overrides', () => {
-      assert.equal(isValidHeuristicsJSON(''), true)
-      assert.equal(isValidHeuristicsJSON('{"ssh_fail_threshold": 5}'), true)
+      expect(isValidHeuristicsJSON('')).toBe(true)
+      expect(isValidHeuristicsJSON('{"ssh_fail_threshold": 5}')).toBe(true)
     })
 
     it('rejects non-objects and malformed JSON', () => {
-      assert.equal(isValidHeuristicsJSON('[1, 2]'), false)
-      assert.equal(isValidHeuristicsJSON('5'), false)
-      assert.equal(isValidHeuristicsJSON('{"ssh_fail_threshold": }'), false)
+      expect(isValidHeuristicsJSON('[1, 2]')).toBe(false)
+      expect(isValidHeuristicsJSON('5')).toBe(false)
+      expect(isValidHeuristicsJSON('{"ssh_fail_threshold": }')).toBe(false)
     })
   })
 })

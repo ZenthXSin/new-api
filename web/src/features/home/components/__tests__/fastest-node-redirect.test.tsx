@@ -16,55 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
+import { describe, expect, test } from 'vitest'
 
 import type { ApiInfoItem } from '@/features/dashboard/types'
-import { Window } from 'happy-dom'
-
-const nodeTestApi = await import('node:test')
-const testGlobals = globalThis as typeof globalThis & {
-  after?: typeof nodeTestApi.after
-  describe?: typeof nodeTestApi.describe
-  test?: typeof nodeTestApi.test
-}
-const after = testGlobals.after ?? nodeTestApi.after
-const describe = testGlobals.describe ?? nodeTestApi.describe
-const test = testGlobals.test ?? nodeTestApi.test
-
-const domWindow = new Window()
-const domGlobals = [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'CustomEvent',
-  'MutationObserver',
-  'ResizeObserver',
-  'IntersectionObserver',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-] as const
-
-for (const key of domGlobals) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
-
-const originalStorage = Object.getOwnPropertyDescriptor(
-  globalThis,
-  'localStorage'
-)
-Object.defineProperty(globalThis, 'localStorage', {
-  configurable: true,
-  value: domWindow.localStorage,
-})
 
 const { act } = await import('react')
 const { StrictMode } = await import('react')
@@ -152,52 +106,60 @@ function installServerProbeFetch() {
 }
 
 describe('fastest node redirect', () => {
-  after(() => {
-    domWindow.close()
-    if (originalStorage) {
-      Object.defineProperty(globalThis, 'localStorage', originalStorage)
-    } else {
-      Reflect.deleteProperty(globalThis, 'localStorage')
-    }
-  })
-
   test('redirects after items swap mid-probe instead of cancelling', async () => {
-    domWindow.localStorage.clear()
+    localStorage.clear()
     let replacedUrl: string | null = null
-    domWindow.location.replace = ((url: string) => {
-      replacedUrl = url
-    }) as typeof domWindow.location.replace
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        replace: (url: string) => {
+          replacedUrl = url
+        },
+      },
+    })
     const fetchControl = installServerProbeFetch()
 
     try {
       const rendered = await renderRedirect([node(NODE_A), node(NODE_B)])
-      assert.equal(fetchControl.fetchCalls(), 1)
+      expect(fetchControl.fetchCalls()).toBe(1)
 
       // Simulate react-query swapping placeholder status for fresh data:
       // the items array identity changes, which re-runs the effect.
       await act(async () => {
         rendered.root.render(<FastestNodeRedirect items={[node(NODE_A), node(NODE_B)]} />)
       })
-      assert.equal(fetchControl.fetchCalls(), 1, 'probe must not restart on data swap')
+      expect(
+        fetchControl.fetchCalls(),
+        'probe must not restart on data swap'
+      ).toBe(1)
 
       fetchControl.resolveProbe()
       await act(async () => {})
 
-      assert.equal(replacedUrl, NODE_A)
-      assert.equal(readProbeMemory()?.url, NODE_A)
+      expect(replacedUrl).toBe(NODE_A)
+      expect(readProbeMemory()?.url).toBe(NODE_A)
 
       await unmountRedirect(rendered)
     } finally {
       fetchControl.restore()
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: window.location,
+      })
     }
   })
 
   test('redirects under StrictMode double-mounting', async () => {
-    domWindow.localStorage.clear()
+    localStorage.clear()
     let replacedUrl: string | null = null
-    domWindow.location.replace = ((url: string) => {
-      replacedUrl = url
-    }) as typeof domWindow.location.replace
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        replace: (url: string) => {
+          replacedUrl = url
+        },
+      },
+    })
     const fetchControl = installServerProbeFetch()
 
     try {
@@ -214,23 +176,27 @@ describe('fastest node redirect', () => {
       })
 
       // StrictMode runs the mount effect twice but the probe must start once.
-      assert.equal(fetchControl.fetchCalls(), 1)
+      expect(fetchControl.fetchCalls()).toBe(1)
 
       fetchControl.resolveProbe()
       await act(async () => {})
 
-      assert.equal(replacedUrl, NODE_A)
-      assert.equal(readProbeMemory()?.url, NODE_A)
+      expect(replacedUrl).toBe(NODE_A)
+      expect(readProbeMemory()?.url).toBe(NODE_A)
 
       await act(async () => root.unmount())
       container.remove()
     } finally {
       fetchControl.restore()
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: window.location,
+      })
     }
   })
 
   test('does not probe when fewer than two nodes are configured', async () => {
-    domWindow.localStorage.clear()
+    localStorage.clear()
     let fetchCalls = 0
     const originalFetch = globalThis.fetch
     globalThis.fetch = (() => {
@@ -240,7 +206,7 @@ describe('fastest node redirect', () => {
 
     try {
       const rendered = await renderRedirect([node(NODE_A)])
-      assert.equal(fetchCalls, 0)
+      expect(fetchCalls).toBe(0)
       await unmountRedirect(rendered)
     } finally {
       globalThis.fetch = originalFetch
@@ -248,8 +214,8 @@ describe('fastest node redirect', () => {
   })
 
   test('does not probe again while the cooldown memory is fresh', async () => {
-    domWindow.localStorage.clear()
-    domWindow.localStorage.setItem(
+    localStorage.clear()
+    localStorage.setItem(
       FASTEST_NODE_STORAGE_KEY,
       JSON.stringify({ url: NODE_A, at: Date.now() })
     )
@@ -262,7 +228,7 @@ describe('fastest node redirect', () => {
 
     try {
       const rendered = await renderRedirect([node(NODE_A), node(NODE_B)])
-      assert.equal(fetchCalls, 0)
+      expect(fetchCalls).toBe(0)
       await unmountRedirect(rendered)
     } finally {
       globalThis.fetch = originalFetch

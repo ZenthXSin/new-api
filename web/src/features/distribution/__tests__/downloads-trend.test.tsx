@@ -16,21 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { after, test } from 'node:test'
-
-import { Window } from 'happy-dom'
+import { expect, test, vi } from 'vitest'
 
 import type { DownloadBucket } from '../api'
 import type { DownloadsSummary } from '../telemetry-data'
 
-// 测试运行器（bun test）提供模块级 mock；静态引入类型解析不到
-// `bun:test`，这里运行时获取以避免对真实 canvas 的依赖。
-const bunTestSpecifier = 'bun:test'
-const { mock } = (await import(bunTestSpecifier)) as unknown as {
-  mock: { module: (path: string, factory: () => unknown) => void }
-}
-mock.module('@visactor/react-vchart', () => ({
+// 避免对真实 canvas 的依赖,用 mock 组件替换 VChart 渲染
+vi.mock('@visactor/react-vchart', () => ({
   VChart: ({ spec }: { spec?: unknown }) => (
     <div
       data-testid='vchart'
@@ -38,32 +30,9 @@ mock.module('@visactor/react-vchart', () => ({
     />
   ),
 }))
-mock.module('@visactor/vchart', () => ({
+vi.mock('@visactor/vchart', () => ({
   ThemeManager: { setCurrentTheme: () => {} },
 }))
-
-const domWindow = new Window()
-for (const key of [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'CustomEvent',
-  'MutationObserver',
-  'ResizeObserver',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-] as const) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
 
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
@@ -120,8 +89,8 @@ test('aggregates download buckets per version and sorts by total', () => {
 
   const result = summarizeDownloads(rows)
 
-  assert.equal(result.total, 16)
-  assert.deepEqual(result.series, [
+  expect(result.total).toBe(16)
+  expect(result.series).toEqual([
     {
       version: '2.0.0',
       points: [{ bucket_ts: 3600, count: 10 }],
@@ -175,31 +144,33 @@ test('fills every hourly bucket of the window with zeros per version', () => {
   // referenceTimestamp=86400 → end=86400，窗口为 [3600, 86400] 共 24 个点
   const result = summarizeDownloads(rows, 24, 86400)
 
-  assert.equal(result.total, 23)
-  assert.deepEqual(
-    result.series.map((series) => series.version),
-    ['1.0.0', '2.0.0']
-  )
+  expect(result.total).toBe(23)
+  expect(result.series.map((series) => series.version)).toEqual([
+    '1.0.0',
+    '2.0.0',
+  ])
   const first = result.series[0]
   const second = result.series[1]
-  assert.ok(first)
-  assert.ok(second)
-  assert.equal(first.points.length, 24)
-  assert.equal(second.points.length, 24)
-  assert.deepEqual(first.points[0], { bucket_ts: 3600, count: 4 })
-  assert.deepEqual(first.points[22], { bucket_ts: 82800, count: 9 })
-  assert.equal(first.points[1]?.count, 0)
-  assert.equal(first.points[23]?.count, 0)
-  assert.deepEqual(second.points.slice(0, 2), [
+  expect(first).toBeDefined()
+  if (first === undefined) return
+  expect(second).toBeDefined()
+  if (second === undefined) return
+  expect(first.points.length).toBe(24)
+  expect(second.points.length).toBe(24)
+  expect(first.points[0]).toEqual({ bucket_ts: 3600, count: 4 })
+  expect(first.points[22]).toEqual({ bucket_ts: 82800, count: 9 })
+  expect(first.points[1]?.count).toBe(0)
+  expect(first.points[23]?.count).toBe(0)
+  expect(second.points.slice(0, 2)).toEqual([
     { bucket_ts: 3600, count: 7 },
     { bucket_ts: 7200, count: 3 },
   ])
-  assert.equal(second.points[23]?.count, 0)
+  expect(second.points[23]?.count).toBe(0)
 })
 
 test('returns an empty summary when there are no download rows', () => {
-  assert.deepEqual(summarizeDownloads([]), { total: 0, series: [] })
-  assert.deepEqual(summarizeDownloads([], 24, 86400), { total: 0, series: [] })
+  expect(summarizeDownloads([])).toEqual({ total: 0, series: [] })
+  expect(summarizeDownloads([], 24, 86400)).toEqual({ total: 0, series: [] })
 })
 
 test('renders the downloads trend chart with versions as series data', async () => {
@@ -228,12 +199,13 @@ test('renders the downloads trend chart with versions as series data', async () 
   })
   await waitForThemeReady()
 
-  assert.ok(container.textContent?.includes('下载量趋势'))
+  expect(container.textContent?.includes('下载量趋势')).toBe(true)
   const chart = container.querySelector('[data-testid="vchart"]')
-  assert.ok(chart, 'chart should render when data exists')
+  expect(chart).not.toBeNull()
+  if (chart === null) return
   const spec = chart?.getAttribute('data-spec') ?? ''
-  assert.match(spec, /2\.0\.0/)
-  assert.match(spec, /1\.0\.0/)
+  expect(spec).toMatch(/2\.0\.0/)
+  expect(spec).toMatch(/1\.0\.0/)
 
   await act(async () => root.unmount())
   container.remove()
@@ -249,12 +221,10 @@ test('shows the empty state without rendering a chart when no data exists', asyn
   })
   await waitForThemeReady()
 
-  assert.ok(container.textContent?.includes('下载量趋势'))
-  assert.ok(container.textContent?.includes('暂无下载数据'))
-  assert.equal(container.querySelector('[data-testid="vchart"]'), null)
+  expect(container.textContent?.includes('下载量趋势')).toBe(true)
+  expect(container.textContent?.includes('暂无下载数据')).toBe(true)
+  expect(container.querySelector('[data-testid="vchart"]')).toBeNull()
 
   await act(async () => root.unmount())
   container.remove()
 })
-
-after(() => domWindow.close())

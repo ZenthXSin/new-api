@@ -16,8 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { describe, expect, test } from 'vitest'
 
 import type { TFunction } from 'i18next'
 
@@ -27,29 +26,25 @@ const translate = ((key: string) => key) as TFunction
 
 describe('login session presentation', () => {
   test('labels built-in and provider OAuth login methods', () => {
-    assert.equal(loginMethodLabel('password', translate), 'Password')
-    assert.equal(
-      loginMethodLabel('2fa', translate),
+    expect(loginMethodLabel('password', translate)).toBe('Password')
+    expect(loginMethodLabel('2fa', translate)).toBe(
       'Two-factor Authentication'
     )
-    assert.equal(loginMethodLabel('oauth:github', translate), 'OAuth · GitHub')
-    assert.equal(
-      loginMethodLabel('oauth:custom-provider', translate),
+    expect(loginMethodLabel('oauth:github', translate)).toBe('OAuth · GitHub')
+    expect(loginMethodLabel('oauth:custom-provider', translate)).toBe(
       'OAuth · custom-provider'
     )
   })
 
   test('derives a stable browser and operating-system label', () => {
-    assert.equal(
+    expect(
       sessionDevice(
         'Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit Safari/605.1.15',
         'Unknown device',
         'Browser'
-      ),
-      'Safari · macOS'
-    )
-    assert.equal(
-      sessionDevice('', 'Unknown device', 'Browser'),
+      )
+    ).toBe('Safari · macOS')
+    expect(sessionDevice('', 'Unknown device', 'Browser')).toBe(
       'Unknown device'
     )
   })

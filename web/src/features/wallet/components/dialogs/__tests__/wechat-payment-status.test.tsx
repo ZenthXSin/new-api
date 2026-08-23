@@ -16,15 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { describe, expect, test } from 'vitest'
 
 import { getNextWeChatPayDialogState } from '../../../lib/wechat-payment-status'
 
 describe('WeChat payment status dialog', () => {
   test('stops with a retryable error after three consecutive verification failures', () => {
     let state = getNextWeChatPayDialogState(0, true, true)
-    assert.deepEqual(state, {
+    expect(state).toEqual({
       status: 'pending',
       consecutiveErrors: 1,
       shouldStop: false,
@@ -33,7 +32,7 @@ describe('WeChat payment status dialog', () => {
     state = getNextWeChatPayDialogState(state.consecutiveErrors, false, false)
     state = getNextWeChatPayDialogState(state.consecutiveErrors, true, true)
 
-    assert.deepEqual(state, {
+    expect(state).toEqual({
       status: 'verification_error',
       consecutiveErrors: 3,
       shouldStop: true,
@@ -43,7 +42,7 @@ describe('WeChat payment status dialog', () => {
   test('resets verification failures after retry and stops on success', () => {
     const state = getNextWeChatPayDialogState(0, true, false, 'success')
 
-    assert.deepEqual(state, {
+    expect(state).toEqual({
       status: 'success',
       consecutiveErrors: 0,
       shouldStop: true,

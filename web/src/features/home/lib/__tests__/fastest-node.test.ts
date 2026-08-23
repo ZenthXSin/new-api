@@ -16,8 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { after, test } from 'node:test'
+import { afterAll, beforeEach, expect, test } from 'vitest'
 
 import type { ApiInfoItem, PingStatus } from '@/features/dashboard/types'
 
@@ -54,52 +53,18 @@ const slowItem: ApiInfoItem = {
   color: 'yellow',
 }
 
-class MemoryStorage {
-  private store = new Map<string, string>()
-
-  getItem(key: string): string | null {
-    return this.store.get(key) ?? null
-  }
-
-  setItem(key: string, value: string): void {
-    this.store.set(key, value)
-  }
-
-  removeItem(key: string): void {
-    this.store.delete(key)
-  }
-
-  clear(): void {
-    this.store.clear()
-  }
-}
-
-function installStorage() {
-  const storage = new MemoryStorage()
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: storage,
-  })
-  return storage
-}
-
-const originalStorage = Object.getOwnPropertyDescriptor(
-  globalThis,
-  'localStorage'
-)
 const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch')
 
-after(() => {
-  if (originalStorage) {
-    Object.defineProperty(globalThis, 'localStorage', originalStorage)
-  } else {
-    Reflect.deleteProperty(globalThis, 'localStorage')
-  }
+afterAll(() => {
   if (originalFetch) {
     Object.defineProperty(globalThis, 'fetch', originalFetch)
   } else {
     Reflect.deleteProperty(globalThis, 'fetch')
   }
+})
+
+beforeEach(() => {
+  localStorage.clear()
 })
 
 function installFetch(
@@ -141,8 +106,8 @@ test('pickFastestNode returns the fastest node and never probes the current orig
     CURRENT_ORIGIN
   )
 
-  assert.equal(fastest, fastItem)
-  assert.deepEqual(probedUrls, [
+  expect(fastest).toBe(fastItem)
+  expect(probedUrls).toEqual([
     'https://node-a.example.com',
     'https://node-b.example.com',
   ])
@@ -153,7 +118,7 @@ test('pickFastestNode returns the only candidate when it is a different origin',
 
   const fastest = await pickFastestNode([fastItem], probe, CURRENT_ORIGIN)
 
-  assert.equal(fastest, fastItem)
+  expect(fastest).toBe(fastItem)
 })
 
 test('pickFastestNode returns null when every probe fails', async () => {
@@ -164,7 +129,7 @@ test('pickFastestNode returns null when every probe fails', async () => {
 
   const fastest = await pickFastestNode([fastItem, slowItem], probe, CURRENT_ORIGIN)
 
-  assert.equal(fastest, null)
+  expect(fastest).toBe(null)
 })
 
 test('pickFastestNode returns null for an empty item list without probing', async () => {
@@ -172,8 +137,8 @@ test('pickFastestNode returns null for an empty item list without probing', asyn
 
   const fastest = await pickFastestNode([], probe, CURRENT_ORIGIN)
 
-  assert.equal(fastest, null)
-  assert.deepEqual(probedUrls, [])
+  expect(fastest).toBe(null)
+  expect(probedUrls).toEqual([])
 })
 
 test('pickFastestNode returns null when the only node shares the current origin', async () => {
@@ -183,66 +148,59 @@ test('pickFastestNode returns null when the only node shares the current origin'
 
   const fastest = await pickFastestNode([sameOriginItem], probe, CURRENT_ORIGIN)
 
-  assert.equal(fastest, null)
-  assert.deepEqual(probedUrls, [])
+  expect(fastest).toBe(null)
+  expect(probedUrls).toEqual([])
 })
 
 test('writeProbeMemory then readProbeMemory round-trips url and timestamp', () => {
-  installStorage()
   writeProbeMemory('https://node-a.example.com', 1234)
 
-  assert.deepEqual(readProbeMemory(), {
+  expect(readProbeMemory()).toEqual({
     url: 'https://node-a.example.com',
     at: 1234,
   })
 })
 
 test('readProbeMemory returns null for unparsable or invalid stored JSON', () => {
-  const storage = installStorage()
-  storage.setItem(FASTEST_NODE_STORAGE_KEY, 'not-json{')
-  assert.equal(readProbeMemory(), null)
-  storage.setItem(FASTEST_NODE_STORAGE_KEY, JSON.stringify({ url: 42, at: 1 }))
-  assert.equal(readProbeMemory(), null)
-  storage.setItem(
+  localStorage.setItem(FASTEST_NODE_STORAGE_KEY, 'not-json{')
+  expect(readProbeMemory()).toBe(null)
+  localStorage.setItem(FASTEST_NODE_STORAGE_KEY, JSON.stringify({ url: 42, at: 1 }))
+  expect(readProbeMemory()).toBe(null)
+  localStorage.setItem(
     FASTEST_NODE_STORAGE_KEY,
     JSON.stringify({ url: 'https://node-a.example.com', at: 'now' })
   )
-  assert.equal(readProbeMemory(), null)
-  storage.setItem(
+  expect(readProbeMemory()).toBe(null)
+  localStorage.setItem(
     FASTEST_NODE_STORAGE_KEY,
     JSON.stringify({ url: 'https://node-a.example.com' })
   )
-  assert.equal(readProbeMemory(), null)
+  expect(readProbeMemory()).toBe(null)
 })
 
 test('shouldProbe returns true without stored memory', () => {
-  installStorage()
-
-  assert.equal(shouldProbe(), true)
+  expect(shouldProbe()).toBe(true)
 })
 
 test('shouldProbe stays false inside the cooldown window', () => {
-  installStorage()
   const at = 1_000_000
   writeProbeMemory('https://node-a.example.com', at)
 
-  assert.equal(shouldProbe(at), false)
-  assert.equal(shouldProbe(at + FASTEST_NODE_COOLDOWN_MS), false)
+  expect(shouldProbe(at)).toBe(false)
+  expect(shouldProbe(at + FASTEST_NODE_COOLDOWN_MS)).toBe(false)
 })
 
 test('shouldProbe returns true once the cooldown has elapsed', () => {
-  installStorage()
   const at = 1_000_000
   writeProbeMemory('https://node-a.example.com', at)
 
-  assert.equal(shouldProbe(at + FASTEST_NODE_COOLDOWN_MS + 1), true)
+  expect(shouldProbe(at + FASTEST_NODE_COOLDOWN_MS + 1)).toBe(true)
 })
 
 test('shouldProbe returns true for corrupted stored JSON', () => {
-  const storage = installStorage()
-  storage.setItem(FASTEST_NODE_STORAGE_KEY, 'not-json{')
+  localStorage.setItem(FASTEST_NODE_STORAGE_KEY, 'not-json{')
 
-  assert.equal(shouldProbe(), true)
+  expect(shouldProbe()).toBe(true)
 })
 
 test('pickFastestNode prefers the server probe and never calls the browser probe when every candidate has a latency', async () => {
@@ -262,8 +220,8 @@ test('pickFastestNode prefers the server probe and never calls the browser probe
     serverProbe
   )
 
-  assert.equal(fastest, fastItem)
-  assert.deepEqual(probedUrls, [])
+  expect(fastest).toBe(fastItem)
+  expect(probedUrls).toEqual([])
 })
 
 test('pickFastestNode skips candidates absent from the server probe and returns the fastest measured one', async () => {
@@ -280,8 +238,8 @@ test('pickFastestNode skips candidates absent from the server probe and returns 
     serverProbe
   )
 
-  assert.equal(fastest, fastItem)
-  assert.deepEqual(probedUrls, [])
+  expect(fastest).toBe(fastItem)
+  expect(probedUrls).toEqual([])
 })
 
 test('pickFastestNode falls back to browser probing when the server probe returns null', async () => {
@@ -298,8 +256,8 @@ test('pickFastestNode falls back to browser probing when the server probe return
     serverProbe
   )
 
-  assert.equal(fastest, fastItem)
-  assert.deepEqual(probedUrls, [
+  expect(fastest).toBe(fastItem)
+  expect(probedUrls).toEqual([
     'https://node-a.example.com',
     'https://node-b.example.com',
   ])
@@ -321,8 +279,8 @@ test('pickFastestNode falls back to browser probing when the server probe throws
     serverProbe
   )
 
-  assert.equal(fastest, fastItem)
-  assert.deepEqual(probedUrls, [
+  expect(fastest).toBe(fastItem)
+  expect(probedUrls).toEqual([
     'https://node-a.example.com',
     'https://node-b.example.com',
   ])
@@ -344,8 +302,8 @@ test('pickFastestNode falls back to browser probing when the server probe misses
     serverProbe
   )
 
-  assert.equal(fastest, fastItem)
-  assert.deepEqual(probedUrls, [
+  expect(fastest).toBe(fastItem)
+  expect(probedUrls).toEqual([
     'https://node-a.example.com',
     'https://node-b.example.com',
   ])
@@ -368,7 +326,7 @@ test('fetchServerNodeProbe maps successful entries and skips errored or malforme
 
   const latencies = await fetchServerNodeProbe()
 
-  assert.deepEqual(latencies, {
+  expect(latencies).toEqual({
     'https://node-a.example.com': 15,
     'https://node-d.example.com': 60,
   })
@@ -377,7 +335,7 @@ test('fetchServerNodeProbe maps successful entries and skips errored or malforme
 test('fetchServerNodeProbe returns null when the response is not ok', async () => {
   installFetch(async () => new Response('', { status: 500 }))
 
-  assert.equal(await fetchServerNodeProbe(), null)
+  expect(await fetchServerNodeProbe()).toBe(null)
 })
 
 test('fetchServerNodeProbe returns null when no entry is usable', async () => {
@@ -389,7 +347,7 @@ test('fetchServerNodeProbe returns null when no entry is usable', async () => {
     return new Response(JSON.stringify(body), { status: 200 })
   })
 
-  assert.equal(await fetchServerNodeProbe(), null)
+  expect(await fetchServerNodeProbe()).toBe(null)
 })
 
 test('fetchServerNodeProbe returns null when the fetch fails', async () => {
@@ -397,5 +355,5 @@ test('fetchServerNodeProbe returns null when the fetch fails', async () => {
     throw new Error('network failure')
   })
 
-  assert.equal(await fetchServerNodeProbe(), null)
+  expect(await fetchServerNodeProbe()).toBe(null)
 })

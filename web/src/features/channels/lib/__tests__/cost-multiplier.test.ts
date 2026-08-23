@@ -16,8 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { describe, expect, test } from 'vitest'
 
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
@@ -31,22 +30,20 @@ describe('channel cost multiplier', () => {
   test('accepts the default value in both form and native input bounds', () => {
     const defaultValue = CHANNEL_FORM_DEFAULT_VALUES.cost_multiplier
 
-    assert.equal(
+    expect(
       channelFormSchema.safeParse({
         ...CHANNEL_FORM_DEFAULT_VALUES,
         name: 'Cost channel',
         models: 'gpt-5',
         key: 'test-key',
-      }).success,
-      true
-    )
-    assert.equal(defaultValue >= COST_MULTIPLIER_MIN, true)
-    assert.equal(defaultValue <= COST_MULTIPLIER_MAX, true)
-    assert.equal(
+      }).success
+    ).toBe(true)
+    expect(defaultValue >= COST_MULTIPLIER_MIN).toBe(true)
+    expect(defaultValue <= COST_MULTIPLIER_MAX).toBe(true)
+    expect(
       Number.isInteger(
         (defaultValue - COST_MULTIPLIER_MIN) / COST_MULTIPLIER_STEP
-      ),
-      true
-    )
+      )
+    ).toBe(true)
   })
 })

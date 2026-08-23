@@ -16,20 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { expect, test } from 'vitest'
 
 import { formatDistributionDate } from '../distribution-display'
 
 test('formats distribution dates for project interface language codes', () => {
-  assert.doesNotThrow(() =>
+  expect(() =>
     formatDistributionDate('2026-08-08T15:37:09+08:00', 'zhCN', 'medium')
-  )
-  assert.doesNotThrow(() =>
+  ).not.toThrow()
+  expect(() =>
     formatDistributionDate('2026-08-08T15:37:09+08:00', 'zhTW', 'medium')
-  )
-  assert.match(
-    formatDistributionDate('2026-08-08T15:37:09+08:00', 'zhCN', 'medium'),
-    /2026/
-  )
+  ).not.toThrow()
+  expect(
+    formatDistributionDate('2026-08-08T15:37:09+08:00', 'zhCN', 'medium')
+  ).toMatch(/2026/)
 })

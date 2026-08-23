@@ -16,8 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { afterEach, test } from 'node:test'
+import { afterEach, expect, test } from 'vitest'
 
 import type { AxiosAdapter, InternalAxiosRequestConfig } from 'axios'
 
@@ -52,8 +51,8 @@ test('app-center management uses the panel session request path', async () => {
     disableDuplicate: true,
   })
 
-  assert.equal(captured?.url, '/api/app-center/apps/7/releases')
-  assert.equal(captured?.headers.Authorization, undefined)
+  expect(captured?.url).toBe('/api/app-center/apps/7/releases')
+  expect(captured?.headers.Authorization).toBe(undefined)
 })
 
 test('skipRequestDedup keeps overlapping app-center requests separate', async () => {
@@ -85,7 +84,7 @@ test('skipRequestDedup keeps overlapping app-center requests separate', async ()
   releaseRequests()
   await Promise.all(requests)
 
-  assert.equal(captured.length, 2)
-  assert.equal(captured[0]?.url, '/api/app-center/apps/7/releases')
-  assert.equal(captured[1]?.url, '/api/app-center/apps/7/releases')
+  expect(captured.length).toBe(2)
+  expect(captured[0]?.url).toBe('/api/app-center/apps/7/releases')
+  expect(captured[1]?.url).toBe('/api/app-center/apps/7/releases')
 })

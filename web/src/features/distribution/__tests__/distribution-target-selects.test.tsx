@@ -16,33 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { after, test } from 'node:test'
-
-import { Window } from 'happy-dom'
-
-const domWindow = new Window()
-for (const key of [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'CustomEvent',
-  'MutationObserver',
-  'ResizeObserver',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-] as const) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
+import { expect, test } from 'vitest'
 
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
@@ -66,11 +40,11 @@ const { DistributionTargetSelects } =
 
 function keydown(element: Element, key: string) {
   element.dispatchEvent(
-    new domWindow.KeyboardEvent('keydown', {
+    new KeyboardEvent('keydown', {
       bubbles: true,
       cancelable: true,
       key,
-    }) as unknown as Event
+    })
   )
 }
 
@@ -84,21 +58,21 @@ async function selectWithKeyboard(
     keydown(dropdown, 'ArrowDown')
   })
 
-  assert.equal(dropdown.getAttribute('aria-expanded'), 'true')
+  expect(dropdown.getAttribute('aria-expanded')).toBe('true')
   const listboxID = dropdown.getAttribute('aria-controls')
-  assert.ok(listboxID)
+  expect(listboxID).not.toBeNull()
+  if (listboxID === null) return
   const listbox = document.querySelector<HTMLElement>(`#${listboxID}`)
-  assert.ok(listbox)
+  expect(listbox).not.toBeNull()
+  if (listbox === null) return
   const options = [...listbox.querySelectorAll<HTMLElement>('[role="option"]')]
-  assert.deepEqual(
-    options.map((option) => option.textContent),
-    expectedLabels
-  )
+  expect(options.map((option) => option.textContent)).toEqual(expectedLabels)
 
   const selectedOption = options.find(
     (option) => option.textContent === selectedLabel
   )
-  assert.ok(selectedOption)
+  expect(selectedOption).toBeDefined()
+  if (selectedOption === undefined) return
 
   await act(async () => {
     selectedOption.focus()
@@ -131,28 +105,26 @@ test('exposes valid targets and selects them by keyboard', async () => {
   })
 
   const dropdowns = container.querySelectorAll('[role="combobox"]')
-  assert.equal(dropdowns.length, 2)
-  assert.equal(dropdowns[0]?.getAttribute('aria-label'), 'Platform')
-  assert.equal(dropdowns[1]?.getAttribute('aria-label'), 'Architecture')
-  assert.match(dropdowns[0]?.textContent ?? '', /Windows/)
-  assert.match(dropdowns[1]?.textContent ?? '', /amd64/)
+  expect(dropdowns.length).toBe(2)
+  expect(dropdowns[0]?.getAttribute('aria-label')).toBe('Platform')
+  expect(dropdowns[1]?.getAttribute('aria-label')).toBe('Architecture')
+  expect(dropdowns[0]?.textContent ?? '').toMatch(/Windows/)
+  expect(dropdowns[1]?.textContent ?? '').toMatch(/amd64/)
 
   await selectWithKeyboard(
     dropdowns[0] as Element,
     ['Windows', 'Linux', 'macOS', 'Android'],
     'Linux'
   )
-  assert.equal(platform, 'linux')
+  expect(platform).toBe('linux')
 
   await selectWithKeyboard(
     dropdowns[1] as Element,
     ['amd64 (x86_64)', 'arm64 (AArch64)', '386 (x86)', 'ARM', 'Universal'],
     'arm64 (AArch64)'
   )
-  assert.equal(architecture, 'arm64')
+  expect(architecture).toBe('arm64')
 
   await act(async () => root.unmount())
   container.remove()
 })
-
-after(() => domWindow.close())

@@ -16,8 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { describe, expect, test } from 'vitest'
 
 import type { TFunction } from 'i18next'
 
@@ -63,19 +62,19 @@ describe('subscription plan allowed_groups', () => {
   describe('planToFormValues', () => {
     test('turns an empty allowed_groups string into an empty array', () => {
       const values = planToFormValues(createPlan({ allowed_groups: '' }))
-      assert.deepEqual(values.allowed_groups, [])
+      expect(values.allowed_groups).toEqual([])
     })
 
     test('turns a single allowed group into a one-element array', () => {
       const values = planToFormValues(createPlan({ allowed_groups: 'vip' }))
-      assert.deepEqual(values.allowed_groups, ['vip'])
+      expect(values.allowed_groups).toEqual(['vip'])
     })
 
     test('splits, trims and drops empty entries from a group list', () => {
       const values = planToFormValues(
         createPlan({ allowed_groups: 'vip, default,' })
       )
-      assert.deepEqual(values.allowed_groups, ['vip', 'default'])
+      expect(values.allowed_groups).toEqual(['vip', 'default'])
     })
   })
 
@@ -84,21 +83,21 @@ describe('subscription plan allowed_groups', () => {
       const payload = formValuesToPlanPayload(
         createFormValues({ allowed_groups: [] })
       )
-      assert.equal(payload.plan.allowed_groups, '')
+      expect(payload.plan.allowed_groups).toBe('')
     })
 
     test('joins a single allowed group', () => {
       const payload = formValuesToPlanPayload(
         createFormValues({ allowed_groups: ['vip'] })
       )
-      assert.equal(payload.plan.allowed_groups, 'vip')
+      expect(payload.plan.allowed_groups).toBe('vip')
     })
 
     test('joins multiple allowed groups with commas', () => {
       const payload = formValuesToPlanPayload(
         createFormValues({ allowed_groups: ['vip', 'default'] })
       )
-      assert.equal(payload.plan.allowed_groups, 'vip,default')
+      expect(payload.plan.allowed_groups).toBe('vip,default')
     })
   })
 
@@ -107,14 +106,14 @@ describe('subscription plan allowed_groups', () => {
       const values = createFormValues({ title: 'Test Plan' })
       delete values.allowed_groups
       const result = getPlanFormSchema(translate).safeParse(values)
-      assert.equal(result.success, true)
+      expect(result.success).toBe(true)
     })
 
     test('accepts an allowed_groups array of group names', () => {
       const result = getPlanFormSchema(translate).safeParse(
         createFormValues({ title: 'Test Plan', allowed_groups: ['vip'] })
       )
-      assert.equal(result.success, true)
+      expect(result.success).toBe(true)
     })
   })
 })
