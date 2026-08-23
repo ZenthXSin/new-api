@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/http"
@@ -211,8 +212,9 @@ func ProbeApiNodes(c *gin.Context) {
 		go func(index int, nodeURL string) {
 			defer wg.Done()
 			start := time.Now()
-			resp, err := client.Head(nodeURL)
+			resp, err := client.Get(nodeURL)
 			if resp != nil {
+				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 				resp.Body.Close()
 			}
 			result := apiNodeProbeResult{URL: nodeURL}
