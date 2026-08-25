@@ -50,7 +50,7 @@ function OverviewCard({
   icon: React.ReactNode
   title: string
   value: string
-  hint: string
+  hint: React.ReactNode
 }) {
   return (
     <div className='border-border bg-card rounded-lg border p-4'>
@@ -108,7 +108,20 @@ export function ProfitSummaryCards({
         icon={<PieChart className='size-4' aria-hidden='true' />}
         title={t('Gross Profit')}
         value={formatLogQuota(overview.gross_profit_quota)}
-        hint={`${t('Margin')} ${percent(overview.margin)}`}
+        hint={
+          <>
+            <div>{`${t('Margin')} ${percent(overview.margin)}`}</div>
+            <div className='mt-0.5'>
+              {t(
+                'Includes manual adjustments: income {{income}}, expense {{expense}}',
+                {
+                  income: money(overview.manual_income_money),
+                  expense: money(overview.manual_expense_money),
+                }
+              )}
+            </div>
+          </>
+        }
       />
       <OverviewCard
         icon={<ReceiptText className='size-4' aria-hidden='true' />}

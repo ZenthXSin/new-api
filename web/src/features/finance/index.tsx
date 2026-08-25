@@ -21,6 +21,7 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 import {
@@ -29,6 +30,9 @@ import {
   type FinanceOverview,
   type FinanceTrends,
 } from './api'
+import { BillsTab } from './components/bills-tab'
+import { EntriesTab } from './components/entries-tab'
+import { FundsLogTab } from './components/funds-log-tab'
 import { PaidMoneyTrendChart } from './components/paid-money-trend-chart'
 import { ProfitSummaryCards } from './components/profit-summary-cards'
 import { RevenueTrendChart } from './components/revenue-trend-chart'
@@ -42,6 +46,13 @@ const RANGE_OPTIONS = [
   { days: 90, labelKey: 'Last 90 Days' },
 ] as const
 
+const TAB_OPTIONS = [
+  { value: 'overview', labelKey: 'Overview' },
+  { value: 'bills', labelKey: 'Bills' },
+  { value: 'funds-log', labelKey: 'Funds Log' },
+  { value: 'entries', labelKey: 'Manual Entries' },
+] as const
+
 function timeRange(days: number): { start: number; end: number } {
   const end = Math.floor(Date.now() / 1000)
   return { start: end - days * DAY, end }
@@ -49,6 +60,7 @@ function timeRange(days: number): { start: number; end: number } {
 
 export function Finance() {
   const { t } = useTranslation()
+  const [activeTab, setActiveTab] = useState('overview')
   const [days, setDays] = useState<number>(30)
   const { start, end } = useMemo(() => timeRange(days), [days])
 
@@ -70,46 +82,84 @@ export function Finance() {
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('Finance Overview')}</SectionPageLayout.Title>
       <SectionPageLayout.Actions>
-        <ToggleGroup
-          value={[
-            RANGE_OPTIONS.find((item) => item.days === days)?.labelKey ??
-              'Last 30 Days',
-          ]}
-          onValueChange={(value) => {
-            const selected = value.at(-1)
-            const option = RANGE_OPTIONS.find(
-              (item) => item.labelKey === selected
-            )
-            if (option) setDays(option.days)
-          }}
-          aria-label={t('Finance Overview')}
-          variant='outline'
-          size='sm'
-        >
-          {RANGE_OPTIONS.map((option) => (
-            <ToggleGroupItem key={option.days} value={option.labelKey}>
-              {t(option.labelKey)}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
+        {activeTab === 'overview' && (
+          <ToggleGroup
+            value={[
+              RANGE_OPTIONS.find((item) => item.days === days)?.labelKey ??
+                'Last 30 Days',
+            ]}
+            onValueChange={(value) => {
+              const selected = value.at(-1)
+              const option = RANGE_OPTIONS.find(
+                (item) => item.labelKey === selected
+              )
+              if (option) setDays(option.days)
+            }}
+            aria-label={t('Finance Overview')}
+            variant='outline'
+            size='sm'
+          >
+            {RANGE_OPTIONS.map((option) => (
+              <ToggleGroupItem key={option.days} value={option.labelKey}>
+                {t(option.labelKey)}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        )}
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
-        <ProfitSummaryCards
-          overview={overview}
-          loading={loading}
-          error={error}
-        />
-        <RevenueTrendChart
-          data={trends?.cost}
-          loading={loading}
-          error={error}
-        />
-        <UserGrowthChart data={trends?.users} loading={loading} error={error} />
-        <PaidMoneyTrendChart
-          data={trends?.users}
-          loading={loading}
-          error={error}
-        />
+        <div className='flex h-full min-h-0 flex-col gap-3'>
+          <Tabs
+            value={activeTab}
+            onValueChange={setActiveTab}
+            className='min-h-0 flex-1'
+          >
+            <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'>
+              {TAB_OPTIONS.map((option) => (
+                <TabsTrigger key={option.value} value={option.value}>
+                  {t(option.labelKey)}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            <TabsContent
+              value='overview'
+              keepMounted
+              className='min-h-0 overflow-y-auto'
+            >
+              <div className='space-y-3'>
+                <ProfitSummaryCards
+                  overview={overview}
+                  loading={loading}
+                  error={error}
+                />
+                <RevenueTrendChart
+                  data={trends?.cost}
+                  loading={loading}
+                  error={error}
+                />
+                <UserGrowthChart
+                  data={trends?.users}
+                  loading={loading}
+                  error={error}
+                />
+                <PaidMoneyTrendChart
+                  data={trends?.users}
+                  loading={loading}
+                  error={error}
+                />
+              </div>
+            </TabsContent>
+            <TabsContent value='bills' keepMounted className='min-h-0'>
+              <BillsTab />
+            </TabsContent>
+            <TabsContent value='funds-log' keepMounted className='min-h-0'>
+              <FundsLogTab />
+            </TabsContent>
+            <TabsContent value='entries' keepMounted className='min-h-0'>
+              <EntriesTab />
+            </TabsContent>
+          </Tabs>
+        </div>
       </SectionPageLayout.Content>
     </SectionPageLayout>
   )

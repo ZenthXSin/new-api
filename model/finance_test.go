@@ -2,12 +2,15 @@ package model
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func insertFinanceLog(t *testing.T, ts int64, logType int, quota int, costQuota int, exclude bool) {
@@ -125,4 +128,337 @@ func TestGetUserGrowthByDayMergesNewAndPaidUsers(t *testing.T) {
 	assert.Equal(t, int64(1), users[2].NewUsers)
 	assert.Equal(t, int64(1), users[2].PaidUsers)
 	assert.InDelta(t, 25, users[2].PaidMoney, 0.0001)
+}
+
+// ---------------------------------------------------------------------------
+// 手动收支条目 / 合并账单 / 资金日志(独立内存 SQLite,临时接管 DB/LOG_DB)
+// ---------------------------------------------------------------------------
+
+// financeTestDB 为账单/资金日志/收支条目测试创建独立的内存 SQLite 并迁移所需表,
+// 临时接管 model.DB/LOG_DB,测试结束后恢复。
+func financeTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	previousDB, previousLogDB := DB, LOG_DB
+	previousMainType, previousLogType := common.MainDatabaseType(), common.LogDatabaseType()
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&User{}, &TopUp{}, &SubscriptionOrder{}, &Log{}, &FinanceEntry{}))
+	DB, LOG_DB = db, db
+	t.Cleanup(func() {
+		DB, LOG_DB = previousDB, previousLogDB
+		common.SetDatabaseTypes(previousMainType, previousLogType)
+		sqlDB, err := db.DB()
+		if err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	return db
+}
+
+// insertFinanceEntryAt 创建手动收支条目并把 created_at 固定为指定时间(BeforeCreate 强制为 now)。
+func insertFinanceEntryAt(t *testing.T, entry *FinanceEntry, createdAt int64) {
+	t.Helper()
+	require.NoError(t, CreateFinanceEntry(entry))
+	require.NoError(t, DB.Model(&FinanceEntry{}).Where("id = ?", entry.Id).Update("created_at", createdAt).Error)
+}
+
+func TestFinanceEntryCRUD(t *testing.T) {
+	financeTestDB(t)
+	before := time.Now().Unix()
+
+	income := &FinanceEntry{EntryType: "income", Category: "赞助", Amount: 100.5, Note: "赞助收入", CreatedBy: 1}
+	require.NoError(t, CreateFinanceEntry(income))
+	require.Positive(t, income.Id)
+	require.GreaterOrEqual(t, income.CreatedAt, before)
+	assert.Equal(t, income.CreatedAt, income.UpdatedAt)
+	incomeID := income.Id
+
+	expense := &FinanceEntry{EntryType: "expense", Category: "服务器", Amount: 30.25, Note: "服务器费用", CreatedBy: 2}
+	require.NoError(t, CreateFinanceEntry(expense))
+	require.Positive(t, expense.Id)
+	// 错开 created_at 以便验证排序与时间过滤
+	require.NoError(t, DB.Model(&FinanceEntry{}).Where("id = ?", expense.Id).Update("created_at", income.CreatedAt-100).Error)
+
+	// 列表:created_at 倒序(income 更新)
+	entries, total, err := ListFinanceEntries(1, 10, "", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total)
+	require.Len(t, entries, 2)
+	assert.Equal(t, income.Id, entries[0].Id)
+	assert.Equal(t, expense.Id, entries[1].Id)
+
+	// 类型筛选
+	entries, total, err = ListFinanceEntries(1, 10, "income", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, entries, 1)
+	assert.Equal(t, income.Id, entries[0].Id)
+
+	// 分页
+	entries, total, err = ListFinanceEntries(1, 1, "", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total)
+	require.Len(t, entries, 1)
+	assert.Equal(t, income.Id, entries[0].Id)
+	entries, total, err = ListFinanceEntries(2, 1, "", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total)
+	require.Len(t, entries, 1)
+	assert.Equal(t, expense.Id, entries[0].Id)
+
+	// 时间范围(闭区间)
+	entries, total, err = ListFinanceEntries(1, 10, "", income.CreatedAt-100, income.CreatedAt-100)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, entries, 1)
+	assert.Equal(t, expense.Id, entries[0].Id)
+
+	// 更新:金额/备注生效,updated_at 刷新
+	income.Amount = 200
+	income.Note = "赞助收入(更新)"
+	require.NoError(t, UpdateFinanceEntry(income.Id, income))
+	var reloaded FinanceEntry
+	require.NoError(t, DB.First(&reloaded, income.Id).Error)
+	assert.Equal(t, 200.0, reloaded.Amount)
+	assert.Equal(t, "赞助收入(更新)", reloaded.Note)
+	assert.GreaterOrEqual(t, reloaded.UpdatedAt, reloaded.CreatedAt)
+
+	// 更新不存在的 id / 非法 id(UpdateFinanceEntry 会把 entry.Id 置为目标 id,
+	// 因此用 incomeID 继续后续断言)
+	require.ErrorIs(t, UpdateFinanceEntry(999999, income), ErrFinanceEntryNotFound)
+	require.ErrorIs(t, UpdateFinanceEntry(0, income), ErrInvalidFinanceEntryId)
+
+	// 删除
+	require.NoError(t, DeleteFinanceEntry(expense.Id))
+	entries, total, err = ListFinanceEntries(1, 10, "", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, entries, 1)
+	assert.Equal(t, incomeID, entries[0].Id)
+	// 重复删除 / 非法 id
+	require.ErrorIs(t, DeleteFinanceEntry(expense.Id), ErrFinanceEntryNotFound)
+	require.ErrorIs(t, DeleteFinanceEntry(0), ErrInvalidFinanceEntryId)
+}
+
+func TestGetManualAdjustmentSumsAndConverts(t *testing.T) {
+	financeTestDB(t)
+	base := time.Date(2026, 8, 25, 12, 0, 0, 0, time.Local).Unix()
+
+	insertFinanceEntryAt(t, &FinanceEntry{EntryType: "income", Amount: 100.5, Note: "窗口内收入"}, base-2*86400)
+	insertFinanceEntryAt(t, &FinanceEntry{EntryType: "expense", Amount: 50.25, Note: "窗口内支出"}, base-2*86400)
+	insertFinanceEntryAt(t, &FinanceEntry{EntryType: "income", Amount: 200, Note: "窗口内收入2"}, base-86400)
+	insertFinanceEntryAt(t, &FinanceEntry{EntryType: "expense", Amount: 30, Note: "窗口外(早)"}, base-3*86400)
+	insertFinanceEntryAt(t, &FinanceEntry{EntryType: "income", Amount: 500, Note: "窗口外(晚)"}, base)
+
+	// 窗口 [base-2d, base-1d]:收入 300.5、支出 50.25
+	incomeMoney, expenseMoney, incomeQuota, expenseQuota, err := GetManualAdjustment(base-2*86400, base-86400)
+	require.NoError(t, err)
+	assert.InDelta(t, 300.5, incomeMoney, 0.0001)
+	assert.InDelta(t, 50.25, expenseMoney, 0.0001)
+	assert.Equal(t, int64(150250000), incomeQuota)
+	assert.Equal(t, int64(25125000), expenseQuota)
+
+	// 全量:收入 800.5、支出 80.25
+	incomeMoney, expenseMoney, incomeQuota, expenseQuota, err = GetManualAdjustment(0, 0)
+	require.NoError(t, err)
+	assert.InDelta(t, 800.5, incomeMoney, 0.0001)
+	assert.InDelta(t, 80.25, expenseMoney, 0.0001)
+	assert.Equal(t, int64(400250000), incomeQuota)
+	assert.Equal(t, int64(40125000), expenseQuota)
+}
+
+func TestGetManualAdjustmentByDayBucketsLocalDates(t *testing.T) {
+	financeTestDB(t)
+	base := time.Date(2026, 8, 25, 12, 0, 0, 0, time.Local).Unix()
+
+	insertFinanceEntryAt(t, &FinanceEntry{EntryType: "income", Amount: 100.5, Note: "d-2"}, base-2*86400)
+	insertFinanceEntryAt(t, &FinanceEntry{EntryType: "expense", Amount: 50.25, Note: "d-1"}, base-86400)
+	insertFinanceEntryAt(t, &FinanceEntry{EntryType: "income", Amount: 200, Note: "d-1"}, base-86400)
+
+	byDay, err := GetManualAdjustmentByDay(base-2*86400, base)
+	require.NoError(t, err)
+	require.Len(t, byDay, 2)
+
+	dayMinus2 := time.Unix(base-2*86400, 0).In(time.Local).Format("2006-01-02")
+	adj := byDay[dayMinus2]
+	assert.InDelta(t, 100.5, adj.IncomeMoney, 0.0001)
+	assert.Zero(t, adj.ExpenseMoney)
+	assert.Equal(t, int64(50250000), adj.IncomeQuota)
+	assert.Zero(t, adj.ExpenseQuota)
+
+	dayMinus1 := time.Unix(base-86400, 0).In(time.Local).Format("2006-01-02")
+	adj = byDay[dayMinus1]
+	assert.InDelta(t, 200, adj.IncomeMoney, 0.0001)
+	assert.InDelta(t, 50.25, adj.ExpenseMoney, 0.0001)
+	assert.Equal(t, int64(100000000), adj.IncomeQuota)
+	assert.Equal(t, int64(25125000), adj.ExpenseQuota)
+}
+
+func TestGetFinanceBillsMergesAllSources(t *testing.T) {
+	financeTestDB(t)
+	base := time.Date(2026, 8, 25, 12, 0, 0, 0, time.Local).Unix()
+
+	u1 := &User{Username: "bill-u1", AffCode: "bill-aff-u1"}
+	require.NoError(t, DB.Create(u1).Error)
+	u2 := &User{Username: "bill-u2", AffCode: "bill-aff-u2"}
+	require.NoError(t, DB.Create(u2).Error)
+
+	// a. 充值:成功(payment_method 作为 note)+ 未成功(pending 不计入)
+	require.NoError(t, DB.Create(&TopUp{UserId: u1.Id, Money: 10.5, TradeNo: "bill-topup-1", PaymentMethod: "stripe", Status: common.TopUpStatusSuccess, CreateTime: base - 5000, CompleteTime: base - 5000}).Error)
+	require.NoError(t, DB.Create(&TopUp{UserId: u2.Id, Money: 99, TradeNo: "bill-topup-pending", PaymentMethod: "epay", Status: common.TopUpStatusPending, CreateTime: base - 4000, CompleteTime: base - 4000}).Error)
+
+	// b. 退款日志:quota 500000 → -1.00
+	require.NoError(t, LOG_DB.Create(&Log{CreatedAt: base - 4000, Type: LogTypeRefund, Username: "bill-u1", Quota: 500000, Content: "退款 1 元"}).Error)
+
+	// c. 订阅购买
+	require.NoError(t, DB.Create(&SubscriptionOrder{UserId: u2.Id, PlanId: 1, Money: 20, TradeNo: "bill-sub-1", Status: common.TopUpStatusSuccess, CreateTime: base - 3000, CompleteTime: base - 3000}).Error)
+
+	// d. 邀请分红(含"分红")与普通充值日志(不含"分红",不计入账单)
+	require.NoError(t, LOG_DB.Create(&Log{CreatedAt: base - 2000, Type: LogTypeTopup, Username: "bill-u1", Quota: 250000, Content: "邀请的用户(ID:2)充值 50,按倍率 0.1 获得分红 25"}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{CreatedAt: base - 1000, Type: LogTypeTopup, Username: "bill-u2", Quota: 100000, Content: "充值成功获得额度"}).Error)
+
+	// e. 手动条目:income @ base-1500,expense @ base-500
+	insertFinanceEntryAt(t, &FinanceEntry{EntryType: "income", Category: "赞助", Amount: 100, Note: "赞助收入", CreatedBy: 1}, base-1500)
+	insertFinanceEntryAt(t, &FinanceEntry{EntryType: "expense", Category: "服务器", Amount: 30.5, Note: "服务器费用", CreatedBy: 1}, base-500)
+
+	// 全部:按时间倒序 expense(-30.5) → income(+100) → affiliate(+0.5) → subscription(+20) → refund(-1) → topup(+10.5)
+	bills, total, err := GetFinanceBills(1, 10, "", "", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(6), total)
+	require.Len(t, bills, 6)
+
+	assert.Equal(t, "expense", bills[0].Type)
+	assert.Equal(t, "manual", bills[0].Source)
+	assert.InDelta(t, -30.5, bills[0].AmountMoney, 0.0001)
+	assert.Equal(t, "服务器费用", bills[0].Note)
+
+	assert.Equal(t, "income", bills[1].Type)
+	assert.InDelta(t, 100, bills[1].AmountMoney, 0.0001)
+
+	assert.Equal(t, "affiliate", bills[2].Type)
+	assert.Equal(t, "bill-u1", bills[2].Username)
+	assert.InDelta(t, 0.5, bills[2].AmountMoney, 0.0001)
+	assert.Contains(t, bills[2].Note, "分红")
+
+	assert.Equal(t, "subscription", bills[3].Type)
+	assert.Equal(t, "bill-u2", bills[3].Username)
+	assert.InDelta(t, 20, bills[3].AmountMoney, 0.0001)
+
+	assert.Equal(t, "refund", bills[4].Type)
+	assert.Equal(t, "bill-u1", bills[4].Username)
+	assert.InDelta(t, -1.0, bills[4].AmountMoney, 0.0001)
+
+	assert.Equal(t, "topup", bills[5].Type)
+	assert.Equal(t, "bill-u1", bills[5].Username)
+	assert.InDelta(t, 10.5, bills[5].AmountMoney, 0.0001)
+	assert.Equal(t, "stripe", bills[5].Note)
+
+	// 类型筛选
+	bills, total, err = GetFinanceBills(1, 10, "topup", "", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	assert.Equal(t, "topup", bills[0].Type)
+	bills, total, err = GetFinanceBills(1, 10, "affiliate", "", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	assert.Equal(t, "affiliate", bills[0].Type)
+
+	// 用户名筛选(充值与订阅走 users 关联,退款/分红走 logs.username,手动条目无用户名)
+	bills, total, err = GetFinanceBills(1, 10, "", "bill-u1", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(3), total)
+	assert.Equal(t, "affiliate", bills[0].Type)
+	assert.Equal(t, "refund", bills[1].Type)
+	assert.Equal(t, "topup", bills[2].Type)
+	bills, total, err = GetFinanceBills(1, 10, "", "bill-u2", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	assert.Equal(t, "subscription", bills[0].Type)
+
+	// 分页
+	bills, total, err = GetFinanceBills(1, 2, "", "", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(6), total)
+	require.Len(t, bills, 2)
+	assert.Equal(t, "expense", bills[0].Type)
+	assert.Equal(t, "income", bills[1].Type)
+	bills, total, err = GetFinanceBills(2, 2, "", "", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(6), total)
+	require.Len(t, bills, 2)
+	assert.Equal(t, "affiliate", bills[0].Type)
+	assert.Equal(t, "subscription", bills[1].Type)
+	bills, total, err = GetFinanceBills(4, 2, "", "", 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(6), total)
+	require.Empty(t, bills)
+
+	// 时间范围(闭区间)
+	bills, total, err = GetFinanceBills(1, 10, "", "", base-4000, base-3000)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total)
+	assert.Equal(t, "subscription", bills[0].Type)
+	assert.Equal(t, "refund", bills[1].Type)
+}
+
+func TestGetFundsLogDeltasAndFilters(t *testing.T) {
+	financeTestDB(t)
+	base := time.Date(2026, 8, 25, 12, 0, 0, 0, time.Local).Unix()
+
+	require.NoError(t, LOG_DB.Create(&Log{CreatedAt: base - 5000, Type: LogTypeTopup, Username: "fund-u1", Quota: 500000, Content: "充值 100 元"}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{CreatedAt: base - 4000, Type: LogTypeConsume, Username: "fund-u1", Quota: 3000, ModelName: "gpt-4o", Content: "消耗额度 3000"}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{CreatedAt: base - 3000, Type: LogTypeRefund, Username: "fund-u2", Quota: 2000, Content: "退款 2000"}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{CreatedAt: base - 2000, Type: LogTypeConsume, Username: "fund-u2", Quota: 5000, Content: "消耗额度 5000"}).Error)
+	// 非资金类型:登录/管理日志不计入
+	require.NoError(t, LOG_DB.Create(&Log{CreatedAt: base - 1000, Type: LogTypeLogin, Username: "fund-u1", Quota: 1, Content: "登录"}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{CreatedAt: base - 500, Type: LogTypeManage, Username: "fund-u1", Quota: 1, Content: "管理操作"}).Error)
+
+	items, total, err := GetFundsLog(1, 10, "", 0, 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(4), total)
+	require.Len(t, items, 4)
+	// 倒序:consume(u2,-5000) → refund(u2,+2000) → consume(u1,-3000,描述取 model_name) → topup(u1,+500000)
+	assert.Equal(t, "consume", items[0].Type)
+	assert.Equal(t, int64(-5000), items[0].QuotaDelta)
+	assert.Equal(t, "消耗额度 5000", items[0].Description)
+	assert.Equal(t, "refund", items[1].Type)
+	assert.Equal(t, int64(2000), items[1].QuotaDelta)
+	assert.Equal(t, "consume", items[2].Type)
+	assert.Equal(t, int64(-3000), items[2].QuotaDelta)
+	assert.Equal(t, "gpt-4o", items[2].Description)
+	assert.Equal(t, "topup", items[3].Type)
+	assert.Equal(t, int64(500000), items[3].QuotaDelta)
+	assert.Equal(t, "充值 100 元", items[3].Description)
+
+	// 用户名筛选
+	items, total, err = GetFundsLog(1, 10, "fund-u1", 0, 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total)
+	assert.Equal(t, "fund-u1", items[0].Username)
+	assert.Equal(t, "fund-u1", items[1].Username)
+
+	// 类型筛选
+	items, total, err = GetFundsLog(1, 10, "", LogTypeConsume, 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total)
+	items, total, err = GetFundsLog(1, 10, "", LogTypeRefund, 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	assert.Equal(t, "refund", items[0].Type)
+
+	// 时间范围
+	items, total, err = GetFundsLog(1, 10, "", 0, base-4000, base-3000)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total)
+	assert.Equal(t, "refund", items[0].Type)
+	assert.Equal(t, "consume", items[1].Type)
+
+	// 分页
+	items, total, err = GetFundsLog(2, 3, "", 0, 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(4), total)
+	require.Len(t, items, 1)
+	assert.Equal(t, "topup", items[0].Type)
 }

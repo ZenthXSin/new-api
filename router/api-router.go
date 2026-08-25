@@ -337,6 +337,13 @@ func SetApiRouter(router *gin.Engine) {
 		financeRoute := apiRouter.Group("/finance")
 		financeRoute.GET("/overview", middleware.AdminAuth(), controller.GetFinanceOverview)
 		financeRoute.GET("/trends", middleware.AdminAuth(), controller.GetFinanceTrends)
+		financeRoute.GET("/bills", middleware.AdminAuth(), controller.GetFinanceBills)
+		financeRoute.GET("/bills/export", middleware.AdminAuth(), controller.ExportFinanceBills)
+		financeRoute.GET("/funds-log", middleware.AdminAuth(), controller.GetFinanceFundsLog)
+		financeRoute.GET("/entries", middleware.AdminAuth(), controller.ListFinanceEntries)
+		financeRoute.POST("/entries", middleware.AdminAuth(), controller.CreateFinanceEntry)
+		financeRoute.PUT("/entries/:id", middleware.AdminAuth(), controller.UpdateFinanceEntry)
+		financeRoute.DELETE("/entries/:id", middleware.AdminAuth(), controller.DeleteFinanceEntry)
 
 		ipguardRoute := apiRouter.Group("/ipguard")
 		ipguardRoute.Use(middleware.RootAuth())

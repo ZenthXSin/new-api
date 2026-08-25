@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+import dayjs from '@/lib/dayjs'
 
 export interface ApiResponse<T = unknown> {
   success: boolean
@@ -35,6 +36,10 @@ export type FinanceOverview = {
   paid_users_period: number
   paid_money_total: number
   paid_money_period: number
+  manual_income_money: number
+  manual_expense_money: number
+  manual_income_quota: number
+  manual_expense_quota: number
 }
 
 export type CostTrendPoint = {
@@ -84,4 +89,186 @@ export async function getFinanceTrends(
     },
   })
   return res.data.data
+}
+
+// ============================================================================
+// Finance Bills
+// ============================================================================
+
+export type FinanceBillType =
+  | 'topup'
+  | 'refund'
+  | 'subscription'
+  | 'affiliate'
+  | 'income'
+  | 'expense'
+
+export type FinanceBillItem = {
+  time: number
+  type: FinanceBillType
+  username: string
+  amount_money: number
+  note: string
+  source: string
+}
+
+export type FinanceBillsResponse = {
+  items: FinanceBillItem[]
+  total: number
+  page: number
+  size: number
+}
+
+export type FinanceBillsParams = {
+  page: number
+  size: number
+  type?: FinanceBillType
+  username?: string
+  start?: number
+  end?: number
+}
+
+export type FinanceBillsExportParams = {
+  type?: FinanceBillType
+  username?: string
+  start?: number
+  end?: number
+}
+
+export async function getFinanceBills(
+  params: FinanceBillsParams
+): Promise<FinanceBillsResponse> {
+  const res = await api.get<ApiResponse<FinanceBillsResponse>>(
+    '/api/finance/bills',
+    { params }
+  )
+  return res.data.data
+}
+
+export async function exportFinanceBills(
+  params: FinanceBillsExportParams = {}
+): Promise<void> {
+  const res = await api.get<Blob>('/api/finance/bills/export', {
+    params,
+    responseType: 'blob',
+  })
+  const url = URL.createObjectURL(res.data)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `finance-bills-${dayjs().format('YYYYMMDD-HHmmss')}.csv`
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
+// ============================================================================
+// Funds Log
+// ============================================================================
+
+export type FundsLogType = 'topup' | 'consume' | 'refund'
+
+export type FundsLogItem = {
+  time: number
+  username: string
+  type: FundsLogType
+  quota_delta: number
+  description: string
+}
+
+export type FundsLogResponse = {
+  items: FundsLogItem[]
+  total: number
+  page: number
+  size: number
+}
+
+export type FundsLogParams = {
+  page: number
+  size: number
+  username?: string
+  type?: FundsLogType
+  start?: number
+  end?: number
+}
+
+export async function getFinanceFundsLog(
+  params: FundsLogParams
+): Promise<FundsLogResponse> {
+  const res = await api.get<ApiResponse<FundsLogResponse>>(
+    '/api/finance/funds-log',
+    { params }
+  )
+  return res.data.data
+}
+
+// ============================================================================
+// Manual Entries
+// ============================================================================
+
+export type FinanceEntryType = 'income' | 'expense'
+
+export type FinanceEntryItem = {
+  id: number
+  entry_type: FinanceEntryType
+  category: string
+  amount: number
+  note: string
+  created_by: number
+  created_at: number
+}
+
+export type FinanceEntryInput = {
+  entry_type: FinanceEntryType
+  category: string
+  amount: number
+  note: string
+}
+
+export type FinanceEntriesResponse = {
+  items: FinanceEntryItem[]
+  total: number
+  page: number
+  size: number
+}
+
+export type FinanceEntriesParams = {
+  page: number
+  size: number
+  entry_type?: FinanceEntryType
+  start?: number
+  end?: number
+}
+
+export async function getFinanceEntries(
+  params: FinanceEntriesParams
+): Promise<FinanceEntriesResponse> {
+  const res = await api.get<ApiResponse<FinanceEntriesResponse>>(
+    '/api/finance/entries',
+    { params }
+  )
+  return res.data.data
+}
+
+export async function createFinanceEntry(
+  input: FinanceEntryInput
+): Promise<FinanceEntryItem> {
+  const res = await api.post<ApiResponse<FinanceEntryItem>>(
+    '/api/finance/entries',
+    input
+  )
+  return res.data.data
+}
+
+export async function updateFinanceEntry(
+  id: number,
+  input: FinanceEntryInput
+): Promise<FinanceEntryItem> {
+  const res = await api.put<ApiResponse<FinanceEntryItem>>(
+    `/api/finance/entries/${id}`,
+    input
+  )
+  return res.data.data
+}
+
+export async function deleteFinanceEntry(id: number): Promise<void> {
+  await api.delete(`/api/finance/entries/${id}`)
 }
