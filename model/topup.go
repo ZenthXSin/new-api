@@ -34,12 +34,13 @@ type PaymentTransaction struct {
 }
 
 // GrantTopUpAffiliateReward 按充值分红倍率给被邀请人的邀请人发放分红:
-// 被邀请人单次充值成功所得额度 × common.TopUpAffiliateRatio,直接进入
-// 邀请人主余额。必须在充值成功事务内调用(幂等:每个订单只在
-// pending→success 状态切换时执行一次),返回 (邀请人ID, 分红额度),
-// 调用方应在事务提交后调用 recordTopUpAffiliateLog 记录审计日志。
-// 分红失败不阻断充值本身,仅记 SysError 审计;倍率为 0、被邀请人无
-// 邀请人或分红额度为 0 时返回 (0, 0)。
+// 被邀请人单次充值成功所得额度 × common.TopUpAffiliateRatio,分红计入
+// 邀请人推荐计划余额(aff_quota)与累计收益(aff_history),不直接进主余额,
+// 邀请人可在钱包页「推荐计划」转入主余额。必须在充值成功事务内调用
+// (幂等:每个订单只在 pending→success 状态切换时执行一次),返回
+// (邀请人ID, 分红额度),调用方应在事务提交后调用 recordTopUpAffiliateLog
+// 记录审计日志。分红失败不阻断充值本身,仅记 SysError 审计;倍率为 0、
+// 被邀请人无邀请人或分红额度为 0 时返回 (0, 0)。
 func GrantTopUpAffiliateReward(tx *gorm.DB, userId int, quotaToAdd int) (int, int) {
 	if common.TopUpAffiliateRatio <= 0 {
 		return 0, 0
@@ -58,9 +59,15 @@ func GrantTopUpAffiliateReward(tx *gorm.DB, userId int, quotaToAdd int) (int, in
 	if reward <= 0 {
 		return 0, 0
 	}
-	result := tx.Model(&User{}).Where("id = ?", payer.InviterId).Update("quota", gorm.Expr("quota + ?", reward))
+	// 分红计入邀请体系(推荐计划余额与累计收益),不直接进主余额;
+	// 邀请人可在钱包页「推荐计划」将 aff_quota 转入主余额。
+	result := tx.Model(&User{}).Where("id = ?", payer.InviterId).
+		Updates(map[string]any{
+			"aff_quota":   gorm.Expr("aff_quota + ?", reward),
+			"aff_history": gorm.Expr("aff_history + ?", reward),
+		})
 	if result.Error != nil || result.RowsAffected != 1 {
-		common.SysError(fmt.Sprintf("grantTopUpAffiliateReward: 邀请人额度更新失败 inviter_id=%d error=%v rows_affected=%d", payer.InviterId, result.Error, result.RowsAffected))
+		common.SysError(fmt.Sprintf("grantTopUpAffiliateReward: 邀请人分红入账失败 inviter_id=%d error=%v rows_affected=%d", payer.InviterId, result.Error, result.RowsAffected))
 		return 0, 0
 	}
 	return payer.InviterId, reward

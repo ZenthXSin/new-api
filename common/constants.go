@@ -131,7 +131,8 @@ var QuotaRemindThreshold = 1000
 var PreConsumedQuota = 500
 
 // TopUpAffiliateRatio 充值分红倍率:被邀请人单次充值成功时,邀请人按其充值
-// 所得额度的该倍率获得分红(直接进入邀请人主余额)。0 表示关闭。
+// 所得额度的该倍率获得分红(计入推荐计划余额 aff_quota,可转入主余额)。
+// 0 表示关闭。
 var TopUpAffiliateRatio = 0.0
 
 var RetryTimes = 0

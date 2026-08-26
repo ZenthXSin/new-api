@@ -79,7 +79,9 @@ export function AffiliateRewardsCard({
               )}
             </p>
             <p className='text-muted-foreground line-clamp-1 text-xs'>
-              被邀请人充值时，你还能按其充值所得额度按倍率获得分红，直接到账主余额。
+              {t(
+                "Invitees' top-ups earn you a share by ratio; rewards are credited to your referral balance and can be transferred to your balance anytime."
+              )}
             </p>
           </div>
         </div>

@@ -37,6 +37,13 @@ func getUserQuotaForAffiliateTest(t *testing.T, id int) int {
 	return user.Quota
 }
 
+func getAffRewardsForAffiliateTest(t *testing.T, id int) (quota, history int) {
+	t.Helper()
+	var user User
+	require.NoError(t, DB.Select("aff_quota", "aff_history").First(&user, "id = ?", id).Error)
+	return user.AffQuota, user.AffHistoryQuota
+}
+
 // 倍率为 0(默认)时,充值不产生任何分红,充值本身正常入账。
 func TestRechargeWeChatPay_AffiliateRewardDisabledByZeroRatio(t *testing.T) {
 	truncateTables(t)
@@ -76,7 +83,11 @@ func TestRechargeWeChatPay_AffiliateRewardCreditedToInviter(t *testing.T) {
 	expected := common.QuotaFromFloat(float64(quotaToAdd) * 0.1)
 	assert.True(t, expected > 0)
 	assert.Equal(t, quotaToAdd, getUserQuotaForAffiliateTest(t, 605))
-	assert.Equal(t, 100+expected, getUserQuotaForAffiliateTest(t, 604))
+	// 分红计入邀请体系(推荐计划余额/累计收益),不直接进主余额
+	assert.Equal(t, 100, getUserQuotaForAffiliateTest(t, 604))
+	affQuota, affHistory := getAffRewardsForAffiliateTest(t, 604)
+	assert.Equal(t, expected, affQuota)
+	assert.Equal(t, expected, affHistory)
 }
 
 // 倍率大于 1 时分红可以超过充值所得额度(管理员自行承担亏损风险)。
@@ -89,7 +100,12 @@ func TestRechargeWeChatPay_AffiliateRewardWithRatioAboveOne(t *testing.T) {
 
 	require.NoError(t, RechargeWeChatPay("aff-ratio-2", 500, "wx-aff-3", "127.0.0.1"))
 
-	assert.Equal(t, 2*int(common.QuotaPerUnit), getUserQuotaForAffiliateTest(t, 606))
+	assert.Equal(t, int(common.QuotaPerUnit), getUserQuotaForAffiliateTest(t, 607))
+	assert.Zero(t, getUserQuotaForAffiliateTest(t, 606))
+	affQuota, affHistory := getAffRewardsForAffiliateTest(t, 606)
+	expected := common.QuotaFromFloat(float64(int(common.QuotaPerUnit)) * 2.0)
+	assert.Equal(t, expected, affQuota)
+	assert.Equal(t, expected, affHistory)
 }
 
 // 同一订单重复回调(幂等)不会重复分红。
@@ -105,7 +121,9 @@ func TestRechargeWeChatPay_AffiliateRewardIsIdempotent(t *testing.T) {
 	require.NoError(t, RechargeWeChatPay("aff-idempotent", 500, "wx-aff-4", "127.0.0.1"))
 	require.NoError(t, RechargeWeChatPay("aff-idempotent", 500, "wx-aff-4", "127.0.0.1"))
 
-	assert.Equal(t, expected, getUserQuotaForAffiliateTest(t, 608))
+	affQuota, affHistory := getAffRewardsForAffiliateTest(t, 608)
+	assert.Equal(t, expected, affQuota)
+	assert.Equal(t, expected, affHistory)
 }
 
 // 分红额度不足 1 个单位(截断为 0)时跳过,不产生 0 分红记录。
@@ -148,6 +166,8 @@ func TestRechargeWeChatPay_AffiliateRewardSaturatesAtInt32Max(t *testing.T) {
 	require.NoError(t, RechargeWeChatPay("aff-saturate", 3000, "wx-aff-7", "127.0.0.1"))
 
 	inviterQuota := getUserQuotaForAffiliateTest(t, 613)
-	assert.Equal(t, math.MaxInt32, inviterQuota)
-	assert.Positive(t, inviterQuota)
+	assert.Zero(t, inviterQuota)
+	affQuota, _ := getAffRewardsForAffiliateTest(t, 613)
+	assert.Equal(t, math.MaxInt32, affQuota)
+	assert.Positive(t, affQuota)
 }
