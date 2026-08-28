@@ -1,8 +1,10 @@
 package model
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,6 +27,47 @@ func TestUserGroupsLegacyFallbackAndNormalization(t *testing.T) {
 	assert.Equal(t, "default", user.Group)
 	assert.Equal(t, []string{"default", "vip"}, user.Groups)
 	assert.JSONEq(t, `["default","vip"]`, user.GroupsData)
+}
+
+func TestUserGroupsJSONIncludesDerivedGroups(t *testing.T) {
+	user := User{Group: "default", GroupsData: `["default","vip"]`}
+	data, err := common.Marshal(user)
+	require.NoError(t, err)
+	var response struct {
+		Group  string   `json:"group"`
+		Groups []string `json:"groups"`
+	}
+	require.NoError(t, common.Unmarshal(data, &response))
+	assert.Equal(t, "default", response.Group)
+	assert.Equal(t, []string{"default", "vip"}, response.Groups)
+}
+
+func TestSearchUsersMatchesLiteralSpecialCharacterGroup(t *testing.T) {
+	setupUserUpdateTestState(t)
+	user := User{
+		Username: "special-group-user",
+		Password: "password",
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+	}
+	require.NoError(t, user.SetGroups([]string{"default", "vip%_literal"}))
+	require.NoError(t, DB.Create(&user).Error)
+
+	users, total, err := SearchUsers("special-group-user", "vip%_literal", nil, nil, 0, 10)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, users, 1)
+	assert.Equal(t, user.Id, users[0].Id)
+
+	users, total, err = SearchUsers("special-group-user", "vip", nil, nil, 0, 10)
+	require.NoError(t, err)
+	assert.Zero(t, total)
+	assert.Empty(t, users)
+}
+
+func TestUserGroupsRejectOverlongValue(t *testing.T) {
+	var user User
+	assert.Error(t, user.SetGroups([]string{strings.Repeat("x", 65)}))
 }
 
 func TestUserGroupsRejectInvalidValues(t *testing.T) {

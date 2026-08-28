@@ -240,6 +240,45 @@ func InitializeUserAuthVersions() error {
 	return DB.Model(&User{}).Where("auth_version IS NULL OR auth_version < ?", 1).Update("auth_version", 1).Error
 }
 
+func updateUserGroupCacheAtVersion(userId int, group string, groups string, authVersion int64) error {
+	if !common.RedisEnabled {
+		return nil
+	}
+	if userId <= 0 || authVersion <= 0 {
+		return fmt.Errorf("invalid user auth version")
+	}
+	const script = `
+local incoming = tonumber(ARGV[1])
+local pending = tonumber(redis.call('GET', KEYS[2]) or '0')
+local committed = tonumber(redis.call('GET', KEYS[3]) or '0')
+local current = tonumber(redis.call('HGET', KEYS[1], 'AuthVersion') or '0')
+if pending > incoming or committed > incoming or current > incoming then
+  return 0
+end
+if committed < incoming then
+  redis.call('SET', KEYS[3], ARGV[1])
+end
+if pending > 0 and pending <= incoming then
+  redis.call('DEL', KEYS[2])
+end
+if redis.call('EXISTS', KEYS[1]) == 0 or current ~= incoming then
+  return 1
+end
+redis.call('HSET', KEYS[1], 'Group', ARGV[2], 'Groups', ARGV[3], 'CacheSchema', ARGV[4])
+return 1`
+	result, err := common.RDB.Eval(context.Background(), script,
+		[]string{getUserCacheKey(userId), getUserAuthFenceKey(userId), getUserAuthVersionKey(userId)},
+		authVersion, group, groups, userCacheSchemaVersion,
+	).Int()
+	if err != nil {
+		return err
+	}
+	if result == 0 {
+		return ErrUserAuthCachePending
+	}
+	return nil
+}
+
 func updateUserCacheFieldAtVersion(userId int, field string, value interface{}, authVersion int64) error {
 	if !common.RedisEnabled {
 		return nil

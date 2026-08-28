@@ -196,24 +196,6 @@ func getUserGroupCache(userId int) (string, error) {
 	return cache.Group, nil
 }
 
-func getUserGroupsCache(userId int) ([]string, error) {
-	cache, err := GetUserCache(userId)
-	if err != nil {
-		return nil, err
-	}
-	var groups []string
-	if cache.Groups != "" {
-		if err := common.Unmarshal([]byte(cache.Groups), &groups); err != nil {
-			return nil, err
-		}
-	}
-	groups = normalizeUserGroups(groups)
-	if len(groups) == 0 && cache.Group != "" {
-		groups = []string{cache.Group}
-	}
-	return groups, nil
-}
-
 func getUserQuotaCache(userId int) (int, error) {
 	cache, err := GetUserCache(userId)
 	if err != nil {
@@ -258,10 +240,7 @@ func RefreshUserGroupCache(userId int) error {
 	// refresh and still pass the auth-version fence. Re-read after every write
 	// and repair the cache when the authoritative group changed in between.
 	for range 3 {
-		if err := updateUserCacheFieldAtVersion(userId, "Group", authoritative.Group, authoritative.AuthVersion); err != nil {
-			return err
-		}
-		if err := updateUserCacheFieldAtVersion(userId, "Groups", authoritative.GroupsData, authoritative.AuthVersion); err != nil {
+		if err := updateUserGroupCacheAtVersion(userId, authoritative.Group, authoritative.GroupsData, authoritative.AuthVersion); err != nil {
 			return err
 		}
 
@@ -281,10 +260,7 @@ func RefreshUserGroupCache(userId int) error {
 	// Preserve the freshest snapshot observed even when the row was too busy to
 	// stabilize within the bounded retries. Returning an error lets best-effort
 	// callers emit an operation-specific warning.
-	if err := updateUserCacheFieldAtVersion(userId, "Group", authoritative.Group, authoritative.AuthVersion); err != nil {
-		return err
-	}
-	if err := updateUserCacheFieldAtVersion(userId, "Groups", authoritative.GroupsData, authoritative.AuthVersion); err != nil {
+	if err := updateUserGroupCacheAtVersion(userId, authoritative.Group, authoritative.GroupsData, authoritative.AuthVersion); err != nil {
 		return err
 	}
 	return fmt.Errorf("user group changed repeatedly during cache refresh")

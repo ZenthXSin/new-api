@@ -582,7 +582,13 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 
 	query = query.Where("("+likeCondition+")", likeArgs...)
 	if group != "" {
-		query = query.Where("("+commonGroupCol+" = ? OR groups LIKE ?)", group, "%\""+group+"\"%")
+		encodedGroup, err := common.Marshal(group)
+		if err != nil {
+			tx.Rollback()
+			return nil, 0, err
+		}
+		escapedGroup := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(string(encodedGroup))
+		query = query.Where("("+commonGroupCol+" = ? OR groups LIKE ? ESCAPE '!')", group, "%"+escapedGroup+"%")
 	}
 
 	if role != nil {
