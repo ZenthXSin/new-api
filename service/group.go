@@ -12,32 +12,66 @@ import (
 )
 
 func GetUserUsableGroups(userGroup string) map[string]string {
+	return GetUserUsableGroupsByGroups([]string{userGroup})
+}
+
+// getUserUsableGroupsForGroup resolves one primary group's target-group
+// permissions. Keeping this isolated lets multi-group users receive the union
+// without making a restrictive rule depend on iteration order.
+func getUserUsableGroupsForGroup(userGroup string) map[string]string {
 	groupsCopy := setting.GetUserUsableGroupsCopy()
-	if userGroup != "" {
-		specialSettings, b := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get(userGroup)
-		if b {
-			// 处理特殊可用分组
-			for specialGroup, desc := range specialSettings {
-				if strings.HasPrefix(specialGroup, "-:") {
-					// 移除分组
-					groupToRemove := strings.TrimPrefix(specialGroup, "-:")
-					delete(groupsCopy, groupToRemove)
-				} else if strings.HasPrefix(specialGroup, "+:") {
-					// 添加分组
-					groupToAdd := strings.TrimPrefix(specialGroup, "+:")
-					groupsCopy[groupToAdd] = desc
-				} else {
-					// 直接添加分组
-					groupsCopy[specialGroup] = desc
-				}
+	userGroup = strings.TrimSpace(userGroup)
+	if userGroup == "" {
+		return groupsCopy
+	}
+	specialSettings, ok := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get(userGroup)
+	if ok {
+		for specialGroup, desc := range specialSettings {
+			if strings.HasPrefix(specialGroup, "-:") {
+				delete(groupsCopy, strings.TrimPrefix(specialGroup, "-:"))
+			} else if strings.HasPrefix(specialGroup, "+:") {
+				groupsCopy[strings.TrimPrefix(specialGroup, "+:")] = desc
+			} else {
+				groupsCopy[specialGroup] = desc
 			}
 		}
-		// 如果userGroup不在UserUsableGroups中，返回UserUsableGroups + userGroup
-		if _, ok := groupsCopy[userGroup]; !ok {
-			groupsCopy[userGroup] = "用户分组"
-		}
+	}
+	if _, ok := groupsCopy[userGroup]; !ok {
+		groupsCopy[userGroup] = "用户分组"
 	}
 	return groupsCopy
+}
+
+// GetUserUsableGroupsByGroups unions the target groups available to each
+// assigned user group. A restriction on one member group must not revoke a
+// target granted by another member group.
+func GetUserUsableGroupsByGroups(userGroups []string) map[string]string {
+	if len(userGroups) == 0 {
+		return setting.GetUserUsableGroupsCopy()
+	}
+	usable := make(map[string]string)
+	hasUserGroup := false
+	seen := make(map[string]struct{}, len(userGroups))
+	for _, userGroup := range userGroups {
+		userGroup = strings.TrimSpace(userGroup)
+		if userGroup == "" {
+			continue
+		}
+		hasUserGroup = true
+		if _, exists := seen[userGroup]; exists {
+			continue
+		}
+		seen[userGroup] = struct{}{}
+		for group, desc := range getUserUsableGroupsForGroup(userGroup) {
+			if _, exists := usable[group]; !exists {
+				usable[group] = desc
+			}
+		}
+	}
+	if !hasUserGroup {
+		return setting.GetUserUsableGroupsCopy()
+	}
+	return usable
 }
 
 func GroupInUserUsableGroups(userGroup, groupName string) bool {
@@ -45,19 +79,32 @@ func GroupInUserUsableGroups(userGroup, groupName string) bool {
 	return ok
 }
 
+func GroupInUserUsableGroupsByGroups(userGroups []string, groupName string) bool {
+	_, ok := GetUserUsableGroupsByGroups(userGroups)[groupName]
+	return ok
+}
+
 func IsUserSelectableGroup(userGroup, groupName string) bool {
+	return IsUserSelectableGroupByGroups([]string{userGroup}, groupName)
+}
+
+func IsUserSelectableGroupByGroups(userGroups []string, groupName string) bool {
 	if groupName == "" || groupName == "auto" {
 		return false
 	}
-	return GroupInUserUsableGroups(userGroup, groupName) && ratio_setting.ContainsGroupRatio(groupName)
+	return GroupInUserUsableGroupsByGroups(userGroups, groupName) && ratio_setting.ContainsGroupRatio(groupName)
 }
 
 // GetUserAutoGroup 根据用户分组获取自动分组设置
 func GetUserAutoGroup(userGroup string) []string {
+	return GetUserAutoGroupByGroups([]string{userGroup})
+}
+
+func GetUserAutoGroupByGroups(userGroups []string) []string {
 	autoGroups := make([]string, 0)
 	seen := make(map[string]struct{})
 	for _, group := range setting.GetAutoGroups() {
-		if !IsUserSelectableGroup(userGroup, group) {
+		if !IsUserSelectableGroupByGroups(userGroups, group) {
 			continue
 		}
 		if _, ok := seen[group]; ok {
@@ -72,11 +119,15 @@ func GetUserAutoGroup(userGroup string) []string {
 // FilterUserTokenAutoGroups applies current permissions before the current
 // per-token limit. It intentionally does not fall back to the global Auto list.
 func FilterUserTokenAutoGroups(userGroup string, groups []string) []string {
+	return FilterUserTokenAutoGroupsByGroups([]string{userGroup}, groups)
+}
+
+func FilterUserTokenAutoGroupsByGroups(userGroups []string, groups []string) []string {
 	maxCount := setting.GetMaxTokenAutoGroups()
 	filtered := make([]string, 0, min(len(groups), maxCount))
 	seen := make(map[string]struct{})
 	for _, group := range groups {
-		if !IsUserSelectableGroup(userGroup, group) {
+		if !IsUserSelectableGroupByGroups(userGroups, group) {
 			continue
 		}
 		if _, ok := seen[group]; ok {
@@ -95,15 +146,19 @@ func FilterUserTokenAutoGroups(userGroup string, groups []string) []string {
 // The absence of the context value means that the token inherits the complete
 // global Auto list; a present (even empty) value is an explicit token snapshot.
 func GetRequestAutoGroups(c *gin.Context, userGroup string) []string {
+	return GetRequestAutoGroupsByGroups(c, []string{userGroup})
+}
+
+func GetRequestAutoGroupsByGroups(c *gin.Context, userGroups []string) []string {
 	value, ok := common.GetContextKey(c, constant.ContextKeyTokenAutoGroups)
 	if !ok {
-		return GetUserAutoGroup(userGroup)
+		return GetUserAutoGroupByGroups(userGroups)
 	}
 	groups, ok := value.([]string)
 	if !ok {
 		return []string{}
 	}
-	return FilterUserTokenAutoGroups(userGroup, groups)
+	return FilterUserTokenAutoGroupsByGroups(userGroups, groups)
 }
 
 // GetGroupsEnabledModels 按 groups 顺序获取各分组启用的模型并去重

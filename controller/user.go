@@ -20,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/QuantumNous/new-api/constant"
 
@@ -522,6 +523,7 @@ func buildSelfUserData(user *model.User) map[string]interface{} {
 		"wechat_id":         user.WeChatId,
 		"telegram_id":       user.TelegramId,
 		"group":             user.Group,
+		"groups":            user.GetGroups(),
 		"quota":             user.Quota,
 		"used_quota":        user.UsedQuota,
 		"request_count":     user.RequestCount,
@@ -638,7 +640,7 @@ func GetUserModels(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	groups := service.GetUserUsableGroups(user.Group)
+	groups := service.GetUserUsableGroupsByGroups(user.GetGroups())
 	group := c.Query("group")
 	var groupsToQuery []string
 	switch {
@@ -648,7 +650,7 @@ func GetUserModels(c *gin.Context) {
 		}
 	case group == "auto":
 		if _, ok := groups[group]; ok {
-			groupsToQuery = service.GetUserAutoGroup(user.Group)
+			groupsToQuery = service.GetUserAutoGroupByGroups(user.GetGroups())
 		}
 	default:
 		if _, ok := groups[group]; ok {
@@ -660,6 +662,29 @@ func GetUserModels(c *gin.Context) {
 		"message": "",
 		"data":    service.GetGroupsEnabledModels(groupsToQuery),
 	})
+}
+
+func validateUserGroups(groups []string, existingGroups []string) error {
+	allowed := make(map[string]struct{})
+	for group := range ratio_setting.GetGroupRatioCopy() {
+		allowed[group] = struct{}{}
+	}
+	for _, group := range existingGroups {
+		allowed[strings.TrimSpace(group)] = struct{}{}
+	}
+	if len(groups) == 0 {
+		return errors.New("user groups cannot be empty")
+	}
+	for _, group := range groups {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			return errors.New("user group cannot be empty")
+		}
+		if _, ok := allowed[group]; !ok {
+			return fmt.Errorf("user group %s is not configured", group)
+		}
+	}
+	return nil
 }
 
 func UpdateUser(c *gin.Context) {
@@ -691,7 +716,39 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 	updatedUser.Role = originUser.Role
+	if updatedUser.Groups != nil {
+		if err := validateUserGroups(updatedUser.Groups, originUser.GetGroups()); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if updatedUser.Group != "" && strings.TrimSpace(updatedUser.Group) != strings.TrimSpace(updatedUser.Groups[0]) {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+		if err := updatedUser.SetGroups(updatedUser.Groups); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	} else if updatedUser.Group != "" {
+		if err := validateUserGroups([]string{updatedUser.Group}, originUser.GetGroups()); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if err := updatedUser.SetGroups([]string{updatedUser.Group}); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	} else {
+		updatedUser.Group = originUser.Group
+		updatedUser.Groups = originUser.GetGroups()
+		if err := updatedUser.SetGroups(updatedUser.Groups); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
+
 	myRole := c.GetInt("role")
+
 	if !canManageTargetRole(myRole, originUser.Role) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
 		return
@@ -1026,6 +1083,21 @@ func CreateUser(c *gin.Context) {
 		Password:    user.Password,
 		DisplayName: user.DisplayName,
 		Role:        user.Role, // 保持管理员设置的角色
+	}
+	if user.Groups != nil {
+		if err := validateUserGroups(user.Groups, nil); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if err := cleanUser.SetGroups(user.Groups); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	} else if user.Group != "" {
+		if err := cleanUser.SetGroups([]string{user.Group}); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	authzTouched := false
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {

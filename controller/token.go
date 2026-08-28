@@ -74,14 +74,21 @@ func isTokenAdmin(c *gin.Context) bool {
 	return c.GetInt("role") >= common.RoleAdminUser
 }
 
-func getTokenRequestUserGroup(c *gin.Context) (string, error) {
+func getTokenRequestUserGroups(c *gin.Context) ([]string, error) {
+	if userGroups := common.GetContextKeyStringSlice(c, constant.ContextKeyUserGroups); len(userGroups) > 0 {
+		return userGroups, nil
+	}
 	if userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup); userGroup != "" {
-		return userGroup, nil
+		return []string{userGroup}, nil
 	}
 	if userGroup := c.GetString("group"); userGroup != "" {
-		return userGroup, nil
+		return []string{userGroup}, nil
 	}
-	return model.GetUserGroup(c.GetInt("id"), false)
+	userGroup, err := model.GetUserGroup(c.GetInt("id"), false)
+	if err != nil {
+		return nil, err
+	}
+	return []string{userGroup}, nil
 }
 
 func setTokenAutoGroups(c *gin.Context, token *model.Token, groups []string) bool {
@@ -99,7 +106,7 @@ func setTokenAutoGroups(c *gin.Context, token *model.Token, groups []string) boo
 		return false
 	}
 
-	userGroup, err := getTokenRequestUserGroup(c)
+	userGroups, err := getTokenRequestUserGroups(c)
 	if err != nil {
 		common.ApiError(c, err)
 		return false
@@ -111,7 +118,7 @@ func setTokenAutoGroups(c *gin.Context, token *model.Token, groups []string) boo
 			return false
 		}
 		seen[group] = struct{}{}
-		if !service.IsUserSelectableGroup(userGroup, group) {
+		if !service.IsUserSelectableGroupByGroups(userGroups, group) {
 			common.ApiErrorI18n(c, i18n.MsgTokenAutoGroupsInvalid, map[string]any{"Group": group})
 			return false
 		}
@@ -171,13 +178,13 @@ func GetToken(c *gin.Context) {
 }
 
 func GetTokenAutoGroups(c *gin.Context) {
-	userGroup, err := getTokenRequestUserGroup(c)
+	userGroups, err := getTokenRequestUserGroups(c)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	common.ApiSuccess(c, gin.H{
-		"groups":    service.GetUserAutoGroup(userGroup),
+		"groups":    service.GetUserAutoGroupByGroups(userGroups),
 		"max_count": setting.GetMaxTokenAutoGroups(),
 	})
 }

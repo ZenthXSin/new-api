@@ -70,3 +70,19 @@ func TestGetRequestAutoGroupsDoesNotFallBackAfterPermissionChange(t *testing.T) 
 
 	assert.Empty(t, groups)
 }
+
+func TestGetUserUsableGroupsByGroupsUsesUnion(t *testing.T) {
+	originalUsable := setting.UserUsableGroups2JSONString()
+	originalRatios := ratio_setting.GroupRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(originalUsable))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalRatios))
+	})
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default","vip":"VIP","pro":"Pro"}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"vip":1,"pro":1}`))
+
+	usable := GetUserUsableGroupsByGroups([]string{"default", "vip"})
+	assert.Contains(t, usable, "default")
+	assert.Contains(t, usable, "vip")
+	assert.Contains(t, usable, "pro")
+}

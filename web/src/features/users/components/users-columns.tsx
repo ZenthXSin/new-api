@@ -176,17 +176,25 @@ export function useUsersColumns(): ColumnDef<User>[] {
       accessorKey: 'group',
       header: t('Group'),
       cell: ({ row }) => {
-        const group = row.getValue('group') as string
+        const groups = row.original.groups?.length
+          ? row.original.groups
+          : [row.getValue('group') as string]
         return (
           <BadgeCell>
-            <GroupBadge group={group} />
+            <div className='flex max-w-full flex-wrap gap-1'>
+              {groups.map((group) => (
+                <GroupBadge key={group} group={group} />
+              ))}
+            </div>
           </BadgeCell>
         )
       },
       filterFn: (row, id, value) => {
-        const group = String(row.getValue(id) || t('User Group')).toLowerCase()
+        const groups = row.original.groups?.length
+          ? row.original.groups
+          : [String(row.getValue(id) || t('User Group'))]
         const searchValue = String(value).toLowerCase()
-        return group.includes(searchValue)
+        return groups.some((group) => group.toLowerCase().includes(searchValue))
       },
       size: 140,
       meta: { mobileOrder: 30 },

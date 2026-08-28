@@ -96,6 +96,8 @@ type User struct {
 	UsedQuota        int                        `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
 	RequestCount     int                        `json:"request_count" gorm:"type:int;default:0;"`               // request number
 	Group            string                     `json:"group" gorm:"type:varchar(64);default:'default'"`
+	Groups           []string                   `json:"groups,omitempty" gorm:"-"`
+	GroupsData       string                     `json:"-" gorm:"column:groups;type:text"`
 	AffCode          string                     `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
 	AffCount         int                        `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
 	AffQuota         int                        `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
@@ -112,10 +114,136 @@ type User struct {
 	AdminPermissions map[string]map[string]bool `json:"admin_permissions,omitempty" gorm:"-:all"`
 }
 
+// normalizeUserGroups removes blank and duplicate entries while preserving
+// the caller's selection order; the first entry is treated as primary.
+func normalizeUserGroups(groups []string) []string {
+	seen := make(map[string]struct{}, len(groups))
+	normalized := make([]string, 0, len(groups))
+	for _, group := range groups {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		if _, exists := seen[group]; exists {
+			continue
+		}
+		seen[group] = struct{}{}
+		normalized = append(normalized, group)
+	}
+	return normalized
+}
+
+func sameUserGroups(left, right []string) bool {
+	left = normalizeUserGroups(left)
+	right = normalizeUserGroups(right)
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func decodeUserGroups(groupsData string) []string {
+	if strings.TrimSpace(groupsData) == "" {
+		return nil
+	}
+	var groups []string
+	if err := common.Unmarshal([]byte(groupsData), &groups); err != nil {
+		return nil
+	}
+	return normalizeUserGroups(groups)
+}
+
+// GetGroups returns all groups assigned to the user. Legacy rows without the
+// JSON column fall back to the existing primary group column.
+func (user *User) GetGroups() []string {
+	groups := normalizeUserGroups(user.Groups)
+	persistedGroups := false
+	if len(groups) == 0 {
+		groups = decodeUserGroups(user.GroupsData)
+		persistedGroups = len(groups) > 0
+	}
+	primary := strings.TrimSpace(user.Group)
+	if primary == "" {
+		return groups
+	}
+	if len(groups) == 0 {
+		return []string{primary}
+	}
+	if persistedGroups {
+		// The legacy group column is authoritative for the primary group. If a
+		// subscription changed it directly, move the current primary to the front
+		// while preserving every explicitly assigned group.
+		result := []string{primary}
+		for _, group := range groups {
+			if group != primary {
+				result = append(result, group)
+			}
+		}
+		return result
+	}
+	withPrimary := make([]string, 0, len(groups)+1)
+	withPrimary = append(withPrimary, primary)
+	for _, group := range groups {
+		if group != primary {
+			withPrimary = append(withPrimary, group)
+		}
+	}
+	return withPrimary
+}
+
+// SetGroups updates both the public array and the persisted JSON snapshot.
+// The first group remains the backwards-compatible users.group value.
+func (user *User) SetGroups(groups []string) error {
+	if len(groups) == 0 {
+		return errors.New("user groups cannot be empty")
+	}
+	seen := make(map[string]struct{}, len(groups))
+	for _, rawGroup := range groups {
+		group := strings.TrimSpace(rawGroup)
+		if group == "" {
+			return errors.New("user group cannot be empty")
+		}
+		if len(group) > 64 {
+			return errors.New("user group is too long")
+		}
+		if _, exists := seen[group]; exists {
+			return fmt.Errorf("duplicate user group: %s", group)
+		}
+		seen[group] = struct{}{}
+	}
+	groups = normalizeUserGroups(groups)
+	data, err := common.Marshal(groups)
+	if err != nil {
+		return err
+	}
+	user.Groups = groups
+	user.Group = groups[0]
+	user.GroupsData = string(data)
+	return nil
+}
+
+func (user User) MarshalJSON() ([]byte, error) {
+	type userJSON User
+	user.Groups = user.GetGroups()
+	return common.Marshal(userJSON(user))
+}
+
 func (user *User) ToBaseUser() *UserBase {
+	groups := user.GetGroups()
+	primary := strings.TrimSpace(user.Group)
+	if primary == "" && len(groups) > 0 {
+		primary = groups[0]
+	}
+	groupsData, _ := common.Marshal(groups)
 	cache := &UserBase{
 		Id:          user.Id,
-		Group:       user.Group,
+		Group:       primary,
+		Groups:      string(groupsData),
 		Quota:       user.Quota,
 		Status:      user.Status,
 		Role:        user.Role,
@@ -454,8 +582,9 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 
 	query = query.Where("("+likeCondition+")", likeArgs...)
 	if group != "" {
-		query = query.Where(commonGroupCol+" = ?", group)
+		query = query.Where("("+commonGroupCol+" = ? OR groups LIKE ?)", group, "%\""+group+"\"%")
 	}
+
 	if role != nil {
 		query = query.Where("role = ?", *role)
 	}
@@ -782,10 +911,30 @@ func (user *User) UpdateWithTx(tx *gorm.DB, updatePassword bool) error {
 	// Updates(struct) ignores zero values. Match that behavior when deciding
 	// whether this request actually changes authentication-sensitive state;
 	// partial self-profile updates intentionally leave role/status/group empty.
+	groupsProvided := newUser.Groups != nil
+	if groupsProvided {
+		if err := newUser.SetGroups(newUser.Groups); err != nil {
+			return err
+		}
+	} else if newUser.Group != "" && current.Group != newUser.Group {
+		groups := decodeUserGroups(current.GroupsData)
+		if len(groups) == 0 {
+			groups = []string{newUser.Group}
+		} else {
+			groups = append([]string{newUser.Group}, groups...)
+		}
+		if err := newUser.SetGroups(normalizeUserGroups(groups)); err != nil {
+			return err
+		}
+	}
+	groupsChanged := groupsProvided || (newUser.Group != "" && current.Group != newUser.Group)
+	if groupsChanged {
+		groupsChanged = !sameUserGroups(current.GetGroups(), newUser.GetGroups())
+	}
 	authChanged := (updatePassword && current.Password != newUser.Password) ||
 		(newUser.Role != 0 && current.Role != newUser.Role) ||
 		(newUser.Status != 0 && current.Status != newUser.Status) ||
-		(newUser.Group != "" && current.Group != newUser.Group)
+		(newUser.Group != "" && current.Group != newUser.Group) || groupsChanged
 	if authChanged {
 		newUser.AuthVersion, err = IncrementUserAuthVersionWithTx(tx, user.Id)
 		if err != nil {
@@ -837,21 +986,39 @@ func (user *User) EditWithTx(tx *gorm.DB, updatePassword bool) error {
 	}
 
 	newUser := *user
+	current := User{}
+	if err = tx.First(&current, user.Id).Error; err != nil {
+		return err
+	}
+
+	groupsProvided := newUser.Groups != nil
+	if groupsProvided {
+		if err := newUser.SetGroups(newUser.Groups); err != nil {
+			return err
+		}
+	} else if newUser.Group != "" {
+		if err := newUser.SetGroups([]string{newUser.Group}); err != nil {
+			return err
+		}
+	}
+	groupsChanged := false
+	if groupsProvided || newUser.Group != "" {
+		groupsChanged = !sameUserGroups(current.GetGroups(), newUser.GetGroups())
+	}
 	updates := map[string]interface{}{
 		"username":     newUser.Username,
 		"display_name": newUser.DisplayName,
-		"group":        newUser.Group,
 		"remark":       newUser.Remark,
+	}
+	if groupsProvided || newUser.Group != "" {
+		updates["group"] = newUser.Group
+		updates["groups"] = newUser.GroupsData
 	}
 	if updatePassword {
 		updates["password"] = newUser.Password
 	}
 
-	current := User{}
-	if err = tx.First(&current, user.Id).Error; err != nil {
-		return err
-	}
-	authChanged := (updatePassword && current.Password != newUser.Password) || current.Group != newUser.Group
+	authChanged := (updatePassword && current.Password != newUser.Password) || groupsChanged
 	if authChanged {
 		newUser.AuthVersion, err = IncrementUserAuthVersionWithTx(tx, user.Id)
 		if err != nil {

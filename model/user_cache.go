@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -11,11 +12,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const userCacheSchemaVersion = 2
+const userCacheSchemaVersion = 3
 
 type UserBase struct {
 	Id          int    `json:"id"`
 	Group       string `json:"group"`
+	Groups      string `json:"groups"`
 	Email       string `json:"email"`
 	Quota       int    `json:"quota"`
 	Status      int    `json:"status"`
@@ -28,11 +30,32 @@ type UserBase struct {
 
 func (user *UserBase) WriteContext(c *gin.Context) {
 	common.SetContextKey(c, constant.ContextKeyUserGroup, user.Group)
+	common.SetContextKey(c, constant.ContextKeyUserGroups, user.GetGroups())
 	common.SetContextKey(c, constant.ContextKeyUserQuota, user.Quota)
 	common.SetContextKey(c, constant.ContextKeyUserStatus, user.Status)
 	common.SetContextKey(c, constant.ContextKeyUserEmail, user.Email)
 	common.SetContextKey(c, constant.ContextKeyUserName, user.Username)
 	common.SetContextKey(c, constant.ContextKeyUserSetting, user.GetSetting())
+}
+
+func (user *UserBase) GetGroups() []string {
+	var groups []string
+	if user.Groups != "" {
+		if err := common.Unmarshal([]byte(user.Groups), &groups); err == nil {
+			groups = normalizeUserGroups(groups)
+		}
+	}
+	primary := strings.TrimSpace(user.Group)
+	if primary == "" {
+		return groups
+	}
+	result := []string{primary}
+	for _, group := range groups {
+		if group != primary {
+			result = append(result, group)
+		}
+	}
+	return normalizeUserGroups(result)
 }
 
 func (user *UserBase) GetSetting() dto.UserSetting {
@@ -173,6 +196,24 @@ func getUserGroupCache(userId int) (string, error) {
 	return cache.Group, nil
 }
 
+func getUserGroupsCache(userId int) ([]string, error) {
+	cache, err := GetUserCache(userId)
+	if err != nil {
+		return nil, err
+	}
+	var groups []string
+	if cache.Groups != "" {
+		if err := common.Unmarshal([]byte(cache.Groups), &groups); err != nil {
+			return nil, err
+		}
+	}
+	groups = normalizeUserGroups(groups)
+	if len(groups) == 0 && cache.Group != "" {
+		groups = []string{cache.Group}
+	}
+	return groups, nil
+}
+
 func getUserQuotaCache(userId int) (int, error) {
 	cache, err := GetUserCache(userId)
 	if err != nil {
@@ -207,9 +248,11 @@ func RefreshUserGroupCache(userId int) error {
 		return fmt.Errorf("invalid user id")
 	}
 	var authoritative User
-	if err := DB.Select("id", "auth_version", commonGroupCol).Where("id = ?", userId).First(&authoritative).Error; err != nil {
+	if err := DB.Select("id", "auth_version", commonGroupCol, "groups").Where("id = ?", userId).First(&authoritative).Error; err != nil {
 		return err
 	}
+	groupsData, _ := common.Marshal(authoritative.GetGroups())
+	authoritative.GroupsData = string(groupsData)
 	// Group transitions intentionally keep the same authentication version. A
 	// refresh that read the previous group can therefore arrive after a newer
 	// refresh and still pass the auth-version fence. Re-read after every write
@@ -218,12 +261,18 @@ func RefreshUserGroupCache(userId int) error {
 		if err := updateUserCacheFieldAtVersion(userId, "Group", authoritative.Group, authoritative.AuthVersion); err != nil {
 			return err
 		}
-
-		var verified User
-		if err := DB.Select("id", "auth_version", commonGroupCol).Where("id = ?", userId).First(&verified).Error; err != nil {
+		if err := updateUserCacheFieldAtVersion(userId, "Groups", authoritative.GroupsData, authoritative.AuthVersion); err != nil {
 			return err
 		}
-		if verified.AuthVersion == authoritative.AuthVersion && verified.Group == authoritative.Group {
+
+		var verified User
+		if err := DB.Select("id", "auth_version", commonGroupCol, "groups").Where("id = ?", userId).First(&verified).Error; err != nil {
+			return err
+		}
+		verifiedGroups, _ := common.Marshal(verified.GetGroups())
+
+		verified.GroupsData = string(verifiedGroups)
+		if verified.AuthVersion == authoritative.AuthVersion && verified.Group == authoritative.Group && string(verifiedGroups) == authoritative.GroupsData {
 			return nil
 		}
 		authoritative = verified
@@ -233,6 +282,9 @@ func RefreshUserGroupCache(userId int) error {
 	// stabilize within the bounded retries. Returning an error lets best-effort
 	// callers emit an operation-specific warning.
 	if err := updateUserCacheFieldAtVersion(userId, "Group", authoritative.Group, authoritative.AuthVersion); err != nil {
+		return err
+	}
+	if err := updateUserCacheFieldAtVersion(userId, "Groups", authoritative.GroupsData, authoritative.AuthVersion); err != nil {
 		return err
 	}
 	return fmt.Errorf("user group changed repeatedly during cache refresh")
