@@ -50,6 +50,10 @@ func GetOidcDiscovery(c *gin.Context) {
 		common.ApiError(c, service.ErrOidcProviderDisabled)
 		return
 	}
+	// Make sure clients fetching JWKS right after setup see a published key.
+	if _, err := model.GetOrCreateOauthSigningKey(); err != nil {
+		common.SysError(fmt.Sprintf("failed to ensure oidc signing key: %v", err))
+	}
 	c.JSON(http.StatusOK, service.BuildOidcDiscovery())
 }
 
@@ -58,6 +62,10 @@ func GetOidcJWKS(c *gin.Context) {
 	settings := system_setting.GetOauthProviderSettings()
 	if !settings.Enabled {
 		common.ApiError(c, service.ErrOidcProviderDisabled)
+		return
+	}
+	if _, err := model.GetOrCreateOauthSigningKey(); err != nil {
+		common.ApiError(c, err)
 		return
 	}
 	keys, err := model.GetOauthJWKS()
