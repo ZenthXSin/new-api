@@ -164,6 +164,9 @@ export type AuthSettings = {
   'passkey.allow_insecure_origin': boolean
   'passkey.user_verification': 'required' | 'preferred' | 'discouraged'
   'passkey.attachment_preference': '' | 'platform' | 'cross-platform'
+  'oauth_provider.enabled': boolean
+  'oauth_provider.issuer': string
+  'oauth_provider.access_token_ttl_minutes': number
 }
 
 export type ContentSettings = {

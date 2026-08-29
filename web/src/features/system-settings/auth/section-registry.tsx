@@ -21,6 +21,7 @@ import { createSectionRegistry } from '../utils/section-registry'
 import { BasicAuthSection } from './basic-auth-section'
 import { BotProtectionSection } from './bot-protection-section'
 import { CustomOAuthSection } from './custom-oauth/custom-oauth-section'
+import { OauthProviderSection } from './oauth-provider/oauth-provider-section'
 import { OAuthSection } from './oauth-section'
 import { PasskeySection } from './passkey-section'
 
@@ -119,6 +120,21 @@ const AUTH_SECTIONS = [
     titleKey: 'Custom OAuth',
     build: (settings: AuthSettings) => (
       <CustomOAuthSection serverAddress={settings.ServerAddress} />
+    ),
+  },
+  {
+    id: 'oauth-provider',
+    titleKey: 'OIDC Provider',
+    build: (settings: AuthSettings) => (
+      <OauthProviderSection
+        serverAddress={settings.ServerAddress}
+        defaultValues={{
+          'oauth_provider.enabled': settings['oauth_provider.enabled'],
+          'oauth_provider.issuer': settings['oauth_provider.issuer'],
+          'oauth_provider.access_token_ttl_minutes':
+            settings['oauth_provider.access_token_ttl_minutes'],
+        }}
+      />
     ),
   },
 ] as const

@@ -235,6 +235,25 @@ func SetApiRouter(router *gin.Engine) {
 			customOAuthRoute.PUT("/:id", controller.UpdateCustomOAuthProvider)
 			customOAuthRoute.DELETE("/:id", controller.DeleteCustomOAuthProvider)
 		}
+
+		// OIDC provider: user consent during third-party authorization
+		oauthConsentRoute := apiRouter.Group("/oauth2")
+		oauthConsentRoute.Use(middleware.UserAuth())
+		{
+			oauthConsentRoute.GET("/consent", controller.GetOidcConsent)
+			oauthConsentRoute.POST("/consent", controller.PostOidcConsent)
+		}
+
+		// OIDC provider: client management (root only)
+		oauthClientRoute := apiRouter.Group("/oauth_client")
+		oauthClientRoute.Use(middleware.RootAuth())
+		{
+			oauthClientRoute.GET("/", controller.GetOauthClients)
+			oauthClientRoute.POST("/", controller.CreateOauthClient)
+			oauthClientRoute.PUT("/:id", controller.UpdateOauthClient)
+			oauthClientRoute.DELETE("/:id", controller.DeleteOauthClient)
+			oauthClientRoute.POST("/:id/reset_secret", controller.ResetOauthClientSecret)
+		}
 		appCenterRoute := apiRouter.Group("/app-center")
 		appCenterRoute.Use(middleware.AppCenterAuthScope(), middleware.UserAuth(), middleware.AppCenterAdmin())
 		{

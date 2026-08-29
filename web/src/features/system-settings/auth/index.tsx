@@ -68,6 +68,9 @@ const defaultAuthSettings: AuthSettings = {
   'passkey.allow_insecure_origin': false,
   'passkey.user_verification': 'preferred',
   'passkey.attachment_preference': '',
+  'oauth_provider.enabled': false,
+  'oauth_provider.issuer': '',
+  'oauth_provider.access_token_ttl_minutes': 480,
 }
 
 export function AuthSettings() {
