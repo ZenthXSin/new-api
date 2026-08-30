@@ -78,6 +78,9 @@ type oidcIDTokenClaims struct {
 	Email             string   `json:"email,omitempty"`
 	EmailVerified     bool     `json:"email_verified,omitempty"`
 	Groups            []string `json:"groups,omitempty"`
+	Quota             int      `json:"quota"`
+	UsedQuota         int      `json:"used_quota"`
+	QuotaPerUnit      float64  `json:"quota_per_unit"`
 	jwt.RegisteredClaims
 }
 
@@ -258,6 +261,9 @@ func IssueOidcTokens(client *model.OauthClient, user *model.User, scopes []strin
 			}
 			idClaims.PreferredUsername = user.Username
 			idClaims.Groups = user.GetGroups()
+			idClaims.Quota = user.Quota
+			idClaims.UsedQuota = user.UsedQuota
+			idClaims.QuotaPerUnit = common.QuotaPerUnit
 		}
 		if _, ok := scopeSet["email"]; ok && user.Email != "" {
 			idClaims.Email = user.Email
@@ -330,7 +336,7 @@ func BuildOidcDiscovery() map[string]interface{} {
 		"id_token_signing_alg_values_supported": []string{"RS256"},
 		"scopes_supported":                      []string{"openid", "profile", "email"},
 		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post", "none"},
-		"claims_supported":                      []string{"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "name", "preferred_username", "email", "email_verified", "groups"},
+		"claims_supported":                      []string{"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "name", "preferred_username", "email", "email_verified", "groups", "quota", "used_quota", "quota_per_unit"},
 		"code_challenge_methods_supported":      []string{"S256"},
 	}
 }
@@ -352,6 +358,9 @@ func BuildOidcUserInfo(user *model.User, scopes []string) map[string]interface{}
 		claims["name"] = displayName
 		claims["preferred_username"] = user.Username
 		claims["groups"] = user.GetGroups()
+		claims["quota"] = user.Quota
+		claims["used_quota"] = user.UsedQuota
+		claims["quota_per_unit"] = common.QuotaPerUnit
 	}
 	if _, ok := scopeSet["email"]; ok && user.Email != "" {
 		claims["email"] = user.Email

@@ -59,6 +59,6 @@ export type OauthClientFormValues = z.infer<typeof oauthClientFormSchema>
 
 export const OAUTH_SCOPE_OPTIONS = [
   { value: 'openid', labelKey: 'OpenID (required for login)' },
-  { value: 'profile', labelKey: 'Profile (username, display name, groups)' },
+  { value: 'profile', labelKey: 'Profile (username, display name, groups, balance)' },
   { value: 'email', labelKey: 'Email address' },
 ] as const

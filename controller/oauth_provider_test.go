@@ -65,6 +65,8 @@ func setupOidcProviderTest(t *testing.T) (*gorm.DB, *model.User) {
 		Email:       "oidc-user@example.com",
 		DisplayName: "OIDC User",
 		Status:      common.UserStatusEnabled,
+		Quota:       500000,
+		UsedQuota:   100,
 	}
 	require.NoError(t, db.Create(user).Error)
 	return db, user
@@ -321,6 +323,9 @@ func TestOidcConsentAndTokenFlow(t *testing.T) {
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &userinfo))
 	assert.Equal(t, "1", userinfo["sub"])
 	assert.Equal(t, "oidc-user@example.com", userinfo["email"])
+	assert.EqualValues(t, 500000, userinfo["quota"])
+	assert.EqualValues(t, 100, userinfo["used_quota"])
+	assert.EqualValues(t, 500000, userinfo["quota_per_unit"])
 
 	// Authorization codes are single use.
 	recorder = performOidcRequest(t, http.MethodPost, oidcTestIssuer+"/token", &form, map[string]string{

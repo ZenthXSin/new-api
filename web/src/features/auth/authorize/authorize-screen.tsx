@@ -56,7 +56,7 @@ interface ConsentResponse {
 
 const SCOPE_LABELS: Record<string, string> = {
   openid: 'Confirm your identity',
-  profile: 'View your username, display name and groups',
+  profile: 'View your username, display name, groups and balance',
   email: 'View your email address',
 }
 
