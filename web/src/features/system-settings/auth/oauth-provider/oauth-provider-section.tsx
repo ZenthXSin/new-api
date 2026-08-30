@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -58,15 +58,23 @@ import {
 } from './hooks/use-oauth-clients'
 import type { OauthClient } from './types'
 
+/**
+ * react-hook-form 7 treats dotted `name` strings as nested paths. The
+ * `oauth_provider.*` fields are therefore modeled as a nested object here and
+ * flattened back to dotted server keys only when persisting (same pattern as
+ * the discord/oidc fields in ../oauth-section.tsx).
+ */
 const oauthProviderSchema = z.object({
-  'oauth_provider.enabled': z.boolean(),
-  'oauth_provider.issuer': z.string(),
-  'oauth_provider.access_token_ttl_minutes': z
-    .string()
-    .refine((value) => {
-      const parsed = Number.parseInt(value, 10)
-      return Number.isFinite(parsed) && parsed >= 5 && parsed <= 43200
-    }, 'Must be between 5 and 43200'),
+  oauth_provider: z.object({
+    enabled: z.boolean(),
+    issuer: z.string(),
+    access_token_ttl_minutes: z
+      .string()
+      .refine((value) => {
+        const parsed = Number.parseInt(value, 10)
+        return Number.isFinite(parsed) && parsed >= 5 && parsed <= 43200
+      }, 'Must be between 5 and 43200'),
+  }),
 })
 
 type OauthProviderFormValues = z.infer<typeof oauthProviderSchema>
@@ -113,43 +121,56 @@ export function OauthProviderSection(props: OauthProviderSectionProps) {
     setResetTarget(null)
   }
 
+  const { defaultValues } = props
+  const formDefaults = useMemo<OauthProviderFormValues>(
+    () => ({
+      oauth_provider: {
+        enabled: defaultValues['oauth_provider.enabled'],
+        issuer: defaultValues['oauth_provider.issuer'],
+        access_token_ttl_minutes: String(
+          defaultValues['oauth_provider.access_token_ttl_minutes']
+        ),
+      },
+    }),
+    [defaultValues]
+  )
+
   const form = useForm<OauthProviderFormValues>({
     resolver: zodResolver(oauthProviderSchema),
-    defaultValues: {
-      'oauth_provider.enabled': props.defaultValues['oauth_provider.enabled'],
-      'oauth_provider.issuer': props.defaultValues['oauth_provider.issuer'],
-      'oauth_provider.access_token_ttl_minutes': String(
-        props.defaultValues['oauth_provider.access_token_ttl_minutes']
-      ),
-    },
+    defaultValues: formDefaults,
   })
 
-  useResetForm(form, {
-    'oauth_provider.enabled': props.defaultValues['oauth_provider.enabled'],
-    'oauth_provider.issuer': props.defaultValues['oauth_provider.issuer'],
-    'oauth_provider.access_token_ttl_minutes': String(
-      props.defaultValues['oauth_provider.access_token_ttl_minutes']
-    ),
-  })
+  useResetForm(form, formDefaults)
 
   const onSubmit = async (data: OauthProviderFormValues) => {
     const updates: UpdateOptionRequest[] = []
-    const ttl = Number.parseInt(data['oauth_provider.access_token_ttl_minutes'], 10)
-    if (ttl !== props.defaultValues['oauth_provider.access_token_ttl_minutes']) {
-      updates.push({ key: 'oauth_provider.access_token_ttl_minutes', value: ttl })
+    const { enabled, issuer, access_token_ttl_minutes } = data.oauth_provider
+    if (enabled !== props.defaultValues['oauth_provider.enabled']) {
+      updates.push({ key: 'oauth_provider.enabled', value: enabled })
     }
-    Object.entries(data).forEach(([key, value]) => {
-      if (key === 'oauth_provider.access_token_ttl_minutes') return
-      if (value !== props.defaultValues[key as keyof typeof props.defaultValues]) {
-        updates.push({ key, value })
-      }
-    })
+    if (issuer !== props.defaultValues['oauth_provider.issuer']) {
+      updates.push({ key: 'oauth_provider.issuer', value: issuer })
+    }
+    const ttl = Number.parseInt(access_token_ttl_minutes, 10)
+    const previousTtl = Number.parseInt(
+      String(props.defaultValues['oauth_provider.access_token_ttl_minutes']),
+      10
+    )
+    if (Number.isFinite(previousTtl) && ttl !== previousTtl) {
+      updates.push({
+        key: 'oauth_provider.access_token_ttl_minutes',
+        value: ttl,
+      })
+    }
     for (const update of updates) {
       await updateOption.mutateAsync(update)
     }
+    if (updates.length > 0) {
+      toast.success(t('Saved successfully'))
+    }
   }
 
-  const watchedIssuer = form.watch('oauth_provider.issuer') as string | undefined
+  const watchedIssuer = form.watch('oauth_provider.issuer')
   const issuerBase = (watchedIssuer || props.defaultValues['oauth_provider.issuer'] || `${props.serverAddress}/oidc`).replace(/\/+$/, '')
   const discoveryUrl = `${issuerBase}/.well-known/openid-configuration`
 
