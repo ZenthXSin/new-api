@@ -45,7 +45,9 @@ import {
 } from '../../lib/wechat-payment-status'
 
 const POLL_INTERVAL_MS = 2000
-const MAX_POLL_DURATION_MS = 10 * 60 * 1000
+// 兜底窗口仅在订单缺少 expire_at 时使用；正常情况下轮询持续到订单自身过期
+// （后端按同一有效期关单），避免"订单还有效但弹窗提前停止确认"的空窗。
+const FALLBACK_POLL_DURATION_MS = 10 * 60 * 1000
 
 interface WeChatNativePaymentDialogProps {
   open: boolean
@@ -71,7 +73,7 @@ export function WeChatNativePaymentDialog(
     let cancelled = false
     let timeoutID: ReturnType<typeof setTimeout> | undefined
     let consecutiveVerificationErrors = 0
-    const stopAt = Math.min(expireAt * 1000, Date.now() + MAX_POLL_DURATION_MS)
+    const stopAt = expireAt > 0 ? expireAt * 1000 : Date.now() + FALLBACK_POLL_DURATION_MS
 
     setStatus('pending')
     successHandledRef.current = false

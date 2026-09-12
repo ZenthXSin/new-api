@@ -202,6 +202,21 @@ func GetTopUpByTradeNo(tradeNo string) *TopUp {
 	return topUp
 }
 
+// GetPendingWeChatPayTopUpsForReconcile 返回仍处于待支付状态、创建时间不早于
+// minCreateTime 的微信支付订单，供后台对账任务主动查单兜底（回调丢失场景）。
+// minCreateTime 限制回看窗口，避免对久远滞留单反复查单；limit 控制单轮批量。
+func GetPendingWeChatPayTopUpsForReconcile(minCreateTime int64, limit int) ([]*TopUp, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var topups []*TopUp
+	err := DB.
+		Where("payment_provider = ? AND status = ? AND create_time >= ?",
+			PaymentProviderWeChatPay, common.TopUpStatusPending, minCreateTime).
+		Order("id asc").Limit(limit).Find(&topups).Error
+	return topups, err
+}
+
 func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, targetStatus string) error {
 	if tradeNo == "" {
 		return errors.New("未提供支付单号")
