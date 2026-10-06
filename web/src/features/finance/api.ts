@@ -75,6 +75,11 @@ export async function getFinanceOverview(
       },
     }
   )
+  if (!res.data.success) {
+    throw new Error(res.data.message || 'Failed to load finance overview', {
+      cause: res.data,
+    })
+  }
   return res.data.data
 }
 
@@ -88,6 +93,11 @@ export async function getFinanceTrends(
       end_timestamp: endTimestamp,
     },
   })
+  if (!res.data.success) {
+    throw new Error(res.data.message || 'Failed to load finance overview', {
+      cause: res.data,
+    })
+  }
   return res.data.data
 }
 

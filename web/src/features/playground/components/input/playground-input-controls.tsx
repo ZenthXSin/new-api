@@ -37,6 +37,7 @@ type PlaygroundInputControlsProps = {
   onGroupChange: (value: string) => void
   onModelChange: (value: string) => void
   onStop?: () => void
+  attachmentCount?: number
   text: string
   tools: ReactNode
 }
@@ -52,6 +53,7 @@ export function PlaygroundInputControls({
   onGroupChange,
   onModelChange,
   onStop,
+  attachmentCount,
   text,
   tools,
 }: PlaygroundInputControlsProps) {
@@ -60,6 +62,9 @@ export function PlaygroundInputControls({
     getInputControlState({
       disabled,
       groups,
+      groupValue,
+      modelValue,
+      attachmentCount,
       hasStopHandler: Boolean(onStop),
       isGenerating,
       isModelLoading,
@@ -83,6 +88,7 @@ export function PlaygroundInputControls({
     shouldShowStop ? (
       <PromptInputButton
         className='border-destructive/25 bg-destructive/10 text-destructive hover:bg-destructive/15 font-medium'
+        aria-label={t('Stop')}
         onClick={onStop}
         variant='secondary'
       >
@@ -93,6 +99,7 @@ export function PlaygroundInputControls({
     ) : (
       <PromptInputButton
         className='bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground h-8 px-3 font-medium shadow-sm'
+        aria-label={t('Send')}
         disabled={!canSubmit}
         type='submit'
         variant='default'

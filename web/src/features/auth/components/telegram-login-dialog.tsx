@@ -34,7 +34,9 @@ let telegramCallbackSequence = 0
 
 export function TelegramLoginDialog(props: TelegramLoginDialogProps) {
   const { t } = useTranslation()
-  const widgetContainer = useRef<HTMLDivElement | null>(null)
+  const [widgetContainer, setWidgetContainer] = useState<HTMLDivElement | null>(
+    null
+  )
   const authorizationHandler = useRef(props.onAuthorization)
   const [callbackName] = useState(
     () => `newApiTelegramLogin${++telegramCallbackSequence}`
@@ -48,7 +50,7 @@ export function TelegramLoginDialog(props: TelegramLoginDialogProps) {
   }, [props.onAuthorization])
 
   useEffect(() => {
-    const container = widgetContainer.current
+    const container = widgetContainer
     const botName = props.botName.trim()
     if (!props.open || !container || !botName) return
 
@@ -78,7 +80,7 @@ export function TelegramLoginDialog(props: TelegramLoginDialogProps) {
       container.replaceChildren()
       delete browserWindow[callbackName]
     }
-  }, [callbackName, props.botName, props.open])
+  }, [callbackName, props.botName, props.open, widgetContainer])
 
   return (
     <Dialog
@@ -99,7 +101,7 @@ export function TelegramLoginDialog(props: TelegramLoginDialogProps) {
           <p className='text-destructive text-sm'>{t('Login failed')}</p>
         )}
         <div
-          ref={widgetContainer}
+          ref={setWidgetContainer}
           className={
             widgetState === 'ready' && !props.pending ? 'block' : 'hidden'
           }

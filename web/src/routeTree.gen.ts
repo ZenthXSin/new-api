@@ -38,14 +38,17 @@ import { Route as SetupIndexRouteImport } from './routes/setup/index'
 import { Route as authUserResetRouteImport } from './routes/(auth)/user/reset'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedChatChatIdRouteImport } from './routes/_authenticated/chat/$chatId'
+import { Route as AuthenticatedCodexIndexRouteImport } from './routes/_authenticated/codex/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedDashboardSectionRouteImport } from './routes/_authenticated/dashboard/$section'
 import { Route as AuthenticatedDistributionIndexRouteImport } from './routes/_authenticated/distribution/index'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
 import { Route as AuthenticatedFinanceIndexRouteImport } from './routes/_authenticated/finance/index'
+import { Route as AuthenticatedGroupAvailabilityIndexRouteImport } from './routes/_authenticated/group-availability/index'
 import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authenticated/keys/index'
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
 import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authenticated/models/$section'
+import { Route as AuthenticatedPaymentsOrdersRouteImport } from './routes/_authenticated/payments/orders'
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
@@ -57,7 +60,9 @@ import { Route as AuthenticatedUsageLogsSectionRouteImport } from './routes/_aut
 import { Route as AuthenticatedUsersIndexRouteImport } from './routes/_authenticated/users/index'
 import { Route as AuthenticatedWalletIndexRouteImport } from './routes/_authenticated/wallet/index'
 import { Route as DistributionSlugIndexRouteImport } from './routes/distribution/$slug/index'
+import { Route as PaymentsCheckoutOrderIdRouteImport } from './routes/payments/checkout/$orderId'
 import { Route as PricingModelIdIndexRouteImport } from './routes/pricing/$modelId/index'
+import { Route as AuthenticatedOauthActionsIdRouteImport } from './routes/_authenticated/oauth/actions/$id'
 import { Route as AuthenticatedSystemSettingsAuthIndexRouteImport } from './routes/_authenticated/system-settings/auth/index'
 import { Route as AuthenticatedSystemSettingsAuthSectionRouteImport } from './routes/_authenticated/system-settings/auth/$section'
 import { Route as AuthenticatedSystemSettingsBillingIndexRouteImport } from './routes/_authenticated/system-settings/billing/index'
@@ -219,6 +224,11 @@ const AuthenticatedChatChatIdRoute = AuthenticatedChatChatIdRouteImport.update({
   path: '/chat/$chatId',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedCodexIndexRoute = AuthenticatedCodexIndexRouteImport.update({
+  id: '/codex/',
+  path: '/codex/',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedDashboardIndexRoute =
   AuthenticatedDashboardIndexRouteImport.update({
     id: '/dashboard/',
@@ -249,6 +259,12 @@ const AuthenticatedFinanceIndexRoute =
     path: '/finance/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedGroupAvailabilityIndexRoute =
+  AuthenticatedGroupAvailabilityIndexRouteImport.update({
+    id: '/group-availability/',
+    path: '/group-availability/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedKeysIndexRoute = AuthenticatedKeysIndexRouteImport.update({
   id: '/keys/',
   path: '/keys/',
@@ -264,6 +280,12 @@ const AuthenticatedModelsSectionRoute =
   AuthenticatedModelsSectionRouteImport.update({
     id: '/models/$section',
     path: '/models/$section',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedPaymentsOrdersRoute =
+  AuthenticatedPaymentsOrdersRouteImport.update({
+    id: '/payments/orders',
+    path: '/payments/orders',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedPlaygroundIndexRoute =
@@ -330,11 +352,22 @@ const DistributionSlugIndexRoute = DistributionSlugIndexRouteImport.update({
   path: '/distribution/$slug/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PaymentsCheckoutOrderIdRoute = PaymentsCheckoutOrderIdRouteImport.update({
+  id: '/payments/checkout/$orderId',
+  path: '/payments/checkout/$orderId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PricingModelIdIndexRoute = PricingModelIdIndexRouteImport.update({
   id: '/pricing/$modelId/',
   path: '/pricing/$modelId/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedOauthActionsIdRoute =
+  AuthenticatedOauthActionsIdRouteImport.update({
+    id: '/oauth/actions/$id',
+    path: '/oauth/actions/$id',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedSystemSettingsAuthIndexRoute =
   AuthenticatedSystemSettingsAuthIndexRouteImport.update({
     id: '/auth/',
@@ -456,11 +489,15 @@ export interface FileRoutesByFullPath {
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/payments/orders': typeof AuthenticatedPaymentsOrdersRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
+  '/payments/checkout/$orderId': typeof PaymentsCheckoutOrderIdRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
+  '/codex/': typeof AuthenticatedCodexIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/distribution/': typeof AuthenticatedDistributionIndexRoute
   '/finance/': typeof AuthenticatedFinanceIndexRoute
+  '/group-availability/': typeof AuthenticatedGroupAvailabilityIndexRoute
   '/keys/': typeof AuthenticatedKeysIndexRoute
   '/models/': typeof AuthenticatedModelsIndexRoute
   '/playground/': typeof AuthenticatedPlaygroundIndexRoute
@@ -474,6 +511,7 @@ export interface FileRoutesByFullPath {
   '/wallet/': typeof AuthenticatedWalletIndexRoute
   '/distribution/$slug/': typeof DistributionSlugIndexRoute
   '/pricing/$modelId/': typeof PricingModelIdIndexRoute
+  '/oauth/actions/$id': typeof AuthenticatedOauthActionsIdRoute
   '/system-settings/auth/$section': typeof AuthenticatedSystemSettingsAuthSectionRoute
   '/system-settings/billing/$section': typeof AuthenticatedSystemSettingsBillingSectionRoute
   '/system-settings/content/$section': typeof AuthenticatedSystemSettingsContentSectionRoute
@@ -519,11 +557,15 @@ export interface FileRoutesByTo {
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/payments/orders': typeof AuthenticatedPaymentsOrdersRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
+  '/payments/checkout/$orderId': typeof PaymentsCheckoutOrderIdRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
+  '/codex': typeof AuthenticatedCodexIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/distribution': typeof AuthenticatedDistributionIndexRoute
   '/finance': typeof AuthenticatedFinanceIndexRoute
+  '/group-availability': typeof AuthenticatedGroupAvailabilityIndexRoute
   '/keys': typeof AuthenticatedKeysIndexRoute
   '/models': typeof AuthenticatedModelsIndexRoute
   '/playground': typeof AuthenticatedPlaygroundIndexRoute
@@ -537,6 +579,7 @@ export interface FileRoutesByTo {
   '/wallet': typeof AuthenticatedWalletIndexRoute
   '/distribution/$slug': typeof DistributionSlugIndexRoute
   '/pricing/$modelId': typeof PricingModelIdIndexRoute
+  '/oauth/actions/$id': typeof AuthenticatedOauthActionsIdRoute
   '/system-settings/auth/$section': typeof AuthenticatedSystemSettingsAuthSectionRoute
   '/system-settings/billing/$section': typeof AuthenticatedSystemSettingsBillingSectionRoute
   '/system-settings/content/$section': typeof AuthenticatedSystemSettingsContentSectionRoute
@@ -586,11 +629,15 @@ export interface FileRoutesById {
   '/_authenticated/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/_authenticated/payments/orders': typeof AuthenticatedPaymentsOrdersRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
+  '/payments/checkout/$orderId': typeof PaymentsCheckoutOrderIdRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
+  '/_authenticated/codex/': typeof AuthenticatedCodexIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/distribution/': typeof AuthenticatedDistributionIndexRoute
   '/_authenticated/finance/': typeof AuthenticatedFinanceIndexRoute
+  '/_authenticated/group-availability/': typeof AuthenticatedGroupAvailabilityIndexRoute
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
   '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
@@ -604,6 +651,7 @@ export interface FileRoutesById {
   '/_authenticated/wallet/': typeof AuthenticatedWalletIndexRoute
   '/distribution/$slug/': typeof DistributionSlugIndexRoute
   '/pricing/$modelId/': typeof PricingModelIdIndexRoute
+  '/_authenticated/oauth/actions/$id': typeof AuthenticatedOauthActionsIdRoute
   '/_authenticated/system-settings/auth/$section': typeof AuthenticatedSystemSettingsAuthSectionRoute
   '/_authenticated/system-settings/billing/$section': typeof AuthenticatedSystemSettingsBillingSectionRoute
   '/_authenticated/system-settings/content/$section': typeof AuthenticatedSystemSettingsContentSectionRoute
@@ -652,11 +700,15 @@ export interface FileRouteTypes {
     | '/dashboard/$section'
     | '/errors/$error'
     | '/models/$section'
+    | '/payments/orders'
     | '/usage-logs/$section'
+    | '/payments/checkout/$orderId'
     | '/channels/'
+    | '/codex/'
     | '/dashboard/'
     | '/distribution/'
     | '/finance/'
+    | '/group-availability/'
     | '/keys/'
     | '/models/'
     | '/playground/'
@@ -670,6 +722,7 @@ export interface FileRouteTypes {
     | '/wallet/'
     | '/distribution/$slug/'
     | '/pricing/$modelId/'
+    | '/oauth/actions/$id'
     | '/system-settings/auth/$section'
     | '/system-settings/billing/$section'
     | '/system-settings/content/$section'
@@ -715,11 +768,15 @@ export interface FileRouteTypes {
     | '/dashboard/$section'
     | '/errors/$error'
     | '/models/$section'
+    | '/payments/orders'
     | '/usage-logs/$section'
+    | '/payments/checkout/$orderId'
     | '/channels'
+    | '/codex'
     | '/dashboard'
     | '/distribution'
     | '/finance'
+    | '/group-availability'
     | '/keys'
     | '/models'
     | '/playground'
@@ -733,6 +790,7 @@ export interface FileRouteTypes {
     | '/wallet'
     | '/distribution/$slug'
     | '/pricing/$modelId'
+    | '/oauth/actions/$id'
     | '/system-settings/auth/$section'
     | '/system-settings/billing/$section'
     | '/system-settings/content/$section'
@@ -781,11 +839,15 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard/$section'
     | '/_authenticated/errors/$error'
     | '/_authenticated/models/$section'
+    | '/_authenticated/payments/orders'
     | '/_authenticated/usage-logs/$section'
+    | '/payments/checkout/$orderId'
     | '/_authenticated/channels/'
+    | '/_authenticated/codex/'
     | '/_authenticated/dashboard/'
     | '/_authenticated/distribution/'
     | '/_authenticated/finance/'
+    | '/_authenticated/group-availability/'
     | '/_authenticated/keys/'
     | '/_authenticated/models/'
     | '/_authenticated/playground/'
@@ -799,6 +861,7 @@ export interface FileRouteTypes {
     | '/_authenticated/wallet/'
     | '/distribution/$slug/'
     | '/pricing/$modelId/'
+    | '/_authenticated/oauth/actions/$id'
     | '/_authenticated/system-settings/auth/$section'
     | '/_authenticated/system-settings/billing/$section'
     | '/_authenticated/system-settings/content/$section'
@@ -833,6 +896,7 @@ export interface RootRouteChildren {
   PricingIndexRoute: typeof PricingIndexRoute
   RankingsIndexRoute: typeof RankingsIndexRoute
   SetupIndexRoute: typeof SetupIndexRoute
+  PaymentsCheckoutOrderIdRoute: typeof PaymentsCheckoutOrderIdRoute
   DistributionSlugIndexRoute: typeof DistributionSlugIndexRoute
   PricingModelIdIndexRoute: typeof PricingModelIdIndexRoute
   DistributionSlugAnnouncementsIdRoute: typeof DistributionSlugAnnouncementsIdRoute
@@ -1043,6 +1107,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChatChatIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/codex/': {
+      id: '/_authenticated/codex/'
+      path: '/codex'
+      fullPath: '/codex/'
+      preLoaderRoute: typeof AuthenticatedCodexIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard/': {
       id: '/_authenticated/dashboard/'
       path: '/dashboard'
@@ -1078,6 +1149,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedFinanceIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/group-availability/': {
+      id: '/_authenticated/group-availability/'
+      path: '/group-availability'
+      fullPath: '/group-availability/'
+      preLoaderRoute: typeof AuthenticatedGroupAvailabilityIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/keys/': {
       id: '/_authenticated/keys/'
       path: '/keys'
@@ -1097,6 +1175,13 @@ declare module '@tanstack/react-router' {
       path: '/models/$section'
       fullPath: '/models/$section'
       preLoaderRoute: typeof AuthenticatedModelsSectionRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/payments/orders': {
+      id: '/_authenticated/payments/orders'
+      path: '/payments/orders'
+      fullPath: '/payments/orders'
+      preLoaderRoute: typeof AuthenticatedPaymentsOrdersRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/playground/': {
@@ -1176,12 +1261,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DistributionSlugIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/payments/checkout/$orderId': {
+      id: '/payments/checkout/$orderId'
+      path: '/payments/checkout/$orderId'
+      fullPath: '/payments/checkout/$orderId'
+      preLoaderRoute: typeof PaymentsCheckoutOrderIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/pricing/$modelId/': {
       id: '/pricing/$modelId/'
       path: '/pricing/$modelId'
       fullPath: '/pricing/$modelId/'
       preLoaderRoute: typeof PricingModelIdIndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/oauth/actions/$id': {
+      id: '/_authenticated/oauth/actions/$id'
+      path: '/oauth/actions/$id'
+      fullPath: '/oauth/actions/$id'
+      preLoaderRoute: typeof AuthenticatedOauthActionsIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/system-settings/auth/': {
       id: '/_authenticated/system-settings/auth/'
@@ -1383,11 +1482,14 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardSectionRoute: typeof AuthenticatedDashboardSectionRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedModelsSectionRoute: typeof AuthenticatedModelsSectionRoute
+  AuthenticatedPaymentsOrdersRoute: typeof AuthenticatedPaymentsOrdersRoute
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
+  AuthenticatedCodexIndexRoute: typeof AuthenticatedCodexIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedDistributionIndexRoute: typeof AuthenticatedDistributionIndexRoute
   AuthenticatedFinanceIndexRoute: typeof AuthenticatedFinanceIndexRoute
+  AuthenticatedGroupAvailabilityIndexRoute: typeof AuthenticatedGroupAvailabilityIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
   AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
@@ -1398,6 +1500,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedUsageLogsIndexRoute: typeof AuthenticatedUsageLogsIndexRoute
   AuthenticatedUsersIndexRoute: typeof AuthenticatedUsersIndexRoute
   AuthenticatedWalletIndexRoute: typeof AuthenticatedWalletIndexRoute
+  AuthenticatedOauthActionsIdRoute: typeof AuthenticatedOauthActionsIdRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
@@ -1408,11 +1511,15 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardSectionRoute: AuthenticatedDashboardSectionRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedModelsSectionRoute: AuthenticatedModelsSectionRoute,
+  AuthenticatedPaymentsOrdersRoute: AuthenticatedPaymentsOrdersRoute,
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
+  AuthenticatedCodexIndexRoute: AuthenticatedCodexIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedDistributionIndexRoute: AuthenticatedDistributionIndexRoute,
   AuthenticatedFinanceIndexRoute: AuthenticatedFinanceIndexRoute,
+  AuthenticatedGroupAvailabilityIndexRoute:
+    AuthenticatedGroupAvailabilityIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,
   AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
@@ -1424,6 +1531,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedUsageLogsIndexRoute: AuthenticatedUsageLogsIndexRoute,
   AuthenticatedUsersIndexRoute: AuthenticatedUsersIndexRoute,
   AuthenticatedWalletIndexRoute: AuthenticatedWalletIndexRoute,
+  AuthenticatedOauthActionsIdRoute: AuthenticatedOauthActionsIdRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
@@ -1446,6 +1554,7 @@ const rootRouteChildren: RootRouteChildren = {
   PricingIndexRoute: PricingIndexRoute,
   RankingsIndexRoute: RankingsIndexRoute,
   SetupIndexRoute: SetupIndexRoute,
+  PaymentsCheckoutOrderIdRoute: PaymentsCheckoutOrderIdRoute,
   DistributionSlugIndexRoute: DistributionSlugIndexRoute,
   PricingModelIdIndexRoute: PricingModelIdIndexRoute,
   DistributionSlugAnnouncementsIdRoute: DistributionSlugAnnouncementsIdRoute,

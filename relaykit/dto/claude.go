@@ -15,6 +15,8 @@ type ClaudeMetadata struct {
 }
 
 type ClaudeMediaMessage struct {
+	Citation     *ClaudeCitation      `json:"citation,omitempty"`
+	Citations    []ClaudeCitation     `json:"citations,omitempty"`
 	Type         string               `json:"type,omitempty"`
 	Text         *string              `json:"text,omitempty"`
 	Model        string               `json:"model,omitempty"`
@@ -33,6 +35,40 @@ type ClaudeMediaMessage struct {
 	Input     any    `json:"input,omitempty"`
 	Content   any    `json:"content,omitempty"`
 	ToolUseId string `json:"tool_use_id,omitempty"`
+}
+
+type ClaudeCitation struct {
+	Type  string `json:"type"`
+	URL   string `json:"url,omitempty"`
+	Title string `json:"title,omitempty"`
+	raw   json.RawMessage
+}
+
+// Preserve provider fields (including document offsets and encrypted search
+// references) when forwarding native Claude. Chat normalization below only
+// exposes the URL/title fields needed to render public sources.
+func (c *ClaudeCitation) UnmarshalJSON(data []byte) error {
+	type plain ClaudeCitation
+	if err := kitutil.Unmarshal(data, (*plain)(c)); err != nil {
+		return err
+	}
+	c.raw = append(c.raw[:0], data...)
+	return nil
+}
+
+func (c ClaudeCitation) MarshalJSON() ([]byte, error) {
+	if len(c.raw) > 0 {
+		return c.raw, nil
+	}
+	type plain ClaudeCitation
+	return kitutil.Marshal(plain(c))
+}
+
+func (c ClaudeCitation) ChatAnnotation() *ChatAnnotation {
+	if c.Type != "web_search_result_location" {
+		return nil
+	}
+	return NewURLCitationAnnotation(c.URL, c.Title)
 }
 
 func (c *ClaudeMediaMessage) SetText(s string) {

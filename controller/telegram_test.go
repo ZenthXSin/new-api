@@ -169,6 +169,7 @@ func TestTelegramBindCommitsFlowAssertionAndBindingAtomically(t *testing.T) {
 		&model.User{},
 		&model.UserSession{},
 		&model.AuthFlow{},
+		&model.OAuthAction{},
 		&model.ExternalIdentityClaim{},
 	))
 	model.DB = db

@@ -29,6 +29,7 @@ import {
   buildOIDCOAuthUrl,
   buildLinuxDOOAuthUrl,
 } from '../lib/oauth'
+import { rememberOAuthLoginRedirect } from '../lib/oauth-callback-mode'
 import { pickTelegramAuthorization } from '../lib/telegram-login'
 import type { SystemStatus, CustomOAuthProviderInfo } from '../types'
 import { useAuthRedirect } from './use-auth-redirect'
@@ -90,6 +91,7 @@ export function useOAuthLogin(
     try {
       await resetSession()
       const state = await createOAuthFlow('github', 'login')
+      rememberOAuthLoginRedirect('github', state, redirectTo)
 
       const url = buildGitHubOAuthUrl(status.github_client_id, state)
       window.open(url, '_self')
@@ -111,6 +113,7 @@ export function useOAuthLogin(
     try {
       await resetSession()
       const state = await createOAuthFlow('discord', 'login')
+      rememberOAuthLoginRedirect('discord', state, redirectTo)
 
       const url = buildDiscordOAuthUrl(status.discord_client_id, state)
       window.open(url, '_self')
@@ -128,6 +131,7 @@ export function useOAuthLogin(
     try {
       await resetSession()
       const state = await createOAuthFlow('oidc', 'login')
+      rememberOAuthLoginRedirect('oidc', state, redirectTo)
 
       const url = buildOIDCOAuthUrl(
         status.oidc_authorization_endpoint,
@@ -149,6 +153,7 @@ export function useOAuthLogin(
     try {
       await resetSession()
       const state = await createOAuthFlow('linuxdo', 'login')
+      rememberOAuthLoginRedirect('linuxdo', state, redirectTo)
 
       const url = buildLinuxDOOAuthUrl(status.linuxdo_client_id, state)
       window.open(url, '_self')
@@ -210,6 +215,7 @@ export function useOAuthLogin(
     try {
       await resetSession()
       const state = await createOAuthFlow(provider.slug, 'login')
+      rememberOAuthLoginRedirect(provider.slug, state, redirectTo)
 
       const redirectUri = `${window.location.origin}/oauth/${provider.slug}`
       const url = new URL(provider.authorization_endpoint)

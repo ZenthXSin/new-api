@@ -3,9 +3,10 @@ package constant
 type ContextKey string
 
 const (
-	ContextKeyTokenCountMeta  ContextKey = "token_count_meta"
-	ContextKeyPromptTokens    ContextKey = "prompt_tokens"
-	ContextKeyEstimatedTokens ContextKey = "estimated_tokens"
+	ContextKeyPlaygroundRequest ContextKey = "playground_request"
+	ContextKeyTokenCountMeta    ContextKey = "token_count_meta"
+	ContextKeyPromptTokens      ContextKey = "prompt_tokens"
+	ContextKeyEstimatedTokens   ContextKey = "estimated_tokens"
 
 	ContextKeyOriginalModel    ContextKey = "original_model"
 	ContextKeyRequestStartTime ContextKey = "request_start_time"

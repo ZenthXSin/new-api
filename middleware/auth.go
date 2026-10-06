@@ -43,6 +43,9 @@ func validUserInfo(username string, role int) bool {
 }
 
 func authHelper(c *gin.Context, minRole int) {
+	if tryOAuthDashboardAuth(c, minRole) {
+		return
+	}
 	user, identity, useAccessToken, err := authenticateDashboardRequest(c)
 	if err != nil {
 		writeDashboardAuthError(c, err)
@@ -77,6 +80,9 @@ func authHelper(c *gin.Context, minRole int) {
 
 func TryUserAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
+		if tryOAuthDashboardAuth(c, common.RoleCommonUser) {
+			return
+		}
 		user, identity, credentialKind, err := classifyDashboardCredential(c)
 		if err != nil {
 			writeDashboardAuthError(c, err)
@@ -247,6 +253,9 @@ func WssAuth(c *gin.Context) {
 // Used for endpoints that need to be accessible from both the dashboard and API clients.
 func TokenOrUserAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
+		if tryOAuthRelayAuth(c) {
+			return
+		}
 		raw, ok := authorizationToken(c.GetHeader("Authorization"))
 		if ok {
 			identity, internal, err := service.ParseDashboardAccessToken(raw)
@@ -278,6 +287,9 @@ func TokenOrUserAuth() func(c *gin.Context) {
 // 仍然检查用户是否被封禁。
 func TokenAuthReadOnly() func(c *gin.Context) {
 	return func(c *gin.Context) {
+		if tryOAuthRelayAuth(c) {
+			return
+		}
 		key := c.Request.Header.Get("Authorization")
 		if key == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{
@@ -309,6 +321,10 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 				})
 			}
 			c.Abort()
+			return
+		}
+
+		if !authorizeOAuthDerivedToken(c, token) {
 			return
 		}
 
@@ -352,6 +368,9 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 
 func TokenAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
+		if tryOAuthRelayAuth(c) {
+			return
+		}
 		// 先检测是否为ws
 		if c.Request.Header.Get("Sec-WebSocket-Protocol") != "" {
 			// Sec-WebSocket-Protocol: realtime, openai-insecure-api-key.sk-xxx, openai-beta.realtime-v1
@@ -423,6 +442,10 @@ func TokenAuth() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusUnauthorized,
 					common.TranslateMessage(c, i18n.MsgTokenInvalid))
 			}
+			return
+		}
+
+		if !authorizeOAuthDerivedToken(c, token) {
 			return
 		}
 

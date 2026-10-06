@@ -39,9 +39,8 @@ func setupStreamTest(t *testing.T, body io.Reader) (*gin.Context, *http.Response
 		Body: io.NopCloser(body),
 	}
 
-	info := &relaycommon.RelayInfo{
-		ChannelMeta: &relaycommon.ChannelMeta{},
-	}
+	info := relaycommon.GenRelayInfoOpenAI(c, nil)
+	info.ChannelMeta = &relaycommon.ChannelMeta{}
 
 	return c, resp, info
 }

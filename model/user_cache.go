@@ -118,11 +118,17 @@ func GetUserCache(userId int) (*UserBase, error) {
 	// Redis misses and read failures both fall back to the shared database. A
 	// version fence newer than the database is the one exception: allowing that
 	// snapshot would re-authorize a user while a restrictive update is pending.
+	if err := checkAppPaymentWalletGuard(userId); err != nil {
+		return nil, err
+	}
 	user, err := GetUserById(userId, false)
 	if err != nil {
 		return nil, err
 	}
 	if common.RedisEnabled {
+		if err := ensureAppPaymentWalletMirror(userId, user.Quota); err != nil {
+			return nil, err
+		}
 		floor, floorErr := getUserAuthVersionFloor(userId)
 		if floorErr == nil && floor > user.AuthVersion {
 			return nil, ErrUserAuthCachePending
@@ -132,6 +138,11 @@ func GetUserCache(userId int) (*UserBase, error) {
 				return nil, err
 			}
 			common.SysLog("failed to synchronously populate user cache: " + err.Error())
+		}
+	}
+	if common.RedisEnabled {
+		if cached, cacheErr := cacheGetUserBase(userId); cacheErr == nil {
+			return cached, nil
 		}
 	}
 	return user.ToBaseUser(), nil

@@ -17,12 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useEffect } from 'react'
-import { useForm } from 'react-hook-form'
+import { useEffect, useId } from 'react'
+import { Controller, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { CopyButton } from '@/components/copy-button'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -33,28 +34,29 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 
 import {
   useCreateOauthClient,
+  useOauthClientCapabilities,
   useUpdateOauthClient,
 } from '../hooks/use-oauth-clients'
 import {
-  OAUTH_SCOPE_OPTIONS,
   type OauthClient,
   type OauthClientFormValues,
   oauthClientFormSchema,
 } from '../types'
+import { ClientScopeSelector } from './client-scope-selector'
 
 type ClientFormDialogProps = {
   open: boolean
@@ -65,10 +67,12 @@ type ClientFormDialogProps = {
 
 export function ClientFormDialog(props: ClientFormDialogProps) {
   const { t } = useTranslation()
-  const createClient = useCreateOauthClient()
+  const id = useId()
+  const createClient = useCreateOauthClient(props.onSecretCreated)
   const updateClient = useUpdateOauthClient()
+  const catalog = useOauthClientCapabilities(props.open)
   const isUpdate = !!props.client
-
+  const isPending = createClient.isPending || updateClient.isPending
   const form = useForm<OauthClientFormValues>({
     resolver: zodResolver(oauthClientFormSchema),
     defaultValues: {
@@ -83,245 +87,252 @@ export function ClientFormDialog(props: ClientFormDialogProps) {
 
   useEffect(() => {
     if (!props.open) return
-    if (props.client) {
-      form.reset({
-        name: props.client.name,
-        description: props.client.description,
-        redirect_uris:
-          props.client.redirect_uris.length > 0
-            ? props.client.redirect_uris
-            : [''],
-        scopes: props.client.scopes,
-        is_public: props.client.is_public,
-        enabled: props.client.enabled,
-      })
-    } else {
-      form.reset({
-        name: '',
-        description: '',
-        redirect_uris: [''],
-        scopes: ['openid', 'profile', 'email'],
-        is_public: false,
-        enabled: true,
-      })
-    }
+    form.reset({
+      name: props.client?.name ?? '',
+      description: props.client?.description ?? '',
+      redirect_uris: props.client?.redirect_uris.length
+        ? props.client.redirect_uris
+        : [''],
+      scopes: props.client?.scopes ?? ['openid', 'profile', 'email'],
+      is_public: props.client?.is_public ?? false,
+      enabled: props.client?.enabled ?? true,
+    })
   }, [props.open, props.client, form])
 
-  const isPublic = form.watch('is_public')
-
   const onSubmit = async (values: OauthClientFormValues) => {
-    const cleaned: OauthClientFormValues = {
-      ...values,
-      redirect_uris: values.redirect_uris
-        .map((uri) => uri.trim())
-        .filter(Boolean),
+    if (!catalog.data || catalog.isError || isPending) return
+    const supported = new Set(
+      catalog.data.capabilities.map((item) => item.scope)
+    )
+    if (values.scopes.some((scope) => !supported.has(scope))) {
+      form.setError('scopes', { message: 'Select a supported permission' })
+      return
     }
     try {
-      if (isUpdate && props.client) {
-        const res = await updateClient.mutateAsync({
-          id: props.client.id,
-          values: cleaned,
-        })
-        if (!res.success) {
-          toast.error(res.message || t('Failed to update client'))
-          return
-        }
-      } else {
-        const res = await createClient.mutateAsync(cleaned)
-        if (!res.success) {
-          toast.error(res.message || t('Failed to create client'))
-          return
-        }
-        if (res.data?.client_secret) {
-          props.onSecretCreated(
-            res.data.client.client_id,
-            res.data.client_secret
-          )
-        }
-      }
+      if (props.client) {
+        await updateClient.mutateAsync({ id: props.client.id, values })
+      } else await createClient.mutateAsync(values)
       props.onOpenChange(false)
-    } catch (error) {
+    } catch {
       toast.error(
-        error instanceof Error ? error.message : t('An error occurred')
+        isUpdate ? t('Failed to update client') : t('Failed to create client')
       )
     }
   }
 
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className='sm:max-w-[560px]'>
+    <Dialog
+      open={props.open}
+      onOpenChange={(open) => {
+        if (!isPending) props.onOpenChange(open)
+      }}
+    >
+      <DialogContent
+        className='max-h-[90dvh] overflow-y-auto sm:max-w-2xl'
+        showCloseButton={!isPending}
+      >
         <DialogHeader>
           <DialogTitle>
             {isUpdate ? t('Edit Client') : t('Add Client')}
           </DialogTitle>
           <DialogDescription>
             {t(
-              'Register a third-party application for "Sign in with this site".'
+              'Register your own application or a third-party application for sign-in and delegated access.'
             )}
           </DialogDescription>
         </DialogHeader>
-        <Form {...form}>
-          <form
-            onSubmit={form.handleSubmit(onSubmit)}
-            className='space-y-4'
-          >
-            <FormField
-              control={form.control}
-              name='name'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Name')}</FormLabel>
-                  <FormControl>
-                    <Input
-                      {...field}
-                      placeholder={t('Application name')}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name='description'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Description')}</FormLabel>
-                  <FormControl>
-                    <Input {...field} placeholder={t('Optional')} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
+        <form onSubmit={form.handleSubmit(onSubmit)}>
+          <FieldGroup className='mb-5'>
+            <Field data-invalid={!!form.formState.errors.name}>
+              <FieldLabel htmlFor={`${id}-name`}>{t('Name')}</FieldLabel>
+              <Input
+                id={`${id}-name`}
+                {...form.register('name')}
+                maxLength={128}
+                disabled={isPending}
+                aria-invalid={!!form.formState.errors.name}
+                placeholder={t('Application name')}
+              />
+              {form.formState.errors.name?.message ? (
+                <FieldError>{t(form.formState.errors.name.message)}</FieldError>
+              ) : null}
+            </Field>
+            <Field data-invalid={!!form.formState.errors.description}>
+              <FieldLabel htmlFor={`${id}-description`}>
+                {t('Description')}
+              </FieldLabel>
+              <Input
+                id={`${id}-description`}
+                {...form.register('description')}
+                maxLength={512}
+                disabled={isPending}
+                aria-invalid={!!form.formState.errors.description}
+                placeholder={t('Optional')}
+              />
+              {form.formState.errors.description?.message ? (
+                <FieldError>
+                  {t(form.formState.errors.description.message)}
+                </FieldError>
+              ) : null}
+            </Field>
+            <Controller
               control={form.control}
               name='redirect_uris'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Redirect URIs')}</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      value={(field.value || []).join('\n')}
-                      onChange={(event) =>
-                        field.onChange(event.target.value.split('\n'))
-                      }
-                      placeholder="https://app.example.com/callback"
-                      rows={3}
-                    />
-                  </FormControl>
-                  <FormDescription>
+              render={({ field, fieldState }) => (
+                <Field data-invalid={!!fieldState.error}>
+                  <FieldLabel htmlFor={`${id}-redirect`}>
+                    {t('Redirect URIs')}
+                  </FieldLabel>
+                  <Textarea
+                    ref={field.ref}
+                    id={`${id}-redirect`}
+                    name={field.name}
+                    onBlur={field.onBlur}
+                    value={field.value.join('\n')}
+                    onChange={(event) =>
+                      field.onChange(event.target.value.split('\n'))
+                    }
+                    disabled={isPending}
+                    aria-invalid={!!fieldState.error}
+                    aria-describedby={`${id}-redirect-description`}
+                    placeholder='https://app.example.com/callback'
+                    rows={3}
+                  />
+                  <FieldDescription id={`${id}-redirect-description`}>
                     {t(
-                      'One exact callback URL per line. Exact match is enforced.'
+                      'One exact HTTPS callback per line. HTTP is allowed only for localhost and loopback addresses.'
                     )}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
+                  </FieldDescription>
+                  {fieldState.error ? (
+                    <FieldError>
+                      {t(
+                        fieldState.error.message ??
+                          'Use an HTTPS callback or a loopback HTTP callback without credentials, fragments, or wildcards'
+                      )}
+                    </FieldError>
+                  ) : null}
+                </Field>
               )}
             />
-            <FormField
-              control={form.control}
-              name='scopes'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Allowed Scopes')}</FormLabel>
-                  <div className='space-y-2'>
-                    {OAUTH_SCOPE_OPTIONS.map((option) => {
-                      const checked = (field.value || []).includes(
-                        option.value
-                      )
-                      return (
-                        <label
-                          key={option.value}
-                          className='flex items-center gap-2 text-sm'
-                        >
-                          <input
-                            type='checkbox'
-                            checked={checked}
-                            onChange={(event) => {
-                              const next = event.target.checked
-                                ? [...(field.value || []), option.value]
-                                : (field.value || []).filter(
-                                    (scope) => scope !== option.value
-                                  )
-                              field.onChange(next)
-                            }}
-                          />
-                          <span>{t(option.labelKey)}</span>
-                        </label>
-                      )
-                    })}
-                  </div>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
+            {catalog.isError ? (
+              <Alert variant='destructive'>
+                <AlertDescription>
+                  {t('Unable to load application permissions')}
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    onClick={() => void catalog.refetch()}
+                  >
+                    {t('Retry')}
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            {!catalog.data && !catalog.isError ? (
+              <Skeleton
+                className='h-40 w-full'
+                aria-label={t('Loading permissions')}
+              />
+            ) : null}
+            {catalog.data && !catalog.isError ? (
+              <Controller
+                control={form.control}
+                name='scopes'
+                render={({ field, fieldState }) => (
+                  <ClientScopeSelector
+                    capabilities={catalog.data.capabilities}
+                    value={field.value}
+                    onChange={field.onChange}
+                    disabled={isPending}
+                    error={fieldState.error?.message}
+                  />
+                )}
+              />
+            ) : null}
+            <Controller
               control={form.control}
               name='is_public'
               render={({ field }) => (
-                <FormItem className='flex items-center justify-between rounded-md border p-3'>
-                  <div className='space-y-0.5'>
-                    <FormLabel>{t('Public client (PKCE)')}</FormLabel>
-                    <FormDescription>
+                <Field
+                  orientation='horizontal'
+                  data-disabled={isUpdate || isPending}
+                >
+                  <FieldContent>
+                    <FieldLabel htmlFor={`${id}-public`}>
+                      {t('Public client (PKCE)')}
+                    </FieldLabel>
+                    <FieldDescription>
                       {t(
                         'For mobile/desktop apps that cannot keep a secret. PKCE is required.'
                       )}
-                    </FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </FormItem>
+                    </FieldDescription>
+                    {isUpdate ? (
+                      <FieldDescription>
+                        {t(
+                          'Client authentication type cannot be changed after creation.'
+                        )}
+                      </FieldDescription>
+                    ) : null}
+                  </FieldContent>
+                  <Switch
+                    id={`${id}-public`}
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                    disabled={isUpdate || isPending}
+                  />
+                </Field>
               )}
             />
-            {!isPublic ? (
-              <p className='text-muted-foreground text-sm'>
+            {!form.watch('is_public') && !isUpdate ? (
+              <FieldDescription>
                 {t(
                   'A client secret is generated automatically and shown only once after creation.'
                 )}
-              </p>
+              </FieldDescription>
             ) : null}
-            <FormField
+            <Controller
               control={form.control}
               name='enabled'
               render={({ field }) => (
-                <FormItem className='flex items-center justify-between rounded-md border p-3'>
-                  <div className='space-y-0.5'>
-                    <FormLabel>{t('Enabled')}</FormLabel>
-                    <FormDescription>
-                      {t('Disabled clients cannot start new authorizations.')}
-                    </FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </FormItem>
+                <Field orientation='horizontal' data-disabled={isPending}>
+                  <FieldContent>
+                    <FieldLabel htmlFor={`${id}-enabled`}>
+                      {t('Enabled')}
+                    </FieldLabel>
+                    <FieldDescription>
+                      {t(
+                        'Disabled clients lose access and cannot refresh tokens or start new authorizations.'
+                      )}
+                    </FieldDescription>
+                  </FieldContent>
+                  <Switch
+                    id={`${id}-enabled`}
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                    disabled={isPending}
+                  />
+                </Field>
               )}
             />
-            <DialogFooter>
-              <Button
-                type='button'
-                variant='outline'
-                onClick={() => props.onOpenChange(false)}
-              >
-                {t('Cancel')}
-              </Button>
-              <Button
-                type='submit'
-                disabled={createClient.isPending || updateClient.isPending}
-              >
-                {isUpdate ? t('Save') : t('Create')}
-              </Button>
-            </DialogFooter>
-          </form>
-        </Form>
+          </FieldGroup>
+          <DialogFooter>
+            <Button
+              type='button'
+              variant='outline'
+              disabled={isPending}
+              onClick={() => props.onOpenChange(false)}
+            >
+              {t('Cancel')}
+            </Button>
+            <Button
+              type='submit'
+              disabled={isPending || !catalog.data || catalog.isError}
+            >
+              {isUpdate ? t('Save') : t('Create')}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )
@@ -338,43 +349,51 @@ export function SecretRevealDialog(props: SecretRevealDialogProps) {
   const { t } = useTranslation()
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className='sm:max-w-[520px]'>
-        <DialogHeader>
+      <DialogContent className='min-w-0 grid-cols-[minmax(0,1fr)] sm:max-w-[520px]'>
+        <DialogHeader className='min-w-0'>
           <DialogTitle>{t('Client secret')}</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className='min-w-0 [overflow-wrap:anywhere]'>
             {t(
               'Copy this secret now. It is stored hashed and cannot be shown again.'
             )}
           </DialogDescription>
         </DialogHeader>
-        <div className='space-y-3'>
-          <div className='flex items-center justify-between gap-2'>
-            <span className='text-muted-foreground text-sm'>
+        <div className='flex min-w-0 flex-col gap-3'>
+          <div className='flex min-w-0 items-center justify-between gap-2'>
+            <span className='text-muted-foreground shrink-0 text-sm'>
               {t('Client ID')}
             </span>
-            <span className='flex min-w-0 items-center gap-2'>
+            <span className='flex min-w-0 flex-1 items-center justify-end gap-2'>
               <code className='bg-muted min-w-0 truncate rounded px-1.5 py-0.5 font-mono text-xs'>
                 {props.clientId}
               </code>
-              <CopyButton value={props.clientId} size='icon' className='size-7' />
+              <CopyButton
+                value={props.clientId}
+                aria-label={t('Copy client ID')}
+                size='icon'
+                className='size-7'
+              />
             </span>
           </div>
-          <div className='flex items-center justify-between gap-2'>
-            <span className='text-muted-foreground text-sm'>
+          <div className='flex min-w-0 items-center justify-between gap-2'>
+            <span className='text-muted-foreground shrink-0 text-sm'>
               {t('Client secret')}
             </span>
-            <span className='flex min-w-0 items-center gap-2'>
+            <span className='flex min-w-0 flex-1 items-center justify-end gap-2'>
               <code className='bg-muted min-w-0 truncate rounded px-1.5 py-0.5 font-mono text-xs'>
                 {props.secret}
               </code>
-              <CopyButton value={props.secret} size='icon' className='size-7' />
+              <CopyButton
+                value={props.secret}
+                aria-label={t('Copy client secret')}
+                size='icon'
+                className='size-7'
+              />
             </span>
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={() => props.onOpenChange(false)}>
-            {t('Done')}
-          </Button>
+          <Button onClick={() => props.onOpenChange(false)}>{t('Done')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -856,14 +856,14 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 func TestChannel(c *gin.Context) {
 	channelId, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		common.ApiError(c, err)
+		channelOperationError(c, err, "渠道测试失败，请在本站查看渠道诊断")
 		return
 	}
 	channel, err := model.CacheGetChannel(channelId)
 	if err != nil {
 		channel, err = model.GetChannelById(channelId, true)
 		if err != nil {
-			common.ApiError(c, err)
+			channelOperationError(c, err, "渠道测试失败，请在本站查看渠道诊断")
 			return
 		}
 	}
@@ -877,7 +877,7 @@ func TestChannel(c *gin.Context) {
 	isStream, _ := strconv.ParseBool(c.Query("stream"))
 	testUserID, err := resolveChannelTestUserID(c)
 	if err != nil {
-		common.ApiError(c, err)
+		channelOperationError(c, err, "渠道测试失败，请在本站查看渠道诊断")
 		return
 	}
 	tik := time.Now()
@@ -886,6 +886,11 @@ func TestChannel(c *gin.Context) {
 		requestCtx = c.Request.Context()
 	}
 	result := testChannel(requestCtx, channel, testUserID, testModel, endpointType, isStream)
+	if _, delegated := middleware.GetOAuthPrincipal(c); delegated && (result.localErr != nil || result.newAPIError != nil) {
+		// Parameter overrides can control both error text and error codes.
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "渠道测试失败，请在本站查看渠道诊断", "error_code": "channel_operation_failed", "time": time.Since(tik).Seconds()})
+		return
+	}
 	if result.localErr != nil {
 		resp := gin.H{
 			"success": false,

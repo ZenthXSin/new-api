@@ -24,8 +24,9 @@ import {
 } from '@tanstack/react-router'
 import type { AxiosRequestConfig } from 'axios'
 import i18next from 'i18next'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { toast } from 'sonner'
+import { z } from 'zod'
 
 import { OAuthCallbackScreen } from '@/features/auth/components/oauth-callback-screen'
 import {
@@ -39,15 +40,33 @@ import {
   startOAuthBindResponseDeadline,
 } from '@/features/auth/lib/oauth-bind-window'
 import {
+  consumeOAuthLoginRedirect,
   getOAuthSessionStorage,
   resolveOAuthCallbackMode,
 } from '@/features/auth/lib/oauth-callback-mode'
+import type { LoginResponse } from '@/features/auth/types'
 import { api, applyAuthBundle, isAuthBundle } from '@/lib/api'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
+import { useAuthStore } from '@/stores/auth-store'
 
 type OAuthRequestConfig = AxiosRequestConfig & {
   skipBusinessError?: boolean
+  skipErrorHandler?: boolean
+  skipAuthRefresh?: boolean
+  skipPanelAuth?: boolean
 }
+
+const callbackSearchSchema = z
+  .object({
+    code: z.string().optional(),
+    state: z.string().optional(),
+    error: z.string().optional(),
+    error_description: z.string().optional(),
+    telegram_bind: z.string().optional(),
+    flow_token: z.string().optional(),
+    error_code: z.string().optional(),
+  })
+  .refine((value) => !(value.code && value.error))
 
 interface OAuthBindingResult {
   type: typeof OAUTH_BIND_RESULT_MESSAGE
@@ -59,19 +78,22 @@ interface OAuthBindingResult {
 
 function OAuthCallback() {
   const navigate = useNavigate()
+  const loginExchange = useRef<{
+    key: string
+    redirect: string | null
+    sessionID: string | undefined
+    userID: number | undefined
+    request: Promise<{ data: LoginResponse }>
+  } | null>(null)
+  const completedLogin = useRef<string | null>(null)
   const { provider } = useParams({ from: '/oauth/$provider' }) as {
     provider: string
   }
-  const search = useSearch({ from: '/oauth/$provider' }) as {
-    code?: string
-    state?: string
-    error?: string
-    error_description?: string
-    redirect?: string
-    telegram_bind?: string
-    flow_token?: string
-    error_code?: string
-  }
+  const searchResult = callbackSearchSchema.safeParse(
+    useSearch({ from: '/oauth/$provider' })
+  )
+  const validSearch = searchResult.success
+  const search = searchResult.data ?? {}
   const callbackState = search.state ?? ''
   const isTelegramBindCallback =
     provider === 'telegram' &&
@@ -88,6 +110,14 @@ function OAuthCallback() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
+
+    if (!validSearch) {
+      if (completedLogin.current === 'invalid-search') return
+      completedLogin.current = 'invalid-search'
+      toast.error(i18next.t('OAuth failed'))
+      void navigate({ to: '/sign-in', replace: true })
+      return
+    }
 
     const code = search.code ?? ''
     const state = callbackState
@@ -180,54 +210,92 @@ function OAuthCallback() {
       void navigate({ href, replace: true })
     }
 
-    if (!code && !search.error) {
-      toast.error(i18next.t('Missing code'))
-      safeNavigate('/sign-in', '/sign-in')
+    const loginKey = JSON.stringify([provider, state, code, search.error])
+    if (completedLogin.current === loginKey) return
+
+    if (!state || (!code && !search.error)) {
+      const redirect = consumeOAuthLoginRedirect(provider, state)
+      completedLogin.current = loginKey
+      toast.error(i18next.t('OAuth failed'))
+      safeNavigate(
+        redirect
+          ? `/sign-in?redirect=${encodeURIComponent(redirect)}`
+          : '/sign-in',
+        '/sign-in'
+      )
       return
     }
 
+    if (loginExchange.current?.key !== loginKey) {
+      const config: OAuthRequestConfig = {
+        params: {
+          code: code || undefined,
+          state,
+          error: search.error,
+          error_description: search.error_description,
+        },
+        skipBusinessError: true,
+        skipErrorHandler: true,
+        skipAuthRefresh: true,
+        skipPanelAuth: true,
+      }
+      const auth = useAuthStore.getState().auth
+      loginExchange.current = {
+        key: loginKey,
+        redirect: consumeOAuthLoginRedirect(provider, state),
+        sessionID: auth.session?.sid,
+        userID: auth.user?.id,
+        request: api.get<LoginResponse>(`/api/oauth/${provider}`, config),
+      }
+    }
+    const exchange = loginExchange.current
+    let active = true
     void (async () => {
       try {
-        const config: OAuthRequestConfig = {
-          params: {
-            code: code || undefined,
-            state,
-            error: search.error,
-            error_description: search.error_description,
-          },
-          skipBusinessError: true,
+        const response = await exchange.request
+        const auth = useAuthStore.getState().auth
+        if (
+          !active ||
+          auth.session?.sid !== exchange.sessionID ||
+          auth.user?.id !== exchange.userID
+        ) {
+          return
         }
-        const response = await api.get(`/api/oauth/${provider}`, config)
+        completedLogin.current = loginKey
         if (response.data?.success && isAuthBundle(response.data?.data)) {
           applyAuthBundle(response.data.data)
-          safeNavigate(search.redirect)
+          safeNavigate(exchange.redirect)
           toast.success(i18next.t('Signed in successfully!'))
           return
         }
         const messageKey = getServerErrorMessageKey(response.data)
-        toast.error(
-          messageKey
-            ? i18next.t(messageKey)
-            : response.data?.message || i18next.t('OAuth failed')
-        )
+        toast.error(i18next.t(messageKey || 'OAuth failed'))
       } catch (error: unknown) {
-        const messageKey = getServerErrorMessageKey(error)
-        const responseMessage = (
-          error as { response?: { data?: { message?: string } } }
-        ).response?.data?.message
-        if (!messageKey) {
-          toast.error(
-            responseMessage ||
-              (error instanceof Error
-                ? error.message
-                : i18next.t('OAuth failed'))
-          )
+        const auth = useAuthStore.getState().auth
+        if (
+          !active ||
+          auth.session?.sid !== exchange.sessionID ||
+          auth.user?.id !== exchange.userID
+        ) {
+          return
         }
+        completedLogin.current = loginKey
+        const messageKey = getServerErrorMessageKey(error)
+        toast.error(i18next.t(messageKey || 'OAuth failed'))
       }
-      safeNavigate('/sign-in', '/sign-in')
+      safeNavigate(
+        exchange.redirect
+          ? `/sign-in?redirect=${encodeURIComponent(exchange.redirect)}`
+          : '/sign-in',
+        '/sign-in'
+      )
     })()
+    return () => {
+      active = false
+    }
   }, [
     callbackState,
+    validSearch,
     mode,
     navigate,
     provider,
@@ -236,7 +304,6 @@ function OAuthCallback() {
     search.error_code,
     search.error_description,
     search.flow_token,
-    search.redirect,
     search.telegram_bind,
   ])
 

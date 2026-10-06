@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { getMarkdownTagMatches } from '@/lib/markdown-code-ranges'
+
 interface ParsedThinkTags {
   visibleContent: string
   reasoning: string
@@ -31,39 +33,37 @@ export function parseThinkTags(content: string): ParsedThinkTags {
     return { visibleContent: content, reasoning: '', hasUnclosedTag: false }
   }
 
+  // An unfinished code span protects a literal opening tag while streaming,
+  // but cannot swallow the real end of an already open reasoning section.
+  const tags = getMarkdownTagMatches(
+    content,
+    /<\/?think>/g,
+    (tag) => tag[0] === '</think>'
+  )
   const visibleParts: string[] = []
   const reasoningParts: string[] = []
   let currentPos = 0
-  let hasUnclosedTag = false
-
-  while (true) {
-    const openPos = content.indexOf('<think>', currentPos)
-
-    if (openPos === -1) {
-      if (currentPos < content.length) {
-        visibleParts.push(content.slice(currentPos))
-      }
-      break
+  let reasoningStart: number | null = null
+  for (const tag of tags) {
+    if (reasoningStart === null && tag[0] === '<think>') {
+      visibleParts.push(content.slice(currentPos, tag.index))
+      reasoningStart = tag.index + tag[0].length
+    } else if (reasoningStart !== null && tag[0] === '</think>') {
+      reasoningParts.push(content.slice(reasoningStart, tag.index))
+      currentPos = tag.index + tag[0].length
+      reasoningStart = null
     }
-
-    if (openPos > currentPos) {
-      visibleParts.push(content.slice(currentPos, openPos))
-    }
-
-    const closePos = content.indexOf('</think>', openPos + 7)
-
-    if (closePos === -1) {
-      reasoningParts.push(content.slice(openPos + 7))
-      hasUnclosedTag = true
-      break
-    }
-
-    reasoningParts.push(content.slice(openPos + 7, closePos))
-    currentPos = closePos + 8
+  }
+  const hasUnclosedTag = reasoningStart !== null
+  if (reasoningStart !== null) {
+    reasoningParts.push(content.slice(reasoningStart))
+  } else visibleParts.push(content.slice(currentPos))
+  if (!reasoningParts.length) {
+    return { visibleContent: content, reasoning: '', hasUnclosedTag: false }
   }
 
   return {
-    visibleContent: visibleParts.join('').trim(),
+    visibleContent: visibleParts.join(''),
     reasoning: reasoningParts.join('\n\n').trim(),
     hasUnclosedTag,
   }

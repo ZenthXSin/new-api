@@ -18,11 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { MESSAGE_ROLES } from '../../constants'
 import type { Message } from '../../types'
+import { getCurrentVersion } from './message-utils'
 
 type MessageEditorState = {
   canSave: boolean
   hasChanged: boolean
   showSaveAndSubmit: boolean
+  hasAttachments: boolean
 }
 
 export function getMessageEditorState(
@@ -31,10 +33,12 @@ export function getMessageEditorState(
   originalText: string
 ): MessageEditorState {
   const hasText = editText.trim().length > 0
+  const hasAttachments = Boolean(getCurrentVersion(message).attachments?.length)
   const hasChanged = editText !== originalText
 
   return {
-    canSave: hasText && hasChanged,
+    canSave: (hasText || hasAttachments) && hasChanged,
+    hasAttachments,
     hasChanged,
     showSaveAndSubmit: message.from === MESSAGE_ROLES.USER,
   }

@@ -355,6 +355,8 @@ export type BillingSettings = {
 }
 
 export type OperationsSettings = {
+  NetworkTrafficEnabled: boolean
+  NetworkTrafficDailyBudgetGB: number
   DefaultCollapseSidebar: boolean
   DemoSiteEnabled: boolean
   SelfUseModeEnabled: boolean

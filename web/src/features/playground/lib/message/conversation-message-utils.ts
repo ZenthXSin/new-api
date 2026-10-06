@@ -35,7 +35,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { Message } from '../../types'
+import type { Message, PlaygroundAttachment } from '../../types'
 import {
   createLoadingAssistantMessage,
   createUserMessage,
@@ -56,13 +56,14 @@ type ChatMessageRenderState = {
 
 export function appendUserMessagePair(
   messages: Message[],
-  content: string
+  content: string,
+  attachments?: PlaygroundAttachment[]
 ): Message[] {
   const submittedAt = Date.now()
 
   return [
     ...messages,
-    createUserMessage(content, submittedAt),
+    createUserMessage(content, submittedAt, attachments),
     createLoadingAssistantMessage(submittedAt),
   ]
 }
@@ -113,7 +114,8 @@ export function applyMessageEdit(
   messages: Message[],
   messageKey: string,
   content: string,
-  shouldSubmit: boolean
+  shouldSubmit: boolean,
+  attachments?: PlaygroundAttachment[]
 ): ApplyMessageEditResult | null {
   const submittedAt = Date.now()
   const messageIndex = messages.findIndex(
@@ -127,7 +129,7 @@ export function applyMessageEdit(
   const updatedMessages = messages.map((message) =>
     message.key === messageKey
       ? {
-          ...updateCurrentVersionContent(message, content),
+          ...updateCurrentVersionContent(message, content, attachments),
           createdAt: shouldSubmit ? submittedAt : message.createdAt,
         }
       : message

@@ -34,6 +34,7 @@ import { BillsTab } from './components/bills-tab'
 import { EntriesTab } from './components/entries-tab'
 import { FundsLogTab } from './components/funds-log-tab'
 import { PaidMoneyTrendChart } from './components/paid-money-trend-chart'
+import { ProfitSimulator } from './components/profit-simulator'
 import { ProfitSummaryCards } from './components/profit-summary-cards'
 import { RevenueTrendChart } from './components/revenue-trend-chart'
 import { UserGrowthChart } from './components/user-growth-chart'
@@ -48,6 +49,7 @@ const RANGE_OPTIONS = [
 
 const TAB_OPTIONS = [
   { value: 'overview', labelKey: 'Overview' },
+  { value: 'simulation', labelKey: 'Profit Simulation' },
   { value: 'bills', labelKey: 'Bills' },
   { value: 'funds-log', labelKey: 'Funds Log' },
   { value: 'entries', labelKey: 'Manual Entries' },
@@ -75,14 +77,12 @@ export function Finance() {
 
   const overview: FinanceOverview | undefined = overviewQuery.data
   const trends: FinanceTrends | undefined = trendsQuery.data
-  const loading = overviewQuery.isLoading || trendsQuery.isLoading
-  const error = overviewQuery.isError || trendsQuery.isError
 
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('Finance Overview')}</SectionPageLayout.Title>
       <SectionPageLayout.Actions>
-        {activeTab === 'overview' && (
+        {(activeTab === 'overview' || activeTab === 'simulation') && (
           <ToggleGroup
             value={[
               RANGE_OPTIONS.find((item) => item.days === days)?.labelKey ??
@@ -129,25 +129,37 @@ export function Finance() {
               <div className='space-y-3'>
                 <ProfitSummaryCards
                   overview={overview}
-                  loading={loading}
-                  error={error}
+                  loading={overviewQuery.isLoading}
+                  error={overviewQuery.isError}
                 />
                 <RevenueTrendChart
                   data={trends?.cost}
-                  loading={loading}
-                  error={error}
+                  loading={trendsQuery.isLoading}
+                  error={trendsQuery.isError}
                 />
                 <UserGrowthChart
                   data={trends?.users}
-                  loading={loading}
-                  error={error}
+                  loading={trendsQuery.isLoading}
+                  error={trendsQuery.isError}
                 />
                 <PaidMoneyTrendChart
                   data={trends?.users}
-                  loading={loading}
-                  error={error}
+                  loading={trendsQuery.isLoading}
+                  error={trendsQuery.isError}
                 />
               </div>
+            </TabsContent>
+            <TabsContent
+              value='simulation'
+              keepMounted
+              className='min-h-0 overflow-y-auto'
+            >
+              <ProfitSimulator
+                overview={overview}
+                rangeDays={days}
+                overviewLoading={overviewQuery.isLoading}
+                overviewError={overviewQuery.isError}
+              />
             </TabsContent>
             <TabsContent value='bills' keepMounted className='min-h-0'>
               <BillsTab />

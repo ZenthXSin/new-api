@@ -16,11 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import * as z from 'zod'
-
-// ============================================================================
-// OIDC Client Types
-// ============================================================================
+export { oauthClientFormSchema } from './lib/client-form-schema'
+export type { OauthClientFormValues } from './lib/client-form-schema'
 
 export interface OauthClient {
   id: number
@@ -39,26 +36,3 @@ export interface OauthClientSecretResponse {
   client: OauthClient
   client_secret: string
 }
-
-// ============================================================================
-// Form Schema
-// ============================================================================
-
-export const oauthClientFormSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
-  description: z.string(),
-  redirect_uris: z
-    .array(z.string())
-    .min(1, 'At least one redirect URI is required'),
-  scopes: z.array(z.string()).min(1, 'Select at least one scope'),
-  is_public: z.boolean(),
-  enabled: z.boolean(),
-})
-
-export type OauthClientFormValues = z.infer<typeof oauthClientFormSchema>
-
-export const OAUTH_SCOPE_OPTIONS = [
-  { value: 'openid', labelKey: 'OpenID (required for login)' },
-  { value: 'profile', labelKey: 'Profile (username, display name, groups, balance)' },
-  { value: 'email', labelKey: 'Email address' },
-] as const

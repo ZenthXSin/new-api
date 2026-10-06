@@ -16,7 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { MESSAGE_STATUS } from '../../constants'
+import { t } from 'i18next'
+
+import { ERROR_MESSAGES, MESSAGE_STATUS } from '../../constants'
 import type { Message } from '../../types'
 import { getMessageContent } from './message-utils'
 
@@ -48,7 +50,11 @@ export function getMessageErrorState(
     return null
   }
 
-  const content = getMessageContent(message) || FALLBACK_ERROR_CONTENT
+  let content =
+    message.errorMessage || getMessageContent(message) || FALLBACK_ERROR_CONTENT
+  if (message.errorCode === 'interrupted') {
+    content = t(ERROR_MESSAGES.INTERRUPTED)
+  }
   const isModelPriceError = message.errorCode === MODEL_PRICE_ERROR_CODE
 
   return {

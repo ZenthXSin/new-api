@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -680,6 +681,11 @@ func inviteUser(inviterId int) error {
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int) error {
+	finish, guardErr := BeginAppPaymentQuotaMutation(user.Id)
+	if guardErr != nil {
+		return guardErr
+	}
+	defer finish()
 	// 检查quota是否小于最小额度
 	if float64(quota) < common.QuotaPerUnit {
 		return fmt.Errorf("转移额度最小为%s！", logger.LogQuota(common.QuotaFromFloat(common.QuotaPerUnit)))
@@ -713,7 +719,12 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	}
 
 	// 提交事务
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		markAppPaymentWalletUnsafe(user.Id)
+		return err
+	}
+	syncCreditUserQuotaCache(user.Id, quota, "affiliate")
+	return nil
 }
 
 func (user *User) prepareForInsert(tx *gorm.DB) error {
@@ -1445,50 +1456,94 @@ func IncreaseUserQuota(id int, quota int, db bool) (err error) {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
 	}
-	gopool.Go(func() {
-		err := cacheIncrUserQuota(id, int64(quota))
-		if err != nil {
-			common.SysLog("failed to increase user quota: " + err.Error())
-		}
-	})
 	if !db && common.BatchUpdateEnabled {
+		if cacheErr := cacheIncrUserQuota(id, int64(quota)); cacheErr != nil {
+			common.SysLog("failed to increase user quota cache")
+		}
 		addNewRecord(BatchUpdateTypeUserQuota, id, quota)
 		return nil
 	}
-	return increaseUserQuota(id, quota)
-}
-
-func increaseUserQuota(id int, quota int) (err error) {
-	err = DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota + ?", quota)).Error
+	finish, err := BeginAppPaymentQuotaMutation(id)
 	if err != nil {
 		return err
 	}
-	return err
+	defer finish()
+	if err = increaseUserQuota(id, quota); err != nil {
+		markAppPaymentWalletUnsafe(id)
+		return err
+	}
+	if err = cacheIncrUserQuota(id, int64(quota)); err != nil {
+		common.SysLog("failed to increase user quota cache")
+	}
+	return nil
+}
+
+func increaseUserQuota(id int, quota int) error {
+	return DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota + ?", quota)).Error
 }
 
 func DecreaseUserQuota(id int, quota int, db bool) (err error) {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
 	}
-	gopool.Go(func() {
-		err := cacheDecrUserQuota(id, int64(quota))
-		if err != nil {
-			common.SysLog("failed to decrease user quota: " + err.Error())
-		}
-	})
 	if !db && common.BatchUpdateEnabled {
+		if cacheErr := cacheDecrUserQuota(id, int64(quota)); cacheErr != nil {
+			common.SysLog("failed to decrease user quota cache")
+		}
 		addNewRecord(BatchUpdateTypeUserQuota, id, -quota)
 		return nil
 	}
-	return decreaseUserQuota(id, quota)
-}
-
-func decreaseUserQuota(id int, quota int) (err error) {
-	err = DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota - ?", quota)).Error
+	finish, err := BeginAppPaymentQuotaMutation(id)
 	if err != nil {
 		return err
 	}
-	return err
+	defer finish()
+	if err = decreaseUserQuota(id, quota); err != nil {
+		markAppPaymentWalletUnsafe(id)
+		return err
+	}
+	if err = cacheDecrUserQuota(id, int64(quota)); err != nil {
+		common.SysLog("failed to decrease user quota cache")
+	}
+	return nil
+}
+
+func decreaseUserQuota(id int, quota int) error {
+	return DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota - ?", quota)).Error
+}
+
+// SetAppPaymentUserQuota applies an administrator's absolute balance target as
+// a delta against the live mirror, preserving unflushed relay consumption.
+func SetAppPaymentUserQuota(id, quota int) error {
+	if id <= 0 || quota < 0 || quota >= common.MaxQuota {
+		return ErrAppPaymentInvalid
+	}
+	finish, err := BeginAppPaymentQuotaMutation(id)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	var delta int
+	if common.RedisEnabled && appPaymentWalletSchemaEnabled() {
+		// Hold only the commerce fence; relay debits remain atomic and the requested
+		// adjustment is computed/applied in the same Lua operation.
+		const script = `local old=redis.call('GET',KEYS[1]); if not old then return {0,0} end; local delta=tonumber(ARGV[1])-tonumber(old); redis.call('SET',KEYS[1],ARGV[1]); if redis.call('HEXISTS',KEYS[2],'Quota')~=0 then redis.call('HSET',KEYS[2],'Quota',ARGV[1]) end; return {1,delta}`
+		result, e := common.RDB.Eval(context.Background(), script, []string{appPaymentWalletMirrorKey(id), getUserCacheKey(id)}, quota).Int64Slice()
+		if e != nil || len(result) != 2 || result[0] != 1 {
+			markAppPaymentWalletUnsafe(id)
+			return ErrAppPaymentBalancePending
+		}
+		delta = int(result[1])
+		if e = DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota + ?", delta)).Error; e != nil {
+			markAppPaymentWalletUnsafe(id)
+			return e
+		}
+		return nil
+	}
+	if err = DB.Model(&User{}).Where("id = ?", id).Update("quota", quota).Error; err != nil {
+		return err
+	}
+	return invalidateUserCache(id)
 }
 
 func DeltaUpdateUserQuota(id int, delta int) (err error) {
@@ -1569,6 +1624,9 @@ func updateUserQuotaUsedQuotaAndRequestCount(id int, quota int, usedQuota int, r
 		},
 	).Error
 	if err != nil {
+		if quota != 0 {
+			markAppPaymentWalletUnsafe(id)
+		}
 		common.SysLog("failed to batch update user quota, used quota and request count: " + err.Error())
 	}
 }

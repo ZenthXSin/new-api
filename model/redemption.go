@@ -141,6 +141,11 @@ func Redeem(key string, userId int) (quota int, err error) {
 	if userId == 0 {
 		return 0, errors.New("无效的 user id")
 	}
+	finish, err := BeginAppPaymentQuotaMutation(userId)
+	if err != nil {
+		return 0, err
+	}
+	defer finish()
 	redemption := &Redemption{}
 
 	keyCol := "`key`"
@@ -148,6 +153,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 		keyCol = `"key"`
 	}
 	common.RandomSleep()
+	quotaWriteAttempted := false
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		err := lockForUpdate(tx).Where(keyCol+" = ?", key).First(redemption).Error
 		if err != nil {
@@ -175,9 +181,13 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if result.RowsAffected == 0 {
 			return errors.New("该兑换码已被使用")
 		}
+		quotaWriteAttempted = true
 		return tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
 	})
 	if err != nil {
+		if quotaWriteAttempted {
+			MarkAppPaymentWalletUnsafe(userId)
+		}
 		common.SysError("redemption failed: " + err.Error())
 		return 0, ErrRedeemFailed
 	}

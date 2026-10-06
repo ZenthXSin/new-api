@@ -23,6 +23,8 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	groupavailability "github.com/QuantumNous/new-api/pkg/group_availability"
+	networktraffic "github.com/QuantumNous/new-api/pkg/network_traffic"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
@@ -57,6 +59,9 @@ func main() {
 		common.FatalLog("failed to initialize resources: " + err.Error())
 		return
 	}
+
+	networkTraffic := networktraffic.StartFromEnvironment()
+	defer networkTraffic.Close()
 
 	common.SysLog("New API " + common.Version + " started")
 	if os.Getenv("GIN_MODE") != "debug" {
@@ -127,6 +132,13 @@ func main() {
 
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	service.StartSubscriptionQuotaResetTask()
+
+	paymentContext, stopPaymentWorkers := context.WithCancel(context.Background())
+	waitPaymentWorkers := service.StartAppPaymentWorkers(paymentContext)
+	defer func() {
+		stopPaymentWorkers()
+		waitPaymentWorkers()
+	}()
 
 	// Report this process as a system instance so the System Info page can show
 	// all currently alive nodes in multi-instance deployments.
@@ -230,6 +242,11 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		common.SysError(fmt.Sprintf("server forced to shutdown: %v", err))
+	}
+	stopPaymentWorkers()
+	waitPaymentWorkers()
+	if err := groupavailability.Default.Flush(); err != nil {
+		common.SysError("failed to persist group availability before shutdown: " + err.Error())
 	}
 	// 内存中的看板数据保存入库，避免重启丢失未落库数据 (issue #5679)
 	if common.DataExportEnabled {
@@ -338,8 +355,14 @@ func InitResources() error {
 	if err != nil {
 		return err
 	}
+	if err := model.InitializeAppPaymentWalletCache(); err != nil {
+		common.SysError("application wallet payments require cache reconciliation")
+	}
 
 	perfmetrics.Init()
+	if err := groupavailability.Init(); err != nil {
+		common.SysError("group availability disabled: " + err.Error())
+	}
 
 	// 启动系统监控
 	common.StartSystemMonitor()

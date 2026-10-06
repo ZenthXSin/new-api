@@ -301,14 +301,15 @@ func (r *GeneralOpenAIRequest) ParseInput() []string {
 }
 
 type Message struct {
-	Role             string          `json:"role"`
-	Content          any             `json:"content"`
-	Name             *string         `json:"name,omitempty"`
-	Prefix           *bool           `json:"prefix,omitempty"`
-	ReasoningContent *string         `json:"reasoning_content,omitempty"`
-	Reasoning        *string         `json:"reasoning,omitempty"`
-	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
-	ToolCallId       string          `json:"tool_call_id,omitempty"`
+	Role             string           `json:"role"`
+	Content          any              `json:"content"`
+	Name             *string          `json:"name,omitempty"`
+	Prefix           *bool            `json:"prefix,omitempty"`
+	ReasoningContent *string          `json:"reasoning_content,omitempty"`
+	Reasoning        *string          `json:"reasoning,omitempty"`
+	ToolCalls        json.RawMessage  `json:"tool_calls,omitempty"`
+	ToolCallId       string           `json:"tool_call_id,omitempty"`
+	Annotations      []ChatAnnotation `json:"annotations,omitempty"`
 	parsedContent    []MediaContent
 	//parsedStringContent *string
 }
@@ -364,9 +365,12 @@ func (m *MediaContent) GetFile() *MessageFile {
 		}
 		if itemMap, ok := m.File.(map[string]any); ok {
 			out := &MessageFile{
-				FileName: kitutil.Interface2String(itemMap["file_name"]),
+				FileName: kitutil.Interface2String(itemMap["filename"]),
 				FileData: kitutil.Interface2String(itemMap["file_data"]),
 				FileId:   kitutil.Interface2String(itemMap["file_id"]),
+			}
+			if out.FileName == "" {
+				out.FileName = kitutil.Interface2String(itemMap["file_name"])
 			}
 			return out
 		}

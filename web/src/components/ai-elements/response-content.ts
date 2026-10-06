@@ -19,149 +19,36 @@ For commercial licensing, please contact support@quantumnous.com
 import type { ReactNode } from 'react'
 import type { ParsedNode } from 'stream-markdown-parser'
 
+import { getMarkdownTagMatches } from '@/lib/markdown-code-ranges'
+
 import { isFootnoteNode } from './response-node-guards'
 import type { ParsedResponseContent } from './response-types'
-
-const FENCE_START_PATTERN = /^(`{3,}|~{3,})([^\n]*)$/
-const FENCE_END_PATTERN = /^(`{3,}|~{3,})\s*$/
-const SECTION_HEADING_PATTERN = /^#{2,6}\s+\d+\.\s+/
-const MARKDOWN_EXAMPLE_LANGUAGES = new Set(['markdown', 'md', 'mdx'])
-
-type MarkdownExampleFence = {
-  contentLines: string[]
-  fenceChar: string
-  language: string
-  nestedFence: boolean
-}
-
-function getFenceRunLength(line: string, fenceChar: string): number {
-  let length = 0
-
-  for (const char of line) {
-    if (char !== fenceChar) {
-      break
-    }
-
-    length++
-  }
-
-  return length
-}
-
-function getMarkdownExampleFenceLength(block: MarkdownExampleFence): number {
-  let maxFenceLength = 3
-
-  for (const line of block.contentLines) {
-    if (!line.startsWith(block.fenceChar)) {
-      continue
-    }
-
-    maxFenceLength = Math.max(
-      maxFenceLength,
-      getFenceRunLength(line, block.fenceChar) + 1
-    )
-  }
-
-  return maxFenceLength
-}
-
-function appendMarkdownExampleFence(
-  output: string[],
-  block: MarkdownExampleFence
-): void {
-  const fence = block.fenceChar.repeat(getMarkdownExampleFenceLength(block))
-
-  output.push(`${fence}${block.language}`)
-  output.push(...block.contentLines)
-  output.push(fence)
-}
-
-function normalizeMarkdownExampleFences(input: string): string {
-  const lines = input.split('\n')
-  const output: string[] = []
-  let exampleFence: MarkdownExampleFence | null = null
-
-  for (const line of lines) {
-    if (!exampleFence) {
-      const match = line.match(FENCE_START_PATTERN)
-
-      if (!match) {
-        output.push(line)
-        continue
-      }
-
-      const language = match[2].trim().toLowerCase()
-      if (MARKDOWN_EXAMPLE_LANGUAGES.has(language)) {
-        exampleFence = {
-          contentLines: [],
-          fenceChar: match[1][0],
-          language,
-          nestedFence: false,
-        }
-        continue
-      }
-
-      output.push(line)
-      continue
-    }
-
-    if (!exampleFence.nestedFence && SECTION_HEADING_PATTERN.test(line)) {
-      appendMarkdownExampleFence(output, exampleFence)
-      output.push(line)
-      exampleFence = null
-      continue
-    }
-
-    if (exampleFence.nestedFence && FENCE_END_PATTERN.test(line)) {
-      exampleFence.contentLines.push(line)
-      exampleFence.nestedFence = false
-      continue
-    }
-
-    if (
-      line.startsWith(exampleFence.fenceChar.repeat(3)) &&
-      !FENCE_END_PATTERN.test(line)
-    ) {
-      exampleFence.contentLines.push(line)
-      exampleFence.nestedFence = true
-      continue
-    }
-
-    if (FENCE_END_PATTERN.test(line)) {
-      appendMarkdownExampleFence(output, exampleFence)
-      exampleFence = null
-      continue
-    }
-
-    exampleFence.contentLines.push(line)
-  }
-
-  if (exampleFence) {
-    appendMarkdownExampleFence(output, exampleFence)
-  }
-
-  return output.join('\n')
-}
 
 export function stripCustomTags(input: unknown): string {
   if (typeof input !== 'string') {
     return String(input ?? '')
   }
 
-  return input
-    .replaceAll(
-      /<\/?(conversation|conversationcontent|reasoning|reasoningcontent|reasoningtrigger|sources|sourcescontent|sourcestrigger|branch|branchmessages|branchnext|branchpage|branchprevious|branchselector|message|messagecontent)\b[^>]*>/gi,
-      ''
-    )
-    .replaceAll(/<\/?think\b[^>]*>/gi, '')
+  const tags = getMarkdownTagMatches(
+    input,
+    /<\/?(conversation|conversationcontent|reasoning|reasoningcontent|reasoningtrigger|sources|sourcescontent|sourcestrigger|branch|branchmessages|branchnext|branchpage|branchprevious|branchselector|message|messagecontent|think)\b[^>\r\n]*>/gi
+  )
+  let position = 0
+  const parts: string[] = []
+  for (const tag of tags) {
+    parts.push(input.slice(position, tag.index))
+    position = tag.index + tag[0].length
+  }
+  parts.push(input.slice(position))
+  return parts.join('')
 }
 
 export function getMarkdownContent(children: ReactNode): string {
   if (Array.isArray(children)) {
-    return normalizeMarkdownExampleFences(stripCustomTags(children.join('')))
+    return stripCustomTags(children.join(''))
   }
 
-  return normalizeMarkdownExampleFences(stripCustomTags(children))
+  return stripCustomTags(children)
 }
 
 export function getNodeKey(node: ParsedNode, index: number): string {

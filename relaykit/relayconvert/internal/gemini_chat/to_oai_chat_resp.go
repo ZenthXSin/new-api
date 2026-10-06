@@ -88,8 +88,9 @@ func ResponseGeminiChat2OpenAI(id string, created int64, response *dto.GeminiCha
 		choice := dto.OpenAITextResponseChoice{
 			Index: int(candidate.Index),
 			Message: dto.Message{
-				Role:    "assistant",
-				Content: "",
+				Role:        "assistant",
+				Content:     "",
+				Annotations: candidate.GroundingMetadata.ChatAnnotations(),
 			},
 			FinishReason: types.FinishReasonStop,
 		}
@@ -192,7 +193,7 @@ func StreamResponseGeminiChat2OpenAI(geminiResponse *dto.GeminiChatResponse) (*d
 		}
 		choice := dto.ChatCompletionsStreamResponseChoice{
 			Index: int(candidate.Index),
-			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{},
+			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{Annotations: candidate.GroundingMetadata.ChatAnnotations()},
 		}
 		var content strings.Builder
 		var inlineGrow int

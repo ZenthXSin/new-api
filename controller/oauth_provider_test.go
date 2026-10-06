@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -19,10 +21,14 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 const oidcTestIssuer = "https://idp.example.com/oidc"
+const oidcTestVerifier = "test-verifier-0123456789abcdef0123456789abcdef"
 
 func setupOidcProviderTest(t *testing.T) (*gorm.DB, *model.User) {
 	t.Helper()
@@ -32,15 +38,47 @@ func setupOidcProviderTest(t *testing.T) (*gorm.DB, *model.User) {
 	previousRedisEnabled := common.RedisEnabled
 	previousMainDatabaseType, previousLogDatabaseType := common.MainDatabaseType(), common.LogDatabaseType()
 	common.RedisEnabled = false
-	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
-
-	dsn := "file:" + strings.ReplaceAll(t.Name(), "/", "_") + "?mode=memory&cache=shared"
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	// External DSNs must refer to isolated, disposable test databases.
+	dialect := common.DatabaseType(os.Getenv("TEST_OAUTH_DIALECT"))
+	var driver gorm.Dialector
+	switch dialect {
+	case "", common.DatabaseTypeSQLite:
+		dialect = common.DatabaseTypeSQLite
+		dsn := "file:" + strings.ReplaceAll(t.Name(), "/", "_") + "?mode=memory&cache=shared"
+		driver = sqlite.Open(dsn)
+	case common.DatabaseTypeMySQL:
+		dsn := os.Getenv("TEST_OAUTH_MYSQL_DSN")
+		require.NotEmpty(t, dsn, "configure an isolated disposable MySQL database")
+		driver = mysql.Open(dsn)
+	case common.DatabaseTypePostgreSQL:
+		dsn := os.Getenv("TEST_OAUTH_POSTGRES_DSN")
+		require.NotEmpty(t, dsn, "configure an isolated disposable PostgreSQL database")
+		driver = postgres.New(postgres.Config{DSN: dsn, PreferSimpleProtocol: true})
+	default:
+		t.Fatalf("unsupported OAuth controller test dialect %q", dialect)
+	}
+	common.SetDatabaseTypes(dialect, dialect)
+	db, err := gorm.Open(driver, &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	if dialect == common.DatabaseTypeSQLite {
+		sqlDB.SetMaxOpenConns(1)
+	} else {
+		sqlDB.SetMaxOpenConns(4)
+	}
 	model.DB, model.LOG_DB = db, db
-	require.NoError(t, db.AutoMigrate(
-		&model.User{}, &model.AuthFlow{}, &model.OauthClient{}, &model.OauthConsent{}, &model.OauthSigningKey{},
-	))
+	fixtureModels := []interface{}{
+		&model.User{}, &model.UserSession{}, &model.AuthFlow{}, &model.OauthClient{}, &model.OauthConsent{}, &model.OauthSigningKey{},
+		&model.OAuthGrant{}, &model.OAuthAccessToken{}, &model.OAuthRefreshToken{}, &model.OAuthAction{}, &model.OAuthRelayBinding{}, &model.Token{}, &model.Log{},
+	}
+	require.NoError(t, db.AutoMigrate(fixtureModels...))
+	if dialect != common.DatabaseTypeSQLite {
+		for _, table := range fixtureModels {
+			require.NoError(t, db.Unscoped().Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(table).Error)
+		}
+	}
+	t.Logf("OAuth controller database: %s", dialect)
 
 	settings := system_setting.GetOauthProviderSettings()
 	previousSettings := *settings
@@ -65,6 +103,8 @@ func setupOidcProviderTest(t *testing.T) (*gorm.DB, *model.User) {
 		Email:       "oidc-user@example.com",
 		DisplayName: "OIDC User",
 		Status:      common.UserStatusEnabled,
+		Role:        common.RoleCommonUser,
+		AuthVersion: 1,
 		Quota:       500000,
 		UsedQuota:   100,
 	}
@@ -122,6 +162,8 @@ func performOidcRequest(t *testing.T, method string, target string, body *url.Va
 		OidcToken(ctx)
 	case strings.HasSuffix(parsedTarget.Path, "/userinfo"):
 		OidcUserInfo(ctx)
+	case strings.HasSuffix(parsedTarget.Path, "/revoke"):
+		OidcRevoke(ctx)
 	default:
 		t.Fatalf("unhandled oidc target: %s", target)
 	}
@@ -188,7 +230,7 @@ func TestOidcAuthorizeValidations(t *testing.T) {
 
 	// Valid request forwards to the consent page with normalized parameters.
 	recorder = performOidcRequest(t, http.MethodGet,
-		oidcTestIssuer+"/authorize?response_type=code&client_id="+client.ClientId+"&redirect_uri=https://rp.example.com/cb&scope=openid+profile+openid&state=xyz123&nonce=n0nce", nil, nil)
+		oidcTestIssuer+"/authorize?response_type=code&client_id="+client.ClientId+"&redirect_uri=https://rp.example.com/cb&scope=openid+profile+openid&state=xyz123&nonce=n0nce&code_challenge_method=S256&code_challenge="+oidcS256Challenge(oidcTestVerifier), nil, nil)
 	target = followOidcRedirect(t, recorder)
 	assert.Equal(t, "/authorize", target.Path)
 	query := target.Query()
@@ -212,37 +254,80 @@ func oidcConsentRequestContext(t *testing.T, method string, userID int, body any
 		ctx.Request = httptest.NewRequest(method, "/api/oauth2/consent", nil)
 	}
 	ctx.Set("id", userID)
+	ctx.Set("session_id", "oauth-test-session")
+	ctx.Set("auth_version", int64(1))
+	ctx.Set("session_version", int64(1))
 	return ctx, recorder
 }
 
+func oidcTestConsentQuery(request oidcConsentRequest) string {
+	query := url.Values{
+		"client_id": {request.ClientId}, "redirect_uri": {request.RedirectUri},
+		"scope": {request.Scope}, "state": {request.State}, "nonce": {request.Nonce},
+		"code_challenge": {request.CodeChallenge}, "code_challenge_method": {request.CodeChallengeMethod},
+	}
+	for _, resource := range request.Resources {
+		query.Add("resource", resource)
+	}
+	return query.Encode()
+}
+
+// approveOidcTestConsent follows the same preview -> explicit decision contract
+// as the browser, including a real-session-bound one-time consent token.
+func approveOidcTestConsent(t *testing.T, userID int, request oidcConsentRequest) *httptest.ResponseRecorder {
+	t.Helper()
+	ctx, recorder := oidcConsentRequestContext(t, http.MethodGet, userID, nil)
+	ctx.Request.URL.RawQuery = oidcTestConsentQuery(request)
+	GetOidcConsent(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var preview struct {
+		Success        bool   `json:"success"`
+		RequireConsent bool   `json:"require_consent"`
+		ConsentToken   string `json:"consent_token"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &preview))
+	require.True(t, preview.Success, recorder.Body.String())
+	require.True(t, preview.RequireConsent)
+	require.NotEmpty(t, preview.ConsentToken)
+	request.ConsentToken = preview.ConsentToken
+	ctx, recorder = oidcConsentRequestContext(t, http.MethodPost, userID, request)
+	PostOidcConsent(ctx)
+	return recorder
+}
+
 func TestOidcConsentAndTokenFlow(t *testing.T) {
-	setupOidcProviderTest(t)
+	db, user := setupOidcProviderTest(t)
 	client, secret := createOidcTestClient(t, false)
 
 	authorizeParams := oidcConsentRequest{
-		ClientId:    client.ClientId,
-		RedirectUri: "https://rp.example.com/cb",
-		Scope:       "openid profile email",
-		State:       "st4te",
-		Nonce:       "n0nce",
-		Approve:     true,
+		ClientId: client.ClientId, RedirectUri: "https://rp.example.com/cb",
+		Scope: "openid profile email", State: "st4te", Nonce: "n0nce", Approve: true,
+		CodeChallenge: oidcS256Challenge(oidcTestVerifier), CodeChallengeMethod: "S256",
 	}
 
-	// First GET reports that consent is required.
-	ctx, recorder := oidcConsentRequestContext(t, http.MethodGet, 1, nil)
-	ctx.Request.URL.RawQuery = "client_id=" + client.ClientId + "&redirect_uri=https://rp.example.com/cb&scope=openid+profile+email"
+	// Preview requires consent and never creates an authorization code, even
+	// if a legacy remembered consent exists.
+	require.NoError(t, model.SaveOauthConsent(user.Id, client.Id, strings.Fields(authorizeParams.Scope)))
+	ctx, recorder := oidcConsentRequestContext(t, http.MethodGet, user.Id, nil)
+	ctx.Request.URL.RawQuery = oidcTestConsentQuery(authorizeParams)
 	GetOidcConsent(ctx)
 	require.Equal(t, http.StatusOK, recorder.Code)
 	var consentState struct {
 		Success        bool   `json:"success"`
 		RequireConsent bool   `json:"require_consent"`
 		Redirect       string `json:"redirect"`
+		ConsentToken   string `json:"consent_token"`
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &consentState))
+	require.True(t, consentState.Success, recorder.Body.String())
 	assert.True(t, consentState.RequireConsent)
+	assert.Empty(t, consentState.Redirect)
+	var codeCount int64
+	require.NoError(t, db.Model(&model.AuthFlow{}).Where("purpose = ?", "oidc_code").Count(&codeCount).Error)
+	assert.Zero(t, codeCount)
 
-	// Approval persists the grant and returns a redirect with a code.
-	ctx, recorder = oidcConsentRequestContext(t, http.MethodPost, 1, authorizeParams)
+	authorizeParams.ConsentToken = consentState.ConsentToken
+	ctx, recorder = oidcConsentRequestContext(t, http.MethodPost, user.Id, authorizeParams)
 	PostOidcConsent(ctx)
 	require.Equal(t, http.StatusOK, recorder.Code)
 	var approval struct {
@@ -250,152 +335,141 @@ func TestOidcConsentAndTokenFlow(t *testing.T) {
 		Redirect string `json:"redirect"`
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &approval))
-	require.True(t, approval.Success)
+	require.True(t, approval.Success, recorder.Body.String())
 	redirect, err := url.Parse(approval.Redirect)
 	require.NoError(t, err)
 	assert.Equal(t, "https://rp.example.com/cb", redirect.Scheme+"://"+redirect.Host+redirect.Path)
 	code := redirect.Query().Get("code")
 	require.NotEmpty(t, code)
 	assert.Equal(t, "st4te", redirect.Query().Get("state"))
+	assert.Equal(t, oidcTestIssuer, redirect.Query().Get("iss"))
 
-	// A remembered grant skips the consent screen on the next login.
-	ctx, recorder = oidcConsentRequestContext(t, http.MethodGet, 1, nil)
-	ctx.Request.URL.RawQuery = "client_id=" + client.ClientId + "&redirect_uri=https://rp.example.com/cb&scope=openid+profile+email"
-	GetOidcConsent(ctx)
-	require.Equal(t, http.StatusOK, recorder.Code)
-	var silent struct {
-		RequireConsent bool   `json:"require_consent"`
-		Redirect       string `json:"redirect"`
-	}
-	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &silent))
-	assert.False(t, silent.RequireConsent)
-	assert.Contains(t, silent.Redirect, "code=")
-
-	// Exchange the code at the token endpoint using Basic auth.
+	// Exchange uses PKCE and Basic client authentication, including on a
+	// confidential client. OIDC claims remain compatible with login clients.
 	form := url.Values{
-		"grant_type":    {"authorization_code"},
-		"code":          {code},
-		"redirect_uri":  {"https://rp.example.com/cb"},
-		"code_verifier": {""},
+		"grant_type": {"authorization_code"}, "code": {code},
+		"redirect_uri": {"https://rp.example.com/cb"}, "code_verifier": {oidcTestVerifier},
 	}
 	recorder = performOidcRequest(t, http.MethodPost, oidcTestIssuer+"/token", &form, map[string]string{
 		"Authorization": "Basic " + basicAuth(client.ClientId, secret),
 	})
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	assert.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
+	assert.Equal(t, "no-cache", recorder.Header().Get("Pragma"))
 	var tokenResponse struct {
-		AccessToken string `json:"access_token"`
-		TokenType   string `json:"token_type"`
-		ExpiresIn   int64  `json:"expires_in"`
-		IDToken     string `json:"id_token"`
-		Scope       string `json:"scope"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		TokenType    string `json:"token_type"`
+		ExpiresIn    int64  `json:"expires_in"`
+		IDToken      string `json:"id_token"`
+		Scope        string `json:"scope"`
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &tokenResponse))
 	assert.Equal(t, "Bearer", tokenResponse.TokenType)
-	assert.Equal(t, "openid profile email", tokenResponse.Scope)
+	assert.ElementsMatch(t, []string{"openid", "profile", "email"}, strings.Fields(tokenResponse.Scope))
 	assert.NotEmpty(t, tokenResponse.AccessToken)
 	assert.NotEmpty(t, tokenResponse.IDToken)
+	assert.Empty(t, tokenResponse.RefreshToken, "offline_access was not granted")
+	assert.LessOrEqual(t, tokenResponse.ExpiresIn, int64(900))
 
-	// The access token resolves back to the user with granted scopes.
-	userId, scopes, err := service.ParseOidcAccessToken(tokenResponse.AccessToken)
+	userID, scopes, err := service.ParseOidcAccessToken(tokenResponse.AccessToken)
 	require.NoError(t, err)
-	assert.Equal(t, 1, userId)
+	assert.Equal(t, user.Id, userID)
 	assert.ElementsMatch(t, []string{"openid", "profile", "email"}, scopes)
 
-	// The id_token carries the nonce and standard claims, signed RS256.
 	privateKey, err := model.LoadActiveOidcSigningKey()
 	require.NoError(t, err)
-	idClaims := &jwt.RegisteredClaims{}
+	idClaims := jwt.MapClaims{}
 	parsed, parseErr := jwt.NewParser(jwt.WithValidMethods([]string{"RS256"})).ParseWithClaims(tokenResponse.IDToken, idClaims, func(*jwt.Token) (interface{}, error) {
 		return &privateKey.PublicKey, nil
 	})
 	require.NoError(t, parseErr)
 	assert.True(t, parsed.Valid)
-	assert.Equal(t, "1", idClaims.Subject)
-	assert.Equal(t, oidcTestIssuer, idClaims.Issuer)
-	assert.Contains(t, idClaims.Audience, client.ClientId)
+	assert.Equal(t, strconv.Itoa(user.Id), idClaims["sub"])
+	assert.Equal(t, oidcTestIssuer, idClaims["iss"])
+	assert.Equal(t, "n0nce", idClaims["nonce"])
+	audiences, err := idClaims.GetAudience()
+	require.NoError(t, err)
+	assert.Contains(t, audiences, client.ClientId)
 
-	// The userinfo endpoint accepts the bearer token.
 	recorder = performOidcRequest(t, http.MethodGet, oidcTestIssuer+"/userinfo", nil, map[string]string{
 		"Authorization": "Bearer " + tokenResponse.AccessToken,
 	})
-	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	var userinfo map[string]any
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &userinfo))
-	assert.Equal(t, "1", userinfo["sub"])
+	assert.Equal(t, strconv.Itoa(user.Id), userinfo["sub"])
 	assert.Equal(t, "oidc-user@example.com", userinfo["email"])
 	assert.EqualValues(t, 500000, userinfo["quota"])
 	assert.EqualValues(t, 100, userinfo["used_quota"])
 	assert.EqualValues(t, 500000, userinfo["quota_per_unit"])
 
-	// Authorization codes are single use.
-	recorder = performOidcRequest(t, http.MethodPost, oidcTestIssuer+"/token", &form, map[string]string{
-		"Authorization": "Basic " + basicAuth(client.ClientId, secret),
-	})
-	require.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), `"invalid_grant"`)
-
-	// Wrong client secret is rejected.
 	form2 := url.Values{"grant_type": {"authorization_code"}, "code": {"x"}, "redirect_uri": {"https://rp.example.com/cb"}}
 	recorder = performOidcRequest(t, http.MethodPost, oidcTestIssuer+"/token", &form2, map[string]string{
 		"Authorization": "Basic " + basicAuth(client.ClientId, "wrong-secret"),
 	})
-	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.Equal(t, http.StatusUnauthorized, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), "invalid_client")
+	assert.Contains(t, recorder.Header().Get("WWW-Authenticate"), "Basic")
 }
 
-func TestOidcTokenPublicClientRequiresPKCE(t *testing.T) {
-	setupOidcProviderTest(t)
+func TestOidcRefreshAndRevokeFlow(t *testing.T) {
+	_, user := setupOidcProviderTest(t)
 	client, _ := createOidcTestClient(t, true)
-
-	challenge := oidcS256Challenge("test-verifier-0123456789abcdef0123456789abcdef")
-	ctx, recorder := oidcConsentRequestContext(t, http.MethodPost, 1, oidcConsentRequest{
-		ClientId:            client.ClientId,
-		RedirectUri:         "https://rp.example.com/cb",
-		Scope:               "openid",
-		CodeChallenge:       challenge,
-		CodeChallengeMethod: "S256",
-		Approve:             true,
+	client.Scopes = "openid profile offline_access"
+	require.NoError(t, model.UpdateOauthClient(client))
+	recorder := approveOidcTestConsent(t, user.Id, oidcConsentRequest{
+		ClientId: client.ClientId, RedirectUri: "https://rp.example.com/cb", Scope: client.Scopes,
+		CodeChallenge: oidcS256Challenge(oidcTestVerifier), CodeChallengeMethod: "S256", Approve: true,
 	})
-	PostOidcConsent(ctx)
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	var approval struct {
 		Redirect string `json:"redirect"`
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &approval))
 	redirect, err := url.Parse(approval.Redirect)
 	require.NoError(t, err)
-	code := redirect.Query().Get("code")
-	require.NotEmpty(t, code)
-
-	// Missing verifier fails PKCE verification.
 	form := url.Values{
-		"grant_type":   {"authorization_code"},
-		"code":         {code},
-		"redirect_uri": {"https://rp.example.com/cb"},
-		"client_id":    {client.ClientId},
+		"grant_type": {"authorization_code"}, "code": {redirect.Query().Get("code")},
+		"redirect_uri": {"https://rp.example.com/cb"}, "code_verifier": {oidcTestVerifier}, "client_id": {client.ClientId},
 	}
 	recorder = performOidcRequest(t, http.MethodPost, oidcTestIssuer+"/token", &form, nil)
-	require.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), "invalid_grant")
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var original service.OAuthTokenResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &original))
+	require.NotEmpty(t, original.RefreshToken)
 
-	// Codes are consumed even when PKCE fails, so a leaked code is useless.
-	form.Set("code_verifier", "wrong-verifier-wrong-verifier-wrong-verifier-wrong")
-	recorder = performOidcRequest(t, http.MethodPost, oidcTestIssuer+"/token", &form, nil)
+	refresh := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {original.RefreshToken}, "client_id": {client.ClientId}}
+	recorder = performOidcRequest(t, http.MethodPost, oidcTestIssuer+"/token", &refresh, nil)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var rotated service.OAuthTokenResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &rotated))
+	assert.NotEqual(t, original.RefreshToken, rotated.RefreshToken)
+	assert.NotEqual(t, original.AccessToken, rotated.AccessToken)
+
+	revoke := url.Values{"client_id": {client.ClientId}, "token": {rotated.RefreshToken}}
+	recorder = performOidcRequest(t, http.MethodPost, oidcTestIssuer+"/revoke", &revoke, nil)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	for _, token := range []string{original.AccessToken, rotated.AccessToken} {
+		recorder = performOidcRequest(t, http.MethodGet, oidcTestIssuer+"/userinfo", nil, map[string]string{"Authorization": "Bearer " + token})
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+	}
+	refresh.Set("refresh_token", rotated.RefreshToken)
+	recorder = performOidcRequest(t, http.MethodPost, oidcTestIssuer+"/token", &refresh, nil)
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	revoke.Set("token", "unknown-token")
+	recorder = performOidcRequest(t, http.MethodPost, oidcTestIssuer+"/revoke", &revoke, nil)
+	assert.Equal(t, http.StatusOK, recorder.Code, "unknown credentials have identical revocation responses")
 }
 
 func TestOidcConsentDenyReturnsAccessDenied(t *testing.T) {
-	setupOidcProviderTest(t)
+	_, user := setupOidcProviderTest(t)
 	client, _ := createOidcTestClient(t, false)
 
-	ctx, recorder := oidcConsentRequestContext(t, http.MethodPost, 1, oidcConsentRequest{
-		ClientId:    client.ClientId,
-		RedirectUri: "https://rp.example.com/cb",
-		Scope:       "openid",
-		State:       "s1",
-		Approve:     false,
+	recorder := approveOidcTestConsent(t, user.Id, oidcConsentRequest{
+		ClientId: client.ClientId, RedirectUri: "https://rp.example.com/cb", Scope: "openid",
+		State: "s1", Approve: false,
+		CodeChallenge: oidcS256Challenge(oidcTestVerifier), CodeChallengeMethod: "S256",
 	})
-	PostOidcConsent(ctx)
 	require.Equal(t, http.StatusOK, recorder.Code)
 	var response struct {
 		Redirect string `json:"redirect"`
@@ -423,4 +497,148 @@ func basicAuth(username, password string) string {
 func oidcS256Challenge(verifier string) string {
 	digest := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(digest[:])
+}
+
+func TestOidcConsentScopeSelectionAndSessionBoundary(t *testing.T) {
+	db, user := setupOidcProviderTest(t)
+	client, _ := createOidcTestClient(t, true)
+	client.Scopes = "openid profile email profile:read"
+	require.NoError(t, model.UpdateOauthClient(client))
+	request := oidcConsentRequest{
+		ClientId: client.ClientId, RedirectUri: "https://rp.example.com/cb", Scope: "full",
+		State: "consent-state", CodeChallenge: oidcS256Challenge(oidcTestVerifier), CodeChallengeMethod: "S256", Approve: true,
+	}
+	ctx, recorder := oidcConsentRequestContext(t, http.MethodGet, user.Id, nil)
+	ctx.Request.URL.RawQuery = oidcTestConsentQuery(request)
+	GetOidcConsent(ctx)
+	var preview struct {
+		Success      bool                    `json:"success"`
+		ConsentToken string                  `json:"consent_token"`
+		Scopes       []string                `json:"scopes"`
+		Capabilities []model.OAuthCapability `json:"capabilities"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &preview))
+	require.True(t, preview.Success, recorder.Body.String())
+	assert.ElementsMatch(t, strings.Fields(client.Scopes), preview.Scopes)
+	assert.NotContains(t, preview.Scopes, "full")
+	require.Len(t, preview.Capabilities, len(preview.Scopes))
+	request.ConsentToken = preview.ConsentToken
+	request.SelectedScopes = []string{"openid", "profile:read"}
+
+	// Copying a consent challenge into a different browser session is denied,
+	// and does not consume the legitimate session's pending decision.
+	ctx, recorder = oidcConsentRequestContext(t, http.MethodPost, user.Id, request)
+	ctx.Set("session_id", "different-browser-session")
+	PostOidcConsent(ctx)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	ctx, recorder = oidcConsentRequestContext(t, http.MethodPost, user.Id, request)
+	PostOidcConsent(ctx)
+	var approval struct {
+		Success  bool   `json:"success"`
+		Redirect string `json:"redirect"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &approval))
+	require.True(t, approval.Success, recorder.Body.String())
+	redirect, err := url.Parse(approval.Redirect)
+	require.NoError(t, err)
+	form := url.Values{
+		"grant_type": {"authorization_code"}, "client_id": {client.ClientId},
+		"code": {redirect.Query().Get("code")}, "redirect_uri": {request.RedirectUri}, "code_verifier": {oidcTestVerifier},
+	}
+	recorder = performOidcRequest(t, http.MethodPost, oidcTestIssuer+"/token", &form, nil)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var token service.OAuthTokenResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &token))
+	assert.ElementsMatch(t, request.SelectedScopes, strings.Fields(token.Scope))
+
+	// Reusing the same approval cannot create another grant.
+	ctx, recorder = oidcConsentRequestContext(t, http.MethodPost, user.Id, request)
+	PostOidcConsent(ctx)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	var grants int64
+	require.NoError(t, db.Model(&model.OAuthGrant{}).Count(&grants).Error)
+	assert.EqualValues(t, 1, grants)
+
+	// A delegated identity/PAT without a live browser session never approves
+	// itself or retrieves a browser consent challenge.
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		ctx, recorder = oidcConsentRequestContext(t, method, user.Id, request)
+		ctx.Set("session_id", "")
+		if method == http.MethodGet {
+			GetOidcConsent(ctx)
+		} else {
+			PostOidcConsent(ctx)
+		}
+		assert.Equal(t, http.StatusForbidden, recorder.Code)
+	}
+}
+
+func TestOAuthGrantManagementOwnsScopesAndInvalidatesTokens(t *testing.T) {
+	db, user := setupOidcProviderTest(t)
+	client, _ := createOidcTestClient(t, true)
+	request := oidcConsentRequest{
+		ClientId: client.ClientId, RedirectUri: "https://rp.example.com/cb", Scope: "openid profile",
+		CodeChallenge: oidcS256Challenge(oidcTestVerifier), CodeChallengeMethod: "S256", Approve: true,
+	}
+	recorder := approveOidcTestConsent(t, user.Id, request)
+	var approval struct {
+		Redirect string `json:"redirect"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &approval))
+	redirect, err := url.Parse(approval.Redirect)
+	require.NoError(t, err)
+	form := url.Values{
+		"grant_type": {"authorization_code"}, "client_id": {client.ClientId},
+		"code": {redirect.Query().Get("code")}, "redirect_uri": {request.RedirectUri}, "code_verifier": {oidcTestVerifier},
+	}
+	recorder = performOidcRequest(t, http.MethodPost, oidcTestIssuer+"/token", &form, nil)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var token service.OAuthTokenResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &token))
+	var grant model.OAuthGrant
+	require.NoError(t, db.First(&grant).Error)
+
+	ctx, recorder := oidcConsentRequestContext(t, http.MethodGet, user.Id, nil)
+	GetOAuthGrants(ctx)
+	var list struct {
+		Data []service.OAuthGrantView `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &list))
+	require.Len(t, list.Data, 1)
+	assert.Equal(t, client.Name, list.Data[0].ClientName)
+	assert.True(t, list.Data[0].Active)
+	assert.NotContains(t, recorder.Body.String(), token.AccessToken)
+
+	ctx, recorder = oidcConsentRequestContext(t, http.MethodGet, user.Id+1, nil)
+	GetOAuthGrants(ctx)
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &list))
+	assert.Empty(t, list.Data)
+
+	// Cross-account access and self-expansion cannot mutate the authorization.
+	for _, test := range []struct {
+		userID   int
+		scopes   []string
+		expected int
+	}{
+		{user.Id + 1, []string{"openid"}, http.StatusNotFound},
+		{user.Id, []string{"openid", "email"}, http.StatusBadRequest},
+		{user.Id, []string{"openid"}, http.StatusOK},
+	} {
+		ctx, recorder = oidcConsentRequestContext(t, http.MethodPatch, test.userID, gin.H{"scopes": test.scopes})
+		ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(grant.ID)}}
+		PatchOAuthGrant(ctx)
+		assert.Equal(t, test.expected, recorder.Code, recorder.Body.String())
+	}
+	recorder = performOidcRequest(t, http.MethodGet, oidcTestIssuer+"/userinfo", nil, map[string]string{"Authorization": "Bearer " + token.AccessToken})
+	assert.Equal(t, http.StatusUnauthorized, recorder.Code, "scope narrowing invalidates all previously issued tokens")
+	ctx, recorder = oidcConsentRequestContext(t, http.MethodDelete, user.Id+1, nil)
+	ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(grant.ID)}}
+	DeleteOAuthGrant(ctx)
+	assert.Equal(t, http.StatusNotFound, recorder.Code)
+	ctx, recorder = oidcConsentRequestContext(t, http.MethodDelete, user.Id, nil)
+	ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(grant.ID)}}
+	DeleteOAuthGrant(ctx)
+	assert.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.NoError(t, db.First(&grant, grant.ID).Error)
+	assert.NotZero(t, grant.RevokedAt)
 }

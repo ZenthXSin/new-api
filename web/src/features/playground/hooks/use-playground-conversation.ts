@@ -24,7 +24,7 @@ import {
   createRegeneratedMessages,
   removeMessageByKey,
 } from '../lib'
-import type { Message } from '../types'
+import type { Message, PlaygroundAttachment } from '../types'
 
 type UsePlaygroundConversationOptions = {
   messages: Message[]
@@ -32,35 +32,45 @@ type UsePlaygroundConversationOptions = {
     updater: Message[] | ((prev: Message[]) => Message[])
   ) => void
   sendChat: (messages: Message[]) => void
+  commitMessages?: (messages: Message[]) => Promise<void>
 }
 
 export function usePlaygroundConversation({
   messages,
   updateMessages,
   sendChat,
+  commitMessages,
 }: UsePlaygroundConversationOptions) {
   const [editingMessageKey, setEditingMessageKey] = useState<string | null>(
     null
   )
 
   const handleSendMessage = useCallback(
-    (text: string) => {
-      const nextMessages = appendUserMessagePair(messages, text)
-      updateMessages(nextMessages)
+    async (text: string, attachments?: PlaygroundAttachment[]) => {
+      const nextMessages = appendUserMessagePair(messages, text, attachments)
+      if (commitMessages) {
+        await commitMessages(nextMessages)
+      } else {
+        updateMessages(nextMessages)
+      }
       sendChat(nextMessages)
     },
-    [messages, updateMessages, sendChat]
+    [messages, updateMessages, sendChat, commitMessages]
   )
 
   const handleRegenerateMessage = useCallback(
-    (message: Message) => {
+    async (message: Message) => {
       const nextMessages = createRegeneratedMessages(messages, message.key)
       if (!nextMessages) return
 
-      updateMessages(nextMessages)
+      if (commitMessages) {
+        await commitMessages(nextMessages)
+      } else {
+        updateMessages(nextMessages)
+      }
       sendChat(nextMessages)
     },
-    [messages, updateMessages, sendChat]
+    [messages, updateMessages, sendChat, commitMessages]
   )
 
   const handleEditMessage = useCallback((message: Message) => {
@@ -74,34 +84,46 @@ export function usePlaygroundConversation({
   }, [])
 
   const applyEdit = useCallback(
-    (newContent: string, shouldSubmit: boolean) => {
+    async (
+      newContent: string,
+      shouldSubmit: boolean,
+      attachments?: PlaygroundAttachment[]
+    ) => {
       if (!editingMessageKey) return
 
       const editResult = applyMessageEdit(
         messages,
         editingMessageKey,
         newContent,
-        shouldSubmit
+        shouldSubmit,
+        attachments
       )
       if (!editResult) return
 
+      if (commitMessages) {
+        await commitMessages(editResult.messages)
+      } else {
+        updateMessages(editResult.messages)
+      }
       setEditingMessageKey(null)
-      updateMessages(editResult.messages)
 
       if (editResult.shouldSend) {
         sendChat(editResult.messages)
       }
     },
-    [editingMessageKey, messages, updateMessages, sendChat]
+    [editingMessageKey, messages, updateMessages, sendChat, commitMessages]
   )
 
   const handleDeleteMessage = useCallback(
-    (message: Message) => {
-      updateMessages((previousMessages) =>
-        removeMessageByKey(previousMessages, message.key)
-      )
+    async (message: Message) => {
+      const nextMessages = removeMessageByKey(messages, message.key)
+      if (commitMessages) {
+        await commitMessages(nextMessages)
+      } else {
+        updateMessages(nextMessages)
+      }
     },
-    [updateMessages]
+    [messages, updateMessages, commitMessages]
   )
 
   return {

@@ -16,10 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import {
+  consumeOAuthLoginRedirect,
   getOAuthSessionStorage,
+  rememberOAuthLoginRedirect,
   markOAuthBindPopup,
   resolveOAuthCallbackMode,
   type OAuthModeStorage,
@@ -169,5 +171,80 @@ describe('OAuth bind popup storage', () => {
         bindState
       )
     ).toBe(false)
+  })
+})
+
+describe('OAuth login return destination', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    sessionStorage.clear()
+    vi.useRealTimers()
+  })
+
+  test('a matching provider and state consume the same-origin destination once', () => {
+    const target = '/authorize?client_id=client&state=client-state#consent'
+    rememberOAuthLoginRedirect('github', 'login-state', target)
+
+    expect(consumeOAuthLoginRedirect('oidc', 'login-state')).toBeNull()
+    expect(consumeOAuthLoginRedirect('github', 'another-state')).toBeNull()
+    expect(consumeOAuthLoginRedirect('github', 'login-state')).toBe(target)
+    expect(consumeOAuthLoginRedirect('github', 'login-state')).toBeNull()
+  })
+
+  test('an expired return destination cannot be reused by a later callback', () => {
+    vi.useFakeTimers()
+    rememberOAuthLoginRedirect('github', 'login-state', '/oauth-actions/action')
+    vi.advanceTimersByTime(10 * 60 * 1000)
+
+    expect(consumeOAuthLoginRedirect('github', 'login-state')).toBeNull()
+  })
+
+  test.each([
+    'https://attacker.example/steal',
+    '//attacker.example/steal',
+    'javascript:alert(1)',
+    '/\\attacker.example/steal',
+  ])('unsafe return destination %s is never saved', (target) => {
+    rememberOAuthLoginRedirect('github', 'login-state', target)
+
+    expect(consumeOAuthLoginRedirect('github', 'login-state')).toBeNull()
+    expect(sessionStorage.length).toBe(0)
+  })
+
+  test('a new same-tab login replaces a stale return destination', () => {
+    rememberOAuthLoginRedirect(
+      'github',
+      'old-state',
+      '/authorize?client_id=old'
+    )
+    rememberOAuthLoginRedirect('oidc', 'new-state', '/oauth-actions/action')
+
+    expect(consumeOAuthLoginRedirect('github', 'old-state')).toBeNull()
+    expect(consumeOAuthLoginRedirect('oidc', 'new-state')).toBe(
+      '/oauth-actions/action'
+    )
+  })
+
+  test('a login without a destination clears a previous same-tab marker', () => {
+    rememberOAuthLoginRedirect(
+      'github',
+      'old-state',
+      '/authorize?client_id=old'
+    )
+    rememberOAuthLoginRedirect('github', 'new-state')
+
+    expect(consumeOAuthLoginRedirect('github', 'old-state')).toBeNull()
+  })
+
+  test('blocked sessionStorage does not prevent OAuth login from continuing', () => {
+    vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+      throw new Error('Storage is disabled')
+    })
+
+    expect(() =>
+      rememberOAuthLoginRedirect('github', 'state', '/authorize')
+    ).not.toThrow()
+    expect(consumeOAuthLoginRedirect('github', 'state')).toBeNull()
+    vi.restoreAllMocks()
   })
 })

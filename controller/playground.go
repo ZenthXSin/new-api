@@ -4,6 +4,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -13,6 +16,9 @@ import (
 )
 
 func Playground(c *gin.Context) {
+	// The OAuth path is rewritten below for normal persisted-token accounting.
+	// Keep the trusted route identity independent of that rewritten path.
+	common.SetContextKey(c, constant.ContextKeyPlaygroundRequest, true)
 	var newAPIError *types.NewAPIError
 
 	defer func() {
@@ -22,6 +28,16 @@ func Playground(c *gin.Context) {
 			})
 		}
 	}()
+
+	if _, delegated := middleware.GetOAuthPrincipal(c); delegated {
+		// OAuth middleware installed the persisted grant accounting identity
+		// before Distribute; retain it for charging, settlement and refunds.
+		originalPath := c.Request.URL.Path
+		c.Request.URL.Path = "/v1/chat/completions"
+		defer func() { c.Request.URL.Path = originalPath }()
+		Relay(c, types.RelayFormatOpenAI)
+		return
+	}
 
 	useAccessToken := c.GetBool("use_access_token")
 	if useAccessToken {

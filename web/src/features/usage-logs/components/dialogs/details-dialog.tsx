@@ -65,6 +65,7 @@ import { cn } from '@/lib/utils'
 
 import type { UsageLog } from '../../data/schema'
 import {
+  TIMING_TEXT_COLOR_MAP,
   parseLogOther,
   getTextPollingHit,
   getParamOverrideActionLabel,
@@ -94,14 +95,6 @@ const CHANNEL_FIELD_LABELS: Record<string, string> = {
   type: 'Type',
   base_url: 'Base URL',
   key: 'Key',
-}
-
-function timingTextColorClass(
-  variant: 'success' | 'warning' | 'danger'
-): string {
-  if (variant === 'success') return 'text-emerald-600'
-  if (variant === 'warning') return 'text-amber-600'
-  return 'text-rose-600'
 }
 
 function DetailRow(props: {
@@ -720,12 +713,12 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 <span
                   className={cn(
                     'font-medium',
-                    timingTextColorClass(
+                    TIMING_TEXT_COLOR_MAP[
                       getResponseTimeColor(
                         props.log.use_time,
                         props.log.completion_tokens
                       )
-                    )
+                    ]
                   )}
                 >
                   {formatUseTime(props.log.use_time)}
@@ -735,9 +728,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
                       <span
                         className={cn(
                           'font-normal',
-                          timingTextColorClass(
+                          TIMING_TEXT_COLOR_MAP[
                             getFirstResponseTimeColor(other.frt / 1000)
-                          )
+                          ]
                         )}
                       >
                         {' '}

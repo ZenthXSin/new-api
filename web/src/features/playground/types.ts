@@ -23,9 +23,41 @@ export type MessageStatus = 'loading' | 'streaming' | 'complete' | 'error'
 
 export type PlaygroundMessageLayoutMode = 'alternating' | 'left'
 
+export interface PlaygroundAttachment {
+  id: string
+  name: string
+  mimeType: string
+  size: number
+  kind: 'image' | 'text' | 'pdf'
+  dataUrl?: string
+  text?: string
+}
+
+export interface PlaygroundUsage {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  prompt_tokens_details?: {
+    cached_tokens?: number
+    cache_creation_tokens?: number
+  }
+  completion_tokens_details?: { reasoning_tokens?: number }
+}
+
+export interface PlaygroundAnnotation {
+  type?: string
+  url_citation?: {
+    url: string
+    title?: string
+    start_index?: number
+    end_index?: number
+  }
+}
+
 export interface MessageVersion {
   id: string
   content: string
+  attachments?: PlaygroundAttachment[]
 }
 
 export interface Message {
@@ -36,6 +68,11 @@ export interface Message {
   startedAt?: number
   completedAt?: number
   durationMs?: number
+  firstTokenAt?: number
+  firstTokenMs?: number
+  usage?: PlaygroundUsage
+  model?: string
+  finishReason?: string
   sources?: { href: string; title: string }[]
   reasoning?: {
     content: string
@@ -49,6 +86,7 @@ export interface Message {
   isContentComplete?: boolean
   status?: MessageStatus
   errorCode?: string | null
+  errorMessage?: string
 }
 
 // API payload types
@@ -58,11 +96,12 @@ export interface ChatCompletionMessage {
 }
 
 export interface ContentPart {
-  type: 'text' | 'image_url'
+  type: 'text' | 'image_url' | 'file'
   text?: string
   image_url?: {
     url: string
   }
+  file?: { filename: string; file_data: string }
 }
 
 export interface ChatCompletionRequest {
@@ -76,6 +115,11 @@ export interface ChatCompletionRequest {
   frequency_penalty?: number
   presence_penalty?: number
   seed?: number
+  stream_options?: { include_usage: boolean }
+  web_search_options?: { search_context_size: 'low' | 'medium' | 'high' }
+  reasoning_effort?: 'low' | 'medium' | 'high'
+  response_format?: { type: 'json_object' }
+  stop?: string[]
 }
 
 export interface ChatCompletionChunk {
@@ -89,9 +133,13 @@ export interface ChatCompletionChunk {
       role?: MessageRole
       content?: string
       reasoning_content?: string
+      annotations?: PlaygroundAnnotation[]
     }
     finish_reason: string | null
   }>
+  usage?: PlaygroundUsage
+  citations?: string[]
+  annotations?: PlaygroundAnnotation[]
 }
 
 export interface ChatCompletionResponse {
@@ -105,14 +153,13 @@ export interface ChatCompletionResponse {
       role: MessageRole
       content: string
       reasoning_content?: string
+      annotations?: PlaygroundAnnotation[]
     }
     finish_reason: string
   }>
-  usage?: {
-    prompt_tokens: number
-    completion_tokens: number
-    total_tokens: number
-  }
+  usage?: PlaygroundUsage
+  citations?: string[]
+  annotations?: PlaygroundAnnotation[]
 }
 
 // Configuration types
@@ -126,6 +173,12 @@ export interface PlaygroundConfig {
   presence_penalty: number
   seed: number | null
   stream: boolean
+  system_prompt?: string
+  web_search?: boolean
+  search_context_size?: 'low' | 'medium' | 'high'
+  reasoning_effort?: 'default' | 'low' | 'medium' | 'high'
+  response_format?: 'text' | 'json_object'
+  stop?: string[]
 }
 
 export interface ParameterEnabled {

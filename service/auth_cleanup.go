@@ -11,7 +11,8 @@ import (
 const authArtifactCleanupInterval = time.Hour
 
 // StartAuthArtifactCleanup removes expired dashboard Sessions and old
-// one-time authentication flows. Only the master instance performs cleanup.
+// one-time authentication flows and expired OAuth artifacts. Only the master
+// instance performs cleanup; request validation enforces expiry immediately.
 func StartAuthArtifactCleanup() {
 	if !common.IsMasterNode {
 		return
@@ -47,5 +48,11 @@ func cleanupAuthArtifacts() {
 	}
 	if err := model.DeleteExpiredAuthFlows(now); err != nil {
 		common.SysError("failed to delete expired authentication flows: " + err.Error())
+	}
+	if _, err := model.CleanupExpiredOAuthGrants(now); err != nil {
+		common.SysError("failed to delete expired OAuth grant families: " + err.Error())
+	}
+	if err := DeleteExpiredOAuthActions(); err != nil {
+		common.SysError("failed to delete expired OAuth actions: " + err.Error())
 	}
 }

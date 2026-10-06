@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/ollama"
@@ -51,6 +52,28 @@ type OpenAIModel struct {
 type OpenAIModelsResponse struct {
 	Data    []OpenAIModel `json:"data"`
 	Success bool          `json:"success"`
+}
+
+// clearOAuthChannelSecrets restricts delegated channel metadata to fields that
+// cannot carry upstream credentials. Full configuration is available only via
+// the separately consented, confirmed channel.config.reveal hosted operation.
+func clearOAuthChannelSecrets(c *gin.Context, channel *model.Channel) {
+	if channel == nil {
+		return
+	}
+	if _, delegated := middleware.GetOAuthPrincipal(c); !delegated {
+		return
+	}
+	channel.Key = ""
+	channel.Keys = nil
+	channel.BaseURL = nil
+	channel.HeaderOverride = nil
+	channel.ParamOverride = nil
+	channel.Setting = nil
+	channel.OtherSettings = ""
+	channel.Other = ""
+	channel.OtherInfo = ""
+	channel.ChannelInfo.MultiKeyDisabledReason = nil
 }
 
 func parseStatusFilter(statusParam string) int {
@@ -167,6 +190,7 @@ func GetAllChannels(c *gin.Context) {
 
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
+		clearOAuthChannelSecrets(c, datum)
 	}
 
 	countQuery := buildChannelListQuery(groupFilter, statusFilter, -1)
@@ -380,6 +404,7 @@ func SearchChannels(c *gin.Context) {
 
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
+		clearOAuthChannelSecrets(c, datum)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -407,6 +432,7 @@ func GetChannel(c *gin.Context) {
 	}
 	if channel != nil {
 		clearChannelInfo(channel)
+		clearOAuthChannelSecrets(c, channel)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -858,7 +884,7 @@ func EditTagChannels(c *gin.Context) {
 		return
 	}
 	if (channelTag.ParamOverride != nil || channelTag.HeaderOverride != nil) &&
-		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
+		!middleware.OAuthPermissionAllowed(c, authz.ChannelSensitiveWrite) {
 		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
 		return
 	}
@@ -1007,7 +1033,7 @@ func UpdateChannel(c *gin.Context) {
 	channel.ChannelInfo = originChannel.ChannelInfo
 
 	if channelHasSensitiveChanges(&channel, originChannel, requestData) &&
-		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
+		!middleware.OAuthPermissionAllowed(c, authz.ChannelSensitiveWrite) {
 		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
 		return
 	}
@@ -1133,6 +1159,7 @@ func UpdateChannel(c *gin.Context) {
 	})
 	channel.Key = ""
 	clearChannelInfo(&channel.Channel)
+	clearOAuthChannelSecrets(c, &channel.Channel)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -1533,7 +1560,7 @@ func ManageMultiKeys(c *gin.Context) {
 		return
 	}
 	if multiKeyActionRequiresSensitiveWrite(request.Action) &&
-		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
+		!middleware.OAuthPermissionAllowed(c, authz.ChannelSensitiveWrite) {
 		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
 		return
 	}
@@ -1605,6 +1632,11 @@ func ManageMultiKeys(c *gin.Context) {
 			keyPreview := key
 			if len(key) > 10 {
 				keyPreview = key[:10] + "..."
+			}
+
+			if _, delegated := middleware.GetOAuthPrincipal(c); delegated {
+				keyPreview = "***"
+				reason = ""
 			}
 
 			allKeyStatusList = append(allKeyStatusList, KeyStatus{

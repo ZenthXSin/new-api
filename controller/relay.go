@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	groupavailability "github.com/QuantumNous/new-api/pkg/group_availability"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -128,6 +129,19 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
 	}
+	defer func() {
+		recovered := recover()
+		resultErr := newAPIError
+		if recovered != nil {
+			resultErr = types.NewError(fmt.Errorf("relay panic: %v", recovered), types.ErrorCodeBadResponse)
+		}
+		if relayFormat != types.RelayFormatOpenAIRealtime {
+			groupavailability.RecordRelayResultWithContext(c, relayInfo, resultErr)
+		}
+		if recovered != nil {
+			panic(recovered)
+		}
+	}()
 
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
@@ -310,6 +324,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 			c.Request.Body = io.NopCloser(bodyStorage)
 
+			groupavailability.BeginAttempt(c, relayInfo)
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				newAPIError = relay.WssHelper(c, relayInfo)
@@ -392,6 +407,7 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 }
 
 func executeRelayAttempt(c *gin.Context, relayFormat types.RelayFormat, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+	groupavailability.BeginAttempt(c, relayInfo)
 	if billingErr := service.PrepareTieredBillingForSelectedGroup(c, relayInfo); billingErr != nil {
 		return billingErr
 	}

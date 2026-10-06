@@ -127,6 +127,14 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}
+	if playgroundSearchRequested(c, request) && !playgroundSearchPresent(jsonData, info.ApiType, true) {
+		return nil, playgroundSearchError()
+	}
+	info.ResponsesUsageInfo = &relaycommon.ResponsesUsageInfo{BuiltInTools: make(map[string]*relaycommon.BuildInToolInfo)}
+	for _, tool := range responsesReq.GetToolsMap() {
+		toolType := common.Interface2String(tool["type"])
+		info.ResponsesUsageInfo.BuiltInTools[toolType] = &relaycommon.BuildInToolInfo{ToolName: toolType}
+	}
 
 	body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 	if err != nil {

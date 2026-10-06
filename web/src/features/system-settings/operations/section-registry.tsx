@@ -21,6 +21,7 @@ import { EmailSettingsSection } from '../integrations/email-settings-section'
 import { MonitoringSettingsSection } from '../integrations/monitoring-settings-section'
 import { WorkerSettingsSection } from '../integrations/worker-settings-section'
 import { LogSettingsSection } from '../maintenance/log-settings-section'
+import { NetworkTrafficSection } from '../maintenance/network-traffic-section'
 import { PerformanceSection } from '../maintenance/performance-section'
 import { UpdateCheckerSection } from '../maintenance/update-checker-section'
 import type { OperationsSettings } from '../types'
@@ -123,6 +124,18 @@ const OPERATIONS_SECTIONS = [
             settings['performance_setting.monitor_memory_threshold'] ?? 90,
           'performance_setting.monitor_disk_threshold':
             settings['performance_setting.monitor_disk_threshold'] ?? 95,
+        }}
+      />
+    ),
+  },
+  {
+    id: 'network-traffic',
+    titleKey: 'Background traffic',
+    build: (settings: OperationsSettings) => (
+      <NetworkTrafficSection
+        defaultValues={{
+          NetworkTrafficEnabled: settings.NetworkTrafficEnabled,
+          NetworkTrafficDailyBudgetGB: settings.NetworkTrafficDailyBudgetGB,
         }}
       />
     ),

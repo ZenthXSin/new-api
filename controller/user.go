@@ -908,6 +908,20 @@ func UpdateSelf(c *gin.Context) {
 		return
 	}
 
+	// Password changes require a real dashboard session and the hosted flow.
+	// Reject delegated requests before checking the original password.
+	if user.Password != "" {
+		if principal, delegated := middleware.GetOAuthPrincipal(c); delegated {
+			if !service.OAuthScopeAllowed(principal, "account_security:write") {
+				c.Header("WWW-Authenticate", `Bearer error="insufficient_scope", scope="account_security:write"`)
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, "error": "insufficient_scope", "code": "OAUTH_INSUFFICIENT_SCOPE", "required_scope": "account_security:write"})
+				return
+			}
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, "error": "interaction_required", "code": "OAUTH_HOSTED_ACTION_REQUIRED", "required_scope": "account_security:write", "action_endpoint": "/api/oauth2/actions", "operation": "password.change"})
+			return
+		}
+	}
+
 	if user.Password == "" {
 		user.Password = "$I_LOVE_U" // make Validator happy :)
 	}
@@ -1260,7 +1274,7 @@ func ManageUser(c *gin.Context) {
 			})
 		case "override":
 			oldQuota := user.Quota
-			if err := model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("quota", req.Value).Error; err != nil {
+			if err := model.SetAppPaymentUserQuota(user.Id, req.Value); err != nil {
 				common.ApiError(c, err)
 				return
 			}

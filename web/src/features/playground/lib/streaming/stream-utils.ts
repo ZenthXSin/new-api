@@ -17,7 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { ERROR_MESSAGES } from '../../constants'
-import type { ChatCompletionChunk } from '../../types'
+import {
+  asRecord,
+  readResponseMetadata,
+  readResponseText,
+  type ResponseMetadata,
+} from './response-metadata'
 
 const STREAM_DONE_MESSAGE = '[DONE]'
 const STREAM_CLOSED_READY_STATE = 2
@@ -29,35 +34,36 @@ export type StreamMessageUpdate = {
   chunk: string
 }
 
-type StreamErrorPayload = {
-  error?: {
-    code?: string
-    message?: string
-  }
-}
-
 export type StreamErrorDetails = {
   errorCode?: string
   errorMessage: string
 }
 
 export function parseStreamErrorDetails(data?: string): StreamErrorDetails {
-  const fallbackMessage = data || ERROR_MESSAGES.API_REQUEST_ERROR
+  const fallbackMessage = ERROR_MESSAGES.API_REQUEST_ERROR
 
   if (!data) {
     return { errorMessage: fallbackMessage }
   }
 
   try {
-    const parsed = JSON.parse(data) as StreamErrorPayload
-
-    if (!parsed?.error) {
-      return { errorMessage: fallbackMessage }
+    const parsed = asRecord(JSON.parse(data))
+    const error = asRecord(parsed?.error)
+    if (!error) {
+      return {
+        errorMessage:
+          typeof parsed?.message === 'string' && parsed.message
+            ? parsed.message
+            : fallbackMessage,
+      }
     }
 
     return {
-      errorCode: parsed.error.code || undefined,
-      errorMessage: parsed.error.message || fallbackMessage,
+      errorCode: typeof error.code === 'string' ? error.code : undefined,
+      errorMessage:
+        typeof error.message === 'string' && error.message
+          ? error.message
+          : fallbackMessage,
     }
   } catch {
     return { errorMessage: fallbackMessage }
@@ -65,28 +71,34 @@ export function parseStreamErrorDetails(data?: string): StreamErrorDetails {
 }
 
 export function parseStreamMessageUpdates(data: string): StreamMessageUpdate[] {
-  const chunk = JSON.parse(data) as ChatCompletionChunk
-  const delta = chunk.choices?.[0]?.delta
+  return parseStreamMessage(data).updates
+}
 
-  if (!delta) {
-    return []
+export function parseStreamMessage(data: string): {
+  updates: StreamMessageUpdate[]
+  metadata: ResponseMetadata
+  error?: StreamErrorDetails
+} {
+  const chunk = asRecord(JSON.parse(data))
+  if (!chunk) throw new Error(ERROR_MESSAGES.PARSE_ERROR)
+  if (chunk.error) {
+    return { updates: [], metadata: {}, error: parseStreamErrorDetails(data) }
   }
-
+  const choice = asRecord(
+    Array.isArray(chunk.choices) ? chunk.choices[0] : undefined
+  )
+  const delta = asRecord(choice?.delta)
   const updates: StreamMessageUpdate[] = []
-
-  if (delta.reasoning_content) {
-    updates.push({ type: 'reasoning', chunk: delta.reasoning_content })
-  }
-
-  if (delta.content) {
-    updates.push({ type: 'content', chunk: delta.content })
-  }
-
-  return updates
+  const reasoning = readResponseText(delta?.reasoning_content)
+  const content =
+    readResponseText(delta?.content) || readResponseText(delta?.refusal)
+  if (reasoning) updates.push({ type: 'reasoning', chunk: reasoning })
+  if (content) updates.push({ type: 'content', chunk: content })
+  return { updates, metadata: readResponseMetadata(chunk) }
 }
 
 export function isStreamDoneMessage(data: string): boolean {
-  return data === STREAM_DONE_MESSAGE
+  return data.trim() === STREAM_DONE_MESSAGE
 }
 
 export function isStreamClosedReadyState(readyState?: number): boolean {

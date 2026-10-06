@@ -21,8 +21,10 @@ import {
   Banknote,
   Box,
   CreditCard,
+  CodeXml,
   FileText,
   FlaskConical,
+  HeartPulse,
   Key,
   LayoutDashboard,
   ListTodo,
@@ -84,6 +86,11 @@ export function useSidebarData(): SidebarData {
             icon: LayoutDashboard,
           },
           {
+            title: t('Group Availability'),
+            url: '/group-availability',
+            icon: HeartPulse,
+          },
+          {
             title: t('API Keys'),
             url: '/keys',
             icon: Key,
@@ -117,6 +124,11 @@ export function useSidebarData(): SidebarData {
             icon: Wallet,
           },
           {
+            title: t('My payment orders'),
+            url: '/payments/orders',
+            icon: CreditCard,
+          },
+          {
             title: t('Profile'),
             url: '/profile',
             icon: User,
@@ -127,6 +139,12 @@ export function useSidebarData(): SidebarData {
         id: 'admin',
         title: t('Admin'),
         items: [
+          {
+            title: t('Codex'),
+            url: '/codex',
+            icon: CodeXml,
+            requiredRole: ROLE.ADMIN,
+          },
           {
             title: t('Channels'),
             url: '/channels',

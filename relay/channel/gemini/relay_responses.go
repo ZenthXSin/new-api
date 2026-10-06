@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	groupavailability "github.com/QuantumNous/new-api/pkg/group_availability"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -28,6 +29,7 @@ func GeminiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	logger.LogDebug(c, "Gemini responses response body: %s", responseBody)
 
 	var geminiResponse dto.GeminiChatResponse
+	groupavailability.ObserveCacheUsage(c, responseBody)
 	if err := common.Unmarshal(responseBody, &geminiResponse); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}

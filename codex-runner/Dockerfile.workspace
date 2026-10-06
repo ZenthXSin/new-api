@@ -1,0 +1,18 @@
+FROM node:24-bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash ca-certificates curl git python3 python3-venv build-essential ripgrep \
+    && rm -rf /var/lib/apt/lists/* \
+    && usermod --login codex --home /home/codex node \
+    && groupmod --new-name codex node \
+    && mkdir -p /home/codex /workspace /opt/new-api-codex \
+    && chown -R 1000:1000 /home/codex /workspace
+
+# prepare-runtime-image.sh copies only installed distribution binaries, never ~/.codex.
+COPY --chmod=755 runtime-vendor/codex /usr/local/bin/codex
+COPY --chmod=755 runtime-vendor/codex-code-mode-host /usr/local/bin/codex-code-mode-host
+COPY --chmod=644 workspace-git.py workspace-process.py migrate-codex-home.py /opt/new-api-codex/
+ENV HOME=/home/codex/user LANG=C.UTF-8
+WORKDIR /workspace
+USER 1000:1000
+CMD ["sleep", "infinity"]

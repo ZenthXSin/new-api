@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
+import { sanitizeAuthRedirect } from './auth-redirect'
+
 /**
  * Tells apart the two OAuth callbacks that land on the same `/oauth/:provider`
  * route: an account **bind**, which runs inside a popup we opened, and a plain
@@ -36,6 +38,71 @@ For commercial licensing, please contact support@quantumnous.com
  */
 
 const OAUTH_BIND_FLOW_KEY_PREFIX = 'oauth_bind_flow:'
+const OAUTH_LOGIN_RETURN_KEY = 'oauth_login_return'
+const OAUTH_LOGIN_RETURN_TTL_MS = 10 * 60 * 1000
+
+/** The return path is tab-local and belongs to one provider authorization. */
+export function rememberOAuthLoginRedirect(
+  provider: string,
+  state: string,
+  redirect?: string
+): void {
+  try {
+    const storage = window.sessionStorage
+    storage.removeItem(OAUTH_LOGIN_RETURN_KEY)
+    const target = sanitizeAuthRedirect(redirect, window.location.origin)
+    if (!provider || !state || !target) return
+
+    storage.setItem(
+      OAUTH_LOGIN_RETURN_KEY,
+      JSON.stringify({
+        provider,
+        state,
+        redirect: target,
+        expiresAt: Date.now() + OAUTH_LOGIN_RETURN_TTL_MS,
+      })
+    )
+  } catch {
+    // Storage restrictions still permit login with the default destination.
+  }
+}
+
+export function consumeOAuthLoginRedirect(
+  provider: string,
+  state: string
+): string | null {
+  if (!provider || !state) return null
+  try {
+    const storage = window.sessionStorage
+    const raw = storage.getItem(OAUTH_LOGIN_RETURN_KEY)
+    if (!raw) return null
+    const marker: unknown = JSON.parse(raw)
+    if (
+      !marker ||
+      typeof marker !== 'object' ||
+      !('provider' in marker) ||
+      !('state' in marker) ||
+      marker.provider !== provider ||
+      marker.state !== state
+    ) {
+      return null
+    }
+
+    storage.removeItem(OAUTH_LOGIN_RETURN_KEY)
+    if (
+      !('expiresAt' in marker) ||
+      typeof marker.expiresAt !== 'number' ||
+      !Number.isFinite(marker.expiresAt) ||
+      marker.expiresAt <= Date.now() ||
+      !('redirect' in marker)
+    ) {
+      return null
+    }
+    return sanitizeAuthRedirect(marker.redirect, window.location.origin)
+  } catch {
+    return null
+  }
+}
 
 /** Minimal shape of `sessionStorage`, kept structural so tests can fake it. */
 export interface OAuthModeStorage {

@@ -15,28 +15,41 @@ const (
 	cacheQuotaInsufficient cacheQuotaResult = iota
 	cacheQuotaOK
 	cacheQuotaMiss
+	cacheQuotaGuarded
+	cacheQuotaMirrorMissing
+	cacheQuotaPending
 )
 
 const userQuotaReserveScript = `
+if redis.call('EXISTS', KEYS[2]) ~= 0 then return -2 end
 if tonumber(redis.call('HGET', KEYS[1], 'Id') or '0') ~= tonumber(ARGV[2])
   or tonumber(redis.call('HGET', KEYS[1], 'CacheSchema') or '0') ~= tonumber(ARGV[3])
   or redis.call('HEXISTS', KEYS[1], 'Quota') == 0 then
   return -1
 end
-local quota = tonumber(redis.call('HGET', KEYS[1], 'Quota'))
+local mirror = redis.call('GET', KEYS[3])
+if not mirror and ARGV[4] == '1' then return -3 end
+local quota = tonumber(mirror or redis.call('HGET', KEYS[1], 'Quota'))
 if quota == nil or quota < tonumber(ARGV[1]) then
   return 0
 end
-redis.call('HINCRBY', KEYS[1], 'Quota', -tonumber(ARGV[1]))
+local updated = quota - tonumber(ARGV[1])
+redis.call('HSET', KEYS[1], 'Quota', updated)
+if mirror then redis.call('SET', KEYS[3], updated) end
 return 1`
 
 const userQuotaDeltaScript = `
+local mirror = redis.call('GET', KEYS[2])
+if not mirror and ARGV[4] == '1' then return -3 end
+local updated = nil
+if mirror then updated = redis.call('INCRBY', KEYS[2], ARGV[1]) end
 if tonumber(redis.call('HGET', KEYS[1], 'Id') or '0') ~= tonumber(ARGV[2])
   or tonumber(redis.call('HGET', KEYS[1], 'CacheSchema') or '0') ~= tonumber(ARGV[3])
   or redis.call('HEXISTS', KEYS[1], 'Quota') == 0 then
   return -1
 end
-redis.call('HINCRBY', KEYS[1], 'Quota', tonumber(ARGV[1]))
+if updated then redis.call('HSET', KEYS[1], 'Quota', updated)
+else redis.call('HINCRBY', KEYS[1], 'Quota', tonumber(ARGV[1])) end
 return 1`
 
 const tokenQuotaReserveScript = `
@@ -74,20 +87,53 @@ func quotaResultFromLua(result int, err error) (cacheQuotaResult, error) {
 		return cacheQuotaOK, nil
 	case 0:
 		return cacheQuotaInsufficient, nil
+	case -2:
+		return cacheQuotaGuarded, nil
+	case -3:
+		return cacheQuotaMirrorMissing, nil
 	default:
 		return cacheQuotaMiss, nil
 	}
 }
 
 func cacheTryReserveUserQuota(userID int, amount int64) (cacheQuotaResult, error) {
-	result, err := common.RDB.Eval(context.Background(), userQuotaReserveScript,
-		[]string{getUserCacheKey(userID)}, amount, userID, userCacheSchemaVersion).Int()
+	enabled := "0"
+	if appPaymentWalletSchemaEnabled() && appPaymentWalletCacheReady.Load() {
+		enabled = "1"
+	}
+	keys := []string{getUserCacheKey(userID), appPaymentWalletGuardKey(userID), appPaymentWalletMirrorKey(userID)}
+	result, err := common.RDB.Eval(context.Background(), userQuotaReserveScript, keys, amount, userID, userCacheSchemaVersion, enabled).Int()
+	if err == nil && result == -3 {
+		if mirrorErr := ensureAppPaymentWalletMirror(userID, 0); mirrorErr != nil {
+			if errors.Is(mirrorErr, errAppPaymentWalletMirrorPending) {
+				return cacheQuotaPending, ErrAppPaymentBalancePending
+			}
+			markAppPaymentWalletUnsafe(userID)
+		}
+		result, err = common.RDB.Eval(context.Background(), userQuotaReserveScript, keys, amount, userID, userCacheSchemaVersion, "0").Int()
+	}
+	if err != nil {
+		markAppPaymentWalletUnsafe(userID)
+	}
 	return quotaResultFromLua(result, err)
 }
 
 func cacheApplyUserQuotaDelta(userID int, delta int64) (cacheQuotaResult, error) {
-	result, err := common.RDB.Eval(context.Background(), userQuotaDeltaScript,
-		[]string{getUserCacheKey(userID)}, delta, userID, userCacheSchemaVersion).Int()
+	enabled := "0"
+	if appPaymentWalletSchemaEnabled() && appPaymentWalletCacheReady.Load() {
+		enabled = "1"
+	}
+	keys := []string{getUserCacheKey(userID), appPaymentWalletMirrorKey(userID)}
+	result, err := common.RDB.Eval(context.Background(), userQuotaDeltaScript, keys, delta, userID, userCacheSchemaVersion, enabled).Int()
+	if err == nil && result == -3 {
+		if mirrorErr := ensureAppPaymentWalletMirror(userID, 0); mirrorErr != nil {
+			markAppPaymentWalletUnsafe(userID)
+		}
+		result, err = common.RDB.Eval(context.Background(), userQuotaDeltaScript, keys, delta, userID, userCacheSchemaVersion, "0").Int()
+	}
+	if err != nil {
+		markAppPaymentWalletUnsafe(userID)
+	}
 	return quotaResultFromLua(result, err)
 }
 
@@ -170,25 +216,53 @@ func TryReserveUserQuota(id int, quota int) (bool, error) {
 		return true, nil
 	}
 	if !common.RedisEnabled {
+		if err := checkAppPaymentWalletGuard(id); err != nil {
+			return false, err
+		}
 		return reserveUserQuotaDB(id, quota)
 	}
 
+	if appPaymentWalletSchemaEnabled() && !appPaymentWalletGuardsReady.Load() {
+		if err := checkAppPaymentWalletGuard(id); err != nil {
+			return false, err
+		}
+	}
 	result, err := cacheTryReserveUserQuota(id, int64(quota))
+	if result == cacheQuotaPending {
+		return false, ErrAppPaymentBalancePending
+	}
+	if result == cacheQuotaGuarded {
+		if err := clearOrphanAppPaymentWalletGuard(id); err != nil {
+			return false, err
+		}
+		result, err = cacheTryReserveUserQuota(id, int64(quota))
+	}
 	if err == nil && result == cacheQuotaMiss {
 		if _, hydrateErr := GetUserCache(id); hydrateErr == nil {
 			result, err = cacheTryReserveUserQuota(id, int64(quota))
+		} else if errors.Is(hydrateErr, errAppPaymentWalletMirrorPending) {
+			return false, ErrAppPaymentBalancePending
 		}
+
+	}
+	if result == cacheQuotaGuarded || result == cacheQuotaPending {
+		return false, ErrAppPaymentBalancePending
 	}
 	if err != nil || result == cacheQuotaMiss {
+		if guardErr := checkAppPaymentWalletGuard(id); guardErr != nil {
+			return false, guardErr
+		}
 		if err != nil {
 			common.SysLog("user quota cache reserve unavailable, falling back to database: " + err.Error())
 		}
+		markAppPaymentWalletUnsafe(id)
 		return reserveUserQuotaDB(id, quota)
 	}
 	if result == cacheQuotaInsufficient {
 		return false, nil
 	}
 	if err = persistUserQuotaDelta(id, -quota); err != nil {
+		markAppPaymentWalletUnsafe(id)
 		compensated, compensateErr := cacheApplyUserQuotaDelta(id, int64(quota))
 		if compensateErr != nil || compensated != cacheQuotaOK {
 			common.SysError(fmt.Sprintf("failed to compensate reserved user quota: result=%d error=%v", compensated, compensateErr))

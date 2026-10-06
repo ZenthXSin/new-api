@@ -23,6 +23,7 @@ import { getMessageContent, hasMessageContent } from './message-utils'
 type MessageActionState = {
   content: string
   hasContent: boolean
+  hasText: boolean
   isAssistant: boolean
   isLoading: boolean
   isUser: boolean
@@ -32,6 +33,7 @@ export function getMessageActionState(message: Message): MessageActionState {
   return {
     content: getMessageContent(message),
     hasContent: hasMessageContent(message),
+    hasText: getMessageContent(message).trim().length > 0,
     isAssistant: message.from === MESSAGE_ROLES.ASSISTANT,
     isUser: message.from === MESSAGE_ROLES.USER,
     isLoading:

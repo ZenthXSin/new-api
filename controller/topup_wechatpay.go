@@ -136,7 +136,7 @@ func WeChatPayPay(c *gin.Context) {
 }
 
 func WeChatPayWebhook(c *gin.Context) {
-	if !isWeChatPayWebhookEnabled() {
+	if !isWeChatPayWebhookEnabled() && !appWeChatWebhookEnabled() {
 		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
@@ -165,6 +165,13 @@ func WeChatPayWebhook(c *gin.Context) {
 		return
 	}
 
+	if dispatchWeChatAppPayment(c, transaction) {
+		return
+	}
+	if !isWeChatPayWebhookEnabled() {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
 	err = model.RechargeWeChatPay(*transaction.OutTradeNo, *transaction.Amount.Total, *transaction.TransactionId, c.ClientIP())
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("微信支付回调入账失败 trade_no=%s error=%q", *transaction.OutTradeNo, err.Error()))

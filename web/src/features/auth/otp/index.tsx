@@ -16,14 +16,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Link } from '@tanstack/react-router'
+import { Link, useSearch } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
+
+import { sanitizeAuthRedirect } from '@/features/auth/lib/auth-redirect'
 
 import { AuthLayout } from '../auth-layout'
 import { OtpForm } from './components/otp-form'
 
 export function Otp() {
   const { t } = useTranslation()
+  const search = useSearch({ from: '/(auth)/otp' })
+  const redirect =
+    sanitizeAuthRedirect(search.redirect, window.location.origin) ?? undefined
+
   return (
     <AuthLayout>
       <div className='w-full space-y-8'>
@@ -38,6 +44,7 @@ export function Otp() {
             {t('Session expired?')}{' '}
             <Link
               to='/sign-in'
+              search={{ redirect }}
               className='hover:text-primary font-medium underline underline-offset-4'
             >
               {t('Re-login')}
@@ -46,7 +53,7 @@ export function Otp() {
           </p>
         </div>
 
-        <OtpForm />
+        <OtpForm redirectTo={redirect} />
       </div>
     </AuthLayout>
   )

@@ -103,6 +103,13 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 		Role:    "assistant",
 		Content: text,
 	}
+	for _, output := range resp.Output {
+		if output.Type == responsesOutputTypeMessage {
+			for _, content := range output.Content {
+				msg.Annotations = append(msg.Annotations, dto.ResponsesURLCitations(content.Annotations)...)
+			}
+		}
+	}
 	if reasoning != "" {
 		msg.ReasoningContent = &reasoning
 	}

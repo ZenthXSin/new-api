@@ -45,6 +45,11 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCo
 		choice.Delta.Role = "assistant"
 	} else if claudeResponse.Type == "content_block_start" {
 		if claudeResponse.ContentBlock != nil {
+			for _, citation := range claudeResponse.ContentBlock.Citations {
+				if annotation := citation.ChatAnnotation(); annotation != nil {
+					choice.Delta.Annotations = append(choice.Delta.Annotations, *annotation)
+				}
+			}
 			if claudeResponse.ContentBlock.Type == "text" && claudeResponse.ContentBlock.Text != nil {
 				choice.Delta.SetContentString(*claudeResponse.ContentBlock.Text)
 			}
@@ -66,6 +71,12 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCo
 		if claudeResponse.Delta != nil {
 			choice.Delta.Content = claudeResponse.Delta.Text
 			switch claudeResponse.Delta.Type {
+			case "citations_delta":
+				if citation := claudeResponse.Delta.Citation; citation != nil {
+					if annotation := citation.ChatAnnotation(); annotation != nil {
+						choice.Delta.Annotations = append(choice.Delta.Annotations, *annotation)
+					}
+				}
 			case "input_json_delta":
 				tools = append(tools, dto.ToolCallResponse{
 					Type:  "function",
@@ -109,10 +120,10 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 		Object:  "chat.completion",
 		Created: kitutil.GetTimestamp(),
 	}
-	var responseText string
+	var responseText strings.Builder
+	var annotations []dto.ChatAnnotation
 	var responseThinking string
 	if len(claudeResponse.Content) > 0 {
-		responseText = claudeResponse.Content[0].GetText()
 		if claudeResponse.Content[0].Thinking != nil {
 			responseThinking = *claudeResponse.Content[0].Thinking
 		}
@@ -138,7 +149,12 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 				thinkingContent = *message.Thinking
 			}
 		case "text":
-			responseText = message.GetText()
+			responseText.WriteString(message.GetText())
+			for _, citation := range message.Citations {
+				if annotation := citation.ChatAnnotation(); annotation != nil {
+					annotations = append(annotations, *annotation)
+				}
+			}
 		}
 	}
 	choice := dto.OpenAITextResponseChoice{
@@ -148,7 +164,8 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 		},
 		FinishReason: StopReasonClaudeToOpenAI(claudeResponse.StopReason),
 	}
-	choice.SetStringContent(responseText)
+	choice.SetStringContent(responseText.String())
+	choice.Message.Annotations = annotations
 	if len(responseThinking) > 0 {
 		choice.ReasoningContent = &responseThinking
 	}

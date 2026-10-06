@@ -884,6 +884,7 @@ func ApplyChannelUpstreamModelUpdates(c *gin.Context) {
 	recordManageAudit(c, "channel.upstream_apply", map[string]interface{}{
 		"id": channel.Id,
 	})
+	clearOAuthChannelSecrets(c, channel)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

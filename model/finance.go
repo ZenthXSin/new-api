@@ -33,7 +33,7 @@ type UserDayStat struct {
 func dayBucketExpr(column string, logDB bool) string {
 	if logDB {
 		if common.UsingLogDatabase(common.DatabaseTypeMySQL) {
-			return fmt.Sprintf("FROM_UNIXTIME(%s, '%%%%Y-%%%%m-%%%%d')", column)
+			return fmt.Sprintf("FROM_UNIXTIME(%s, '%%Y-%%m-%%d')", column)
 		}
 		if common.UsingLogDatabase(common.DatabaseTypePostgreSQL) {
 			return fmt.Sprintf("TO_CHAR(TO_TIMESTAMP(%s), 'YYYY-MM-DD')", column)
@@ -44,7 +44,7 @@ func dayBucketExpr(column string, logDB bool) string {
 		return fmt.Sprintf("date(%s, 'unixepoch', 'localtime')", column)
 	}
 	if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
-		return fmt.Sprintf("FROM_UNIXTIME(%s, '%%%%Y-%%%%m-%%%%d')", column)
+		return fmt.Sprintf("FROM_UNIXTIME(%s, '%%Y-%%m-%%d')", column)
 	}
 	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
 		return fmt.Sprintf("TO_CHAR(TO_TIMESTAMP(%s), 'YYYY-MM-DD')", column)

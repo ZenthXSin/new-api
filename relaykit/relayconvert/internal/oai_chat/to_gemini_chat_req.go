@@ -166,9 +166,9 @@ func OpenAIChatRequestToGeminiGenerateContent(c context.Context, textRequest dto
 		geminiRequest.SafetySettings = safetySettings
 	}
 
-	if textRequest.Tools != nil {
+	if textRequest.Tools != nil || textRequest.WebSearchOptions != nil {
 		functions := make([]dto.FunctionRequest, 0, len(textRequest.Tools))
-		googleSearch := false
+		googleSearch := textRequest.WebSearchOptions != nil
 		codeExecution := false
 		urlContext := false
 		for _, tool := range textRequest.Tools {

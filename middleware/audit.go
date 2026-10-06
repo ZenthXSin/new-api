@@ -6,6 +6,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
@@ -164,6 +165,9 @@ func finishAdminAudit(c *gin.Context, writer *auditResponseWriter) {
 		"admin_role":     operatorRole,
 		"auth_method":    auditAuthMethod(c),
 	}
+	for key, value := range OAuthAuditMetadata(c) {
+		adminInfo[key] = value
+	}
 	auditInfo := map[string]interface{}{
 		"method":  method,
 		"route":   route,
@@ -181,6 +185,9 @@ func finishAdminAudit(c *gin.Context, writer *auditResponseWriter) {
 }
 
 func auditAuthMethod(c *gin.Context) string {
+	if metadata := OAuthAuditMetadata(c); metadata != nil {
+		return metadata["auth_method"].(string)
+	}
 	if c.GetBool("use_access_token") {
 		return "access_token"
 	}
@@ -203,4 +210,33 @@ func auditResponseSuccess(status int, body []byte) bool {
 		}
 	}
 	return status < 400
+}
+
+// OAuthAuditMetadata records verified application identity without credentials,
+// request bodies or callback URLs. Hosted actions keep their genuine session
+// identity and install a separate principal solely for audit attribution.
+func OAuthAuditMetadata(c *gin.Context) map[string]interface{} {
+	principal, delegated := GetOAuthPrincipal(c)
+	method := "oauth"
+	if !delegated {
+		value, exists := c.Get("oauth_hosted_principal")
+		var ok bool
+		principal, ok = value.(*service.OAuthPrincipal)
+		if !exists || !ok || principal == nil {
+			return nil
+		}
+		method = "oauth_hosted"
+	}
+	if principal.UserID <= 0 || principal.UserID != c.GetInt("id") || principal.ClientID == "" || principal.GrantID <= 0 {
+		return nil
+	}
+	metadata := map[string]interface{}{
+		"auth_method":     method,
+		"oauth_client_id": principal.ClientID,
+		"oauth_grant_id":  principal.GrantID,
+	}
+	if method == "oauth_hosted" && c.GetString("oauth_hosted_action_id") != "" {
+		metadata["oauth_action_id"] = c.GetString("oauth_hosted_action_id")
+	}
+	return metadata
 }

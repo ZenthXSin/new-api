@@ -19,14 +19,16 @@ For commercial licensing, please contact support@quantumnous.com
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { z } from 'zod'
 
-import { sanitizeAuthRedirect } from '@/features/auth/lib/auth-redirect'
 import { AuthorizeScreen } from '@/features/auth/authorize/authorize-screen'
+import { sanitizeAuthRedirect } from '@/features/auth/lib/auth-redirect'
 import { useAuthStore } from '@/stores/auth-store'
 
 const searchSchema = z.object({
   client_id: z.string().optional(),
   redirect_uri: z.string().optional(),
   scope: z.string().optional(),
+  resource: z.union([z.string(), z.array(z.string())]).optional(),
+  prompt: z.string().optional(),
   state: z.string().optional(),
   nonce: z.string().optional(),
   code_challenge: z.string().optional(),
@@ -38,7 +40,8 @@ const searchSchema = z.object({
 export const Route = createFileRoute('/(auth)/authorize')({
   component: AuthorizePage,
   validateSearch: searchSchema,
-  beforeLoad: async () => {
+  beforeLoad: async ({ search }) => {
+    if (search.error) return
     const { auth } = useAuthStore.getState()
     if (auth.user) return
 

@@ -279,6 +279,7 @@ func migrateDB() error {
 		&Midjourney{},
 		&TopUp{},
 		&PaymentTransaction{},
+		&PaymentApplication{}, &PaymentWebhookEvent{}, &PaymentWalletGuard{}, &PaymentWalletOperation{}, &PaymentWalletCacheWitness{}, &PaymentWalletMutation{},
 		&QuotaData{},
 		&Task{},
 		&Model{},
@@ -291,13 +292,18 @@ func migrateDB() error {
 		&SubscriptionOrder{},
 		&UserSubscription{},
 		&SubscriptionPreConsumeRecord{},
-		&FinanceEntry{},
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
 		&OauthClient{},
 		&OauthConsent{},
 		&OauthSigningKey{},
+		&OAuthGrant{},
+		&OAuthAccessToken{},
+		&OAuthRefreshToken{},
+		&OAuthRelayBinding{},
+		&OAuthAction{},
 		&PerfMetric{},
+		&GroupAvailabilityBucket{},
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
@@ -308,6 +314,12 @@ func migrateDB() error {
 		&AuthzRole{},
 	)
 	if err != nil {
+		return err
+	}
+	if err := migrateAppPaymentOrderSchema(); err != nil {
+		return err
+	}
+	if err := migrateFinanceEntrySchema(); err != nil {
 		return err
 	}
 	if err := InitializeUserAuthVersions(); err != nil {
@@ -356,6 +368,7 @@ func migrateDBFast() error {
 		{&Midjourney{}, "Midjourney"},
 		{&TopUp{}, "TopUp"},
 		{&PaymentTransaction{}, "PaymentTransaction"},
+		{&PaymentApplication{}, "PaymentApplication"}, {&PaymentWebhookEvent{}, "PaymentWebhookEvent"}, {&PaymentWalletGuard{}, "PaymentWalletGuard"}, {&PaymentWalletOperation{}, "PaymentWalletOperation"}, {&PaymentWalletCacheWitness{}, "PaymentWalletCacheWitness"}, {&PaymentWalletMutation{}, "PaymentWalletMutation"},
 		{&QuotaData{}, "QuotaData"},
 		{&Task{}, "Task"},
 		{&Model{}, "Model"},
@@ -368,13 +381,18 @@ func migrateDBFast() error {
 		{&SubscriptionOrder{}, "SubscriptionOrder"},
 		{&UserSubscription{}, "UserSubscription"},
 		{&SubscriptionPreConsumeRecord{}, "SubscriptionPreConsumeRecord"},
-		{&FinanceEntry{}, "FinanceEntry"},
 		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
 		{&OauthClient{}, "OauthClient"},
 		{&OauthConsent{}, "OauthConsent"},
 		{&OauthSigningKey{}, "OauthSigningKey"},
+		{&OAuthGrant{}, "OAuthGrant"},
+		{&OAuthAccessToken{}, "OAuthAccessToken"},
+		{&OAuthRefreshToken{}, "OAuthRefreshToken"},
+		{&OAuthRelayBinding{}, "OAuthRelayBinding"},
+		{&OAuthAction{}, "OAuthAction"},
 		{&PerfMetric{}, "PerfMetric"},
+		{&GroupAvailabilityBucket{}, "GroupAvailabilityBucket"},
 		{&SystemInstance{}, "SystemInstance"},
 		{&SystemTask{}, "SystemTask"},
 		{&SystemTaskLock{}, "SystemTaskLock"},
@@ -404,6 +422,12 @@ func migrateDBFast() error {
 		if err != nil {
 			return err
 		}
+	}
+	if err := migrateAppPaymentOrderSchema(); err != nil {
+		return err
+	}
+	if err := migrateFinanceEntrySchema(); err != nil {
+		return err
 	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err

@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { KeyRound, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { BadgeCell } from '@/components/data-table/core/badge-cell'
@@ -35,6 +36,7 @@ type ClientTableProps = {
   onEdit: (client: OauthClient) => void
   onCreate: () => void
   onResetSecret: (client: OauthClient) => void
+  onPayments?: (client: OauthClient) => void
 }
 
 export function ClientTable(props: ClientTableProps) {
@@ -43,21 +45,25 @@ export function ClientTable(props: ClientTableProps) {
   const [deleteTarget, setDeleteTarget] = useState<OauthClient | null>(null)
 
   const handleDelete = async () => {
-    if (!deleteTarget) return
-    await deleteClient.mutateAsync(deleteTarget.id)
-    setDeleteTarget(null)
+    if (!deleteTarget || deleteClient.isPending) return
+    try {
+      await deleteClient.mutateAsync(deleteTarget.id)
+      setDeleteTarget(null)
+    } catch {
+      toast.error(t('Failed to delete client'))
+    }
   }
 
   return (
     <>
-      <div className='flex items-center justify-between'>
+      <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
         <p className='text-muted-foreground text-sm'>
           {t(
-            'Register third-party applications that may sign in with this site.'
+            'Manage applications that can request sign-in and delegated access to this site.'
           )}
         </p>
         <Button size='sm' onClick={props.onCreate}>
-          <Plus className='mr-1.5 h-4 w-4' />
+          <Plus className='size-4' aria-hidden='true' />
           {t('Add Client')}
         </Button>
       </div>
@@ -106,6 +112,22 @@ export function ClientTable(props: ClientTableProps) {
             ),
           },
           {
+            id: 'permissions',
+            header: t('Allowed permissions'),
+            cell: (client) => (
+              <details className='max-w-64 text-sm'>
+                <summary className='cursor-pointer'>
+                  {t('{{count}} permissions', { count: client.scopes.length })}
+                </summary>
+                <ul className='mt-2 flex max-h-40 flex-col gap-1 overflow-y-auto font-mono text-xs break-all'>
+                  {client.scopes.map((scope) => (
+                    <li key={scope}>{scope}</li>
+                  ))}
+                </ul>
+              </details>
+            ),
+          },
+          {
             id: 'status',
             header: t('Status'),
             cell: (client) => (
@@ -125,10 +147,25 @@ export function ClientTable(props: ClientTableProps) {
             cellClassName: 'flex justify-end gap-1',
             cell: (client) => (
               <div className='flex justify-end gap-1'>
+                {props.onPayments && !client.is_public && (
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    onClick={() => props.onPayments?.(client)}
+                  >
+                    {t('Payment settings')}
+                  </Button>
+                )}
                 <Button
                   variant='ghost'
                   size='icon-sm'
                   disabled={client.is_public}
+                  aria-label={
+                    client.is_public
+                      ? t('Public clients have no secret')
+                      : t('Reset secret')
+                  }
                   title={
                     client.is_public
                       ? t('Public clients have no secret')
@@ -136,7 +173,7 @@ export function ClientTable(props: ClientTableProps) {
                   }
                   onClick={() => props.onResetSecret(client)}
                 >
-                  <KeyRound className='h-4 w-4' />
+                  <KeyRound className='size-4' aria-hidden='true' />
                 </Button>
                 <StaticRowActions
                   editLabel={t('Edit')}
@@ -153,7 +190,9 @@ export function ClientTable(props: ClientTableProps) {
 
       <ConfirmDialog
         open={!!deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        onOpenChange={(open) =>
+          !open && !deleteClient.isPending && setDeleteTarget(null)
+        }
         title={t('Delete Client')}
         desc={t(
           'Are you sure you want to delete "{{name}}"? Applications using this client will immediately lose access.',

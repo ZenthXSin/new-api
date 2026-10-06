@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useLocation } from '@tanstack/react-router'
+
 import { AnimatedOutlet } from '@/components/page-transition'
 import { SkipToMain } from '@/components/skip-to-main'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
@@ -32,6 +34,10 @@ type AuthenticatedLayoutProps = {
 }
 
 export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
+  const isCodex = useLocation({
+    select: (location) =>
+      location.pathname === '/codex' || location.pathname.startsWith('/codex/'),
+  })
   const defaultOpen = getCookie('sidebar_state') !== 'false'
 
   return (
@@ -39,9 +45,13 @@ export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
       <SearchProvider>
         <SidebarProvider defaultOpen={defaultOpen} className='flex-col'>
           <SkipToMain />
-          <AppHeader />
+          <AppHeader
+            showSidebarTrigger={!isCodex}
+            showTopNav={!isCodex}
+            showSearch={!isCodex}
+          />
           <div className='flex min-h-0 w-full flex-1'>
-            <AppSidebar />
+            {!isCodex && <AppSidebar />}
             <SidebarInset
               className={cn(
                 '@container/content',

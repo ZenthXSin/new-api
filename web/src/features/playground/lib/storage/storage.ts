@@ -16,383 +16,257 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { MESSAGE_STATUS, STORAGE_KEYS } from '../../constants'
-import type { PlaygroundConfig, ParameterEnabled, Message } from '../../types'
+import { useAuthStore } from '@/stores/auth-store'
+
+import { STORAGE_KEYS } from '../../constants'
+import type { Message, ParameterEnabled, PlaygroundConfig } from '../../types'
 import {
-  finalizeMessage,
-  isAssistantMessagePending,
-  sanitizeMessagesOnLoad,
-} from '../message/message-streaming-utils'
-import { completeAssistantTiming } from '../message/message-timing-utils'
-import { hasMessageContent } from '../message/message-utils'
-import {
-  MAX_LOADED_MESSAGE_CHARS,
-  MAX_LOADED_MESSAGES_CHARS,
-  MAX_STORED_MESSAGES,
   MAX_STORED_MESSAGES_BYTES,
+  MAX_STORED_MESSAGES,
   STORAGE_VERSION,
   messagesSchema,
   parameterEnabledSchema,
   playgroundConfigSchema,
 } from './storage-schema'
 
-type StoredEnvelope<T> = {
-  version: number
-  data: T
-}
-
-const TRUNCATED_CONTENT_SUFFIX = '\n\n[...]'
-const MIN_PREFIX_COLLAPSE_LENGTH = 2000
-const MIN_REPEATED_SECTION_COUNT = 3
-const SECTION_HEADING_LINE_PATTERN = /^#{2,6}\s+\d+\.\s+.+$/gm
-
-function readStoredValue(key: string): unknown | null {
-  const saved = localStorage.getItem(key)
-  if (!saved) return null
-
-  return JSON.parse(saved) as unknown
-}
-
-function readStoredMessagesValue(): unknown | null {
-  const saved = localStorage.getItem(STORAGE_KEYS.MESSAGES)
-  if (!saved) return null
-
-  if (saved.length > MAX_STORED_MESSAGES_BYTES) {
-    localStorage.removeItem(STORAGE_KEYS.MESSAGES)
-    return null
+const DATABASE_NAME = 'new-api-playground'
+const STORE_NAME = 'conversations'
+const pendingWrites = new Map<string, Promise<void>>()
+export type PlaygroundStorageStatus = 'loading' | 'saving' | 'saved' | 'error'
+export class PlaygroundStorageError extends Error {
+  constructor(
+    public readonly code: 'unavailable' | 'limit' | 'invalid' | 'account'
+  ) {
+    super(code)
+    this.name = 'PlaygroundStorageError'
   }
-
-  return JSON.parse(saved) as unknown
 }
-
-function unwrapStoredValue(value: unknown): unknown {
-  if (!value || typeof value !== 'object') {
-    return value
-  }
-
-  if ('version' in value && 'data' in value) {
-    return (value as StoredEnvelope<unknown>).data
-  }
-
-  return value
+export function currentPlaygroundUserID(): number | null {
+  return useAuthStore.getState().auth.user?.id ?? null
 }
-
-function writeStoredValue<T>(key: string, data: T): void {
-  const payload: StoredEnvelope<T> = {
-    version: STORAGE_VERSION,
-    data,
+function ownerID(userID: number | null = currentPlaygroundUserID()): number {
+  if (!Number.isSafeInteger(userID) || !userID || userID < 1) {
+    throw new PlaygroundStorageError('account')
   }
-
-  localStorage.setItem(key, JSON.stringify(payload))
+  return userID
 }
-
-function trimMessages(messages: Message[]): Message[] {
-  if (messages.length <= MAX_STORED_MESSAGES) {
-    return messages
+function scopedKey(kind: string, userID?: number | null): string {
+  return `playground_v2:${ownerID(userID)}:${kind}`
+}
+function readSettings(kind: string, userID?: number | null): unknown {
+  const value = localStorage.getItem(scopedKey(kind, userID))
+  if (!value) {
+    return {}
   }
-
-  return messages.slice(-MAX_STORED_MESSAGES)
+  return JSON.parse(value) as unknown
 }
-
-function getMessageSize(message: Message): number {
-  const versionsSize = message.versions.reduce(
-    (total, version) => total + version.content.length,
-    0
+export function loadConfig(userID?: number | null): Partial<PlaygroundConfig> {
+  const value = readSettings('config', userID)
+  // Previous versions allowed max_tokens=0; retain all other valid settings.
+  if (
+    value &&
+    typeof value === 'object' &&
+    'max_tokens' in value &&
+    value.max_tokens === 0
+  ) {
+    value.max_tokens = 4096
+  }
+  return playgroundConfigSchema.parse(value)
+}
+export function saveConfig(
+  config: Partial<PlaygroundConfig>,
+  userID?: number | null
+): void {
+  localStorage.setItem(
+    scopedKey('config', userID),
+    JSON.stringify(playgroundConfigSchema.parse(config))
   )
-  const reasoningSize = message.reasoning?.content.length ?? 0
-
-  return versionsSize + reasoningSize
+}
+export function loadParameterEnabled(
+  userID?: number | null
+): Partial<ParameterEnabled> {
+  return parameterEnabledSchema.parse(readSettings('parameters', userID))
+}
+export function saveParameterEnabled(
+  parameters: Partial<ParameterEnabled>,
+  userID?: number | null
+): void {
+  localStorage.setItem(
+    scopedKey('parameters', userID),
+    JSON.stringify(parameterEnabledSchema.parse(parameters))
+  )
 }
 
-function truncateText(text: string, maxLength: number): string {
-  if (text.length <= maxLength) {
-    return text
+export function validateConversationMessages(messages: unknown): Message[] {
+  if (Array.isArray(messages) && messages.length > MAX_STORED_MESSAGES) {
+    throw new PlaygroundStorageError('limit')
   }
-
-  if (maxLength <= TRUNCATED_CONTENT_SUFFIX.length) {
-    return text.slice(0, maxLength)
+  const result = messagesSchema.safeParse(messages)
+  if (!result.success) {
+    throw new PlaygroundStorageError('invalid')
   }
-
-  return `${text.slice(0, maxLength - TRUNCATED_CONTENT_SUFFIX.length)}${TRUNCATED_CONTENT_SUFFIX}`
-}
-
-type SectionOccurrence = {
-  heading: string
-  index: number
-}
-
-function getSectionOccurrences(text: string): SectionOccurrence[] {
-  const occurrences: SectionOccurrence[] = []
-  const matches = text.matchAll(SECTION_HEADING_LINE_PATTERN)
-  for (const match of matches) {
-    const index = match.index
-    if (index === undefined) {
-      continue
-    }
-
-    occurrences.push({
-      heading: match[0],
-      index,
-    })
+  if (
+    new TextEncoder().encode(JSON.stringify(result.data)).byteLength >
+    MAX_STORED_MESSAGES_BYTES
+  ) {
+    throw new PlaygroundStorageError('limit')
   }
-
-  return occurrences
+  return result.data
 }
-
-function getHeadingCounts(
-  occurrences: SectionOccurrence[]
-): Map<string, number> {
-  const counts = new Map<string, number>()
-
-  for (const occurrence of occurrences) {
-    counts.set(occurrence.heading, (counts.get(occurrence.heading) ?? 0) + 1)
-  }
-
-  return counts
-}
-
-function findLastRepeatedSectionRunStart(text: string): number {
-  const occurrences = getSectionOccurrences(text)
-  const headingCounts = getHeadingCounts(occurrences)
-  const lastRepeatedIndexes: number[] = []
-  const seenHeadings = new Set<string>()
-
-  for (let index = occurrences.length - 1; index >= 0; index--) {
-    const occurrence = occurrences[index]
-    const count = headingCounts.get(occurrence.heading) ?? 0
-
+export function restoreConversationMessages(messages: Message[]): Message[] {
+  return messages.map((message) => {
     if (
-      count < MIN_REPEATED_SECTION_COUNT ||
-      seenHeadings.has(occurrence.heading)
+      message.from !== 'assistant' ||
+      !['loading', 'streaming'].includes(message.status ?? '')
     ) {
-      continue
+      return message
     }
-
-    seenHeadings.add(occurrence.heading)
-    lastRepeatedIndexes.push(occurrence.index)
-  }
-
-  if (lastRepeatedIndexes.length === 0) {
-    return -1
-  }
-
-  return Math.min(...lastRepeatedIndexes)
-}
-
-function collapseRepeatedSectionSnapshots(text: string): string {
-  if (text.length < MIN_PREFIX_COLLAPSE_LENGTH) {
-    return text
-  }
-
-  const lastRepeatedRunStart = findLastRepeatedSectionRunStart(text)
-  if (lastRepeatedRunStart === -1) {
-    return text
-  }
-
-  return text.slice(lastRepeatedRunStart)
-}
-
-function normalizeStoredMessageForLoad(message: Message): Message {
-  let changed = false
-  const versions = message.versions.map((version) => {
-    const collapsedContent = collapseRepeatedSectionSnapshots(version.content)
-    const content = truncateText(collapsedContent, MAX_LOADED_MESSAGE_CHARS)
-
-    if (content === version.content && collapsedContent === version.content) {
-      return version
-    }
-
-    changed = true
+    // Preserve exactly the partial answer/reasoning already received. A browser
+    // restart cannot turn an interrupted generation into a successful response.
     return {
-      ...version,
-      content,
+      ...message,
+      status: 'error',
+      errorCode: 'interrupted',
+      isReasoningStreaming: false,
+      isReasoningComplete: true,
+      isContentComplete: true,
     }
   })
-
-  const reasoning = message.reasoning
-    ? {
-        ...message.reasoning,
-        content: truncateText(
-          message.reasoning.content,
-          MAX_LOADED_MESSAGE_CHARS
-        ),
+}
+async function openDatabase(): Promise<IDBDatabase> {
+  if (typeof indexedDB === 'undefined') {
+    throw new PlaygroundStorageError('unavailable')
+  }
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DATABASE_NAME, 1)
+    let rejected = false
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(STORE_NAME)) {
+        request.result.createObjectStore(STORE_NAME)
       }
-    : undefined
-
-  if (reasoning?.content !== message.reasoning?.content) {
-    changed = true
+    }
+    request.onerror = () => {
+      rejected = true
+      reject(new PlaygroundStorageError('unavailable'))
+    }
+    request.onblocked = () => {
+      rejected = true
+      reject(new PlaygroundStorageError('unavailable'))
+    }
+    request.onsuccess = () => {
+      if (rejected) {
+        request.result.close()
+        return
+      }
+      request.result.onversionchange = () => request.result.close()
+      resolve(request.result)
+    }
+  })
+}
+export async function loadMessages(
+  userID?: number | null
+): Promise<Message[] | null> {
+  const key = scopedKey('messages', userID)
+  await pendingWrites.get(key)?.catch(() => undefined)
+  const db = await openDatabase()
+  try {
+    const value = await new Promise<unknown>((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readonly')
+      const request = transaction.objectStore(STORE_NAME).get(key)
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(new PlaygroundStorageError('unavailable'))
+      transaction.onabort = () =>
+        reject(new PlaygroundStorageError('unavailable'))
+    })
+    if (value === undefined) {
+      return null
+    }
+    if (
+      typeof value !== 'object' ||
+      value === null ||
+      !('version' in value) ||
+      value.version !== STORAGE_VERSION ||
+      !('data' in value)
+    ) {
+      throw new PlaygroundStorageError('invalid')
+    }
+    return restoreConversationMessages(validateConversationMessages(value.data))
+  } finally {
+    db.close()
   }
-
-  const normalized = changed ? { ...message, versions, reasoning } : message
-
-  if (!isAssistantMessagePending(normalized)) {
-    return normalized
+}
+export function saveMessages(
+  messages: Message[],
+  userID?: number | null
+): Promise<void> {
+  let key: string
+  let data: Message[]
+  try {
+    key = scopedKey('messages', userID)
+    data = validateConversationMessages(messages)
+  } catch (error) {
+    return Promise.reject(error)
   }
-
-  const hasContent = hasMessageContent(normalized)
-  const hasReasoning = normalized.reasoning?.content.trim()
-
-  if (!hasContent && !hasReasoning) {
-    return normalized
-  }
-
-  const completedAt =
-    normalized.completedAt ??
-    normalized.reasoning?.completedAt ??
-    normalized.startedAt ??
-    normalized.createdAt ??
-    Date.now()
-
-  return completeAssistantTiming(
-    {
-      ...finalizeMessage(normalized),
-      status: MESSAGE_STATUS.COMPLETE,
-      isReasoningStreaming: false,
+  const work = (pendingWrites.get(key) ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(async () => {
+      const db = await openDatabase()
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const transaction = db.transaction(STORE_NAME, 'readwrite')
+          transaction
+            .objectStore(STORE_NAME)
+            .put({ version: STORAGE_VERSION, data }, key)
+          transaction.oncomplete = () => resolve()
+          transaction.onerror = () =>
+            reject(new PlaygroundStorageError('unavailable'))
+          transaction.onabort = () =>
+            reject(new PlaygroundStorageError('unavailable'))
+        })
+      } finally {
+        db.close()
+      }
+    })
+  pendingWrites.set(key, work)
+  void work.then(
+    () => {
+      if (pendingWrites.get(key) === work) {
+        pendingWrites.delete(key)
+      }
     },
-    completedAt
+    () => {
+      if (pendingWrites.get(key) === work) {
+        pendingWrites.delete(key)
+      }
+    }
   )
+  return work
 }
-
-function trimMessagesByContentSize(messages: Message[]): Message[] {
-  let totalSize = 0
-  const result: Message[] = []
-
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index]
-    const messageSize = getMessageSize(message)
-
-    if (
-      result.length > 0 &&
-      totalSize + messageSize > MAX_LOADED_MESSAGES_CHARS
-    ) {
-      break
-    }
-
-    totalSize += messageSize
-    result.push(message)
-  }
-
-  return result.reverse()
-}
-
-/**
- * Load playground config from localStorage
- */
-export function loadConfig(): Partial<PlaygroundConfig> {
+export function hasLegacyConversation(): boolean {
   try {
-    const saved = readStoredValue(STORAGE_KEYS.CONFIG)
-    if (!saved) return {}
-
-    return playgroundConfigSchema.parse(unwrapStoredValue(saved))
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to load config:', error)
-  }
-  return {}
-}
-
-/**
- * Save playground config to localStorage
- */
-export function saveConfig(config: Partial<PlaygroundConfig>): void {
-  try {
-    const parsed = playgroundConfigSchema.parse(config)
-    writeStoredValue(STORAGE_KEYS.CONFIG, parsed)
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to save config:', error)
+    return Boolean(localStorage.getItem(STORAGE_KEYS.MESSAGES))
+  } catch {
+    return false
   }
 }
-
-/**
- * Load parameter enabled state from localStorage
- */
-export function loadParameterEnabled(): Partial<ParameterEnabled> {
-  try {
-    const saved = readStoredValue(STORAGE_KEYS.PARAMETER_ENABLED)
-    if (!saved) return {}
-
-    return parameterEnabledSchema.parse(unwrapStoredValue(saved))
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to load parameter enabled:', error)
+export function readLegacyConversation(): Message[] {
+  const raw = localStorage.getItem(STORAGE_KEYS.MESSAGES)
+  if (!raw) {
+    return []
   }
-  return {}
+  if (new TextEncoder().encode(raw).byteLength > MAX_STORED_MESSAGES_BYTES) {
+    throw new PlaygroundStorageError('limit')
+  }
+  const value: unknown = JSON.parse(raw)
+  const data =
+    value && typeof value === 'object' && 'data' in value ? value.data : value
+  return restoreConversationMessages(validateConversationMessages(data))
 }
-
-/**
- * Save parameter enabled state to localStorage
- */
-export function saveParameterEnabled(
-  parameterEnabled: Partial<ParameterEnabled>
-): void {
-  try {
-    const parsed = parameterEnabledSchema.parse(parameterEnabled)
-    writeStoredValue(STORAGE_KEYS.PARAMETER_ENABLED, parsed)
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to save parameter enabled:', error)
-  }
-}
-
-/**
- * Load messages from localStorage
- */
-export function loadMessages(): Message[] | null {
-  try {
-    const saved = readStoredMessagesValue()
-    if (!saved) return null
-
-    const parsed = messagesSchema.parse(unwrapStoredValue(saved)) as Message[]
-    const normalized = parsed.map(normalizeStoredMessageForLoad)
-    const normalizedChanged = normalized.some(
-      (message, index) => message !== parsed[index]
-    )
-    const trimmed = trimMessages(normalized)
-    const sizeTrimmed = trimMessagesByContentSize(trimmed)
-    const sanitized = sanitizeMessagesOnLoad(sizeTrimmed)
-
-    if (
-      normalizedChanged ||
-      trimmed !== normalized ||
-      sizeTrimmed !== trimmed ||
-      sanitized !== sizeTrimmed
-    ) {
-      saveMessages(sanitized)
-    }
-
-    return sanitized
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to load messages:', error)
-  }
-  return null
-}
-
-/**
- * Save messages to localStorage
- */
-export function saveMessages(messages: Message[]): void {
-  try {
-    const trimmed = trimMessages(messages)
-    const parsed = messagesSchema.parse(trimmed) as Message[]
-    writeStoredValue(STORAGE_KEYS.MESSAGES, parsed)
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to save messages:', error)
-  }
-}
-
-/**
- * Clear all playground data
- */
-export function clearPlaygroundData(): void {
-  try {
-    localStorage.removeItem(STORAGE_KEYS.CONFIG)
-    localStorage.removeItem(STORAGE_KEYS.PARAMETER_ENABLED)
-    localStorage.removeItem(STORAGE_KEYS.MESSAGES)
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to clear playground data:', error)
-  }
+export async function clearPlaygroundData(
+  userID?: number | null
+): Promise<void> {
+  const id = ownerID(userID)
+  await saveMessages([], id)
+  localStorage.removeItem(scopedKey('config', id))
+  localStorage.removeItem(scopedKey('parameters', id))
 }

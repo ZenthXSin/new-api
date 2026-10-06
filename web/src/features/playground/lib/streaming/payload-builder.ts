@@ -37,11 +37,39 @@ export function buildChatCompletionPayload(
     .filter(isValidMessage)
     .map(formatMessageForAPI)
 
+  const instructions = [config.system_prompt?.trim()]
+  if (config.response_format === 'json_object') {
+    instructions.push('Respond with a valid JSON object.')
+  }
+  const systemPrompt = instructions.filter(Boolean).join('\n\n')
+  if (systemPrompt) {
+    processedMessages.unshift({ role: 'system', content: systemPrompt })
+  }
+
   const payload: ChatCompletionRequest = {
     model: config.model,
     group: config.group,
     messages: processedMessages,
     stream: config.stream,
+  }
+
+  if (config.stream) {
+    payload.stream_options = { include_usage: true }
+  }
+  if (config.web_search) {
+    payload.web_search_options = {
+      search_context_size: config.search_context_size ?? 'medium',
+    }
+  }
+  if (config.reasoning_effort && config.reasoning_effort !== 'default') {
+    payload.reasoning_effort = config.reasoning_effort
+  }
+  if (config.response_format === 'json_object') {
+    payload.response_format = { type: 'json_object' }
+  }
+  const stop = config.stop?.filter((value) => value.length > 0)
+  if (stop?.length) {
+    payload.stop = stop
   }
 
   if (parameterEnabled.temperature) {

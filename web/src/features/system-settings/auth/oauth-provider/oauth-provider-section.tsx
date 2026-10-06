@@ -16,27 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { zodResolver } from '@hookform/resolvers/zod'
 import { useMemo, useState } from 'react'
+import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import * as z from 'zod'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
-
 import { CopyButton } from '@/components/copy-button'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-
-import { SettingsSection } from '../../components/settings-section'
-import { useResetForm } from '../../hooks/use-reset-form'
-import { useUpdateOption } from '../../hooks/use-update-option'
-import {
-  SettingsForm,
-  SettingsSwitchContent,
-  SettingsSwitchItem,
-} from '../../components/settings-form-layout'
-import { SettingsPageFormActions } from '../../components/settings-page-context'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { useForm } from 'react-hook-form'
-import * as z from 'zod'
+import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
@@ -47,10 +37,25 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
-import type { UpdateOptionRequest } from '../../types'
+import { PaymentApplicationSettings } from '@/features/app-payments/application-settings'
+import { useAuthStore } from '@/stores/auth-store'
 
-import { ClientFormDialog, SecretRevealDialog } from './components/client-form-dialog'
+import {
+  SettingsForm,
+  SettingsSwitchContent,
+  SettingsSwitchItem,
+} from '../../components/settings-form-layout'
+import { SettingsPageFormActions } from '../../components/settings-page-context'
+import { SettingsSection } from '../../components/settings-section'
+import { useResetForm } from '../../hooks/use-reset-form'
+import { useUpdateOption } from '../../hooks/use-update-option'
+import type { UpdateOptionRequest } from '../../types'
+import {
+  ClientFormDialog,
+  SecretRevealDialog,
+} from './components/client-form-dialog'
 import { ClientTable } from './components/client-table'
 import {
   useOauthClients,
@@ -68,12 +73,10 @@ const oauthProviderSchema = z.object({
   oauth_provider: z.object({
     enabled: z.boolean(),
     issuer: z.string(),
-    access_token_ttl_minutes: z
-      .string()
-      .refine((value) => {
-        const parsed = Number.parseInt(value, 10)
-        return Number.isFinite(parsed) && parsed >= 5 && parsed <= 43200
-      }, 'Must be between 5 and 43200'),
+    access_token_ttl_minutes: z.string().refine((value) => {
+      const parsed = Number.parseInt(value, 10)
+      return Number.isFinite(parsed) && parsed >= 5 && parsed <= 43200
+    }, 'Must be between 5 and 43200'),
   }),
 })
 
@@ -89,9 +92,21 @@ type OauthProviderSectionProps = {
 }
 
 export function OauthProviderSection(props: OauthProviderSectionProps) {
+  const user = useAuthStore((state) => state.auth.user)
+  const sessionID = useAuthStore((state) => state.auth.session?.sid)
+  return (
+    <OauthProviderSectionContent
+      key={`${user?.id}:${user?.role}:${sessionID}`}
+      {...props}
+    />
+  )
+}
+
+function OauthProviderSectionContent(props: OauthProviderSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
-  const { data: clients = [], isLoading } = useOauthClients()
+  const clientQuery = useOauthClients()
+  const clients = clientQuery.data ?? []
   const [formDialogOpen, setFormDialogOpen] = useState(false)
   const [editingClient, setEditingClient] = useState<OauthClient | null>(null)
   const [secretDialog, setSecretDialog] = useState<{
@@ -99,26 +114,21 @@ export function OauthProviderSection(props: OauthProviderSectionProps) {
     secret: string
   } | null>(null)
   const [resetTarget, setResetTarget] = useState<OauthClient | null>(null)
-  const resetSecret = useResetOauthClientSecret()
+  const [paymentTarget, setPaymentTarget] = useState<OauthClient | null>(null)
+  const role = useAuthStore((state) => state.auth.user?.role ?? 0)
+  const resetSecret = useResetOauthClientSecret((id, secret) => {
+    const client = clients.find((item) => item.id === id)
+    if (client) setSecretDialog({ clientId: client.client_id, secret })
+  })
 
   const handleResetSecret = async () => {
-    if (!resetTarget) return
+    if (!resetTarget || resetSecret.isPending) return
     try {
-      const res = await resetSecret.mutateAsync(resetTarget.id)
-      if (res.success && res.data?.client_secret) {
-        setSecretDialog({
-          clientId: resetTarget.client_id,
-          secret: res.data.client_secret,
-        })
-      } else {
-        toast.error(res.message || t('Failed to reset client secret'))
-      }
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : t('An error occurred')
-      )
+      await resetSecret.mutateAsync(resetTarget.id)
+      setResetTarget(null)
+    } catch {
+      toast.error(t('Failed to reset client secret'))
     }
-    setResetTarget(null)
   }
 
   const { defaultValues } = props
@@ -171,11 +181,15 @@ export function OauthProviderSection(props: OauthProviderSectionProps) {
   }
 
   const watchedIssuer = form.watch('oauth_provider.issuer')
-  const issuerBase = (watchedIssuer || props.defaultValues['oauth_provider.issuer'] || `${props.serverAddress}/oidc`).replace(/\/+$/, '')
+  const issuerBase = (
+    watchedIssuer ||
+    props.defaultValues['oauth_provider.issuer'] ||
+    `${props.serverAddress}/oidc`
+  ).replace(/\/+$/, '')
   const discoveryUrl = `${issuerBase}/.well-known/openid-configuration`
 
   return (
-    <SettingsSection title={t('Sign in with this site (OIDC Provider)')}>
+    <SettingsSection title={t('OAuth applications and sign-in')}>
       <Form {...form}>
         <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
           <SettingsPageFormActions
@@ -188,10 +202,10 @@ export function OauthProviderSection(props: OauthProviderSectionProps) {
             render={({ field }) => (
               <SettingsSwitchItem>
                 <SettingsSwitchContent>
-                  <FormLabel>{t('Enable OIDC Provider')}</FormLabel>
+                  <FormLabel>{t('Enable OAuth and OIDC provider')}</FormLabel>
                   <FormDescription>
                     {t(
-                      'Allow third-party websites and apps to authenticate users with this site.'
+                      'Allow your own and third-party applications to sign in and use explicitly authorized site features.'
                     )}
                   </FormDescription>
                 </SettingsSwitchContent>
@@ -230,10 +244,15 @@ export function OauthProviderSection(props: OauthProviderSectionProps) {
             name='oauth_provider.access_token_ttl_minutes'
             render={({ field }) => (
               <FormItem>
-                <FormLabel>{t('Access token lifetime (minutes)')}</FormLabel>
+                <FormLabel>{t('ID token lifetime (minutes)')}</FormLabel>
                 <FormControl>
                   <Input type='number' min={5} max={43200} {...field} />
                 </FormControl>
+                <FormDescription>
+                  {t(
+                    'Access tokens expire after 15 minutes. This setting controls identity tokens.'
+                  )}
+                </FormDescription>
                 <FormMessage />
               </FormItem>
             )}
@@ -245,7 +264,9 @@ export function OauthProviderSection(props: OauthProviderSectionProps) {
         <AlertTitle>{t('Discovery URL')}</AlertTitle>
         <AlertDescription className='space-y-3 text-sm'>
           <p>
-            {t('Share this URL with the application integrating your login.')}
+            {t(
+              'Share this discovery URL with applications integrating sign-in and delegated access.'
+            )}
           </p>
           <div className='flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between'>
             <code className='bg-muted text-foreground min-w-0 truncate rounded px-1.5 py-0.5 text-xs'>
@@ -256,11 +277,24 @@ export function OauthProviderSection(props: OauthProviderSectionProps) {
         </AlertDescription>
       </Alert>
 
-      {isLoading ? (
-        <div className='text-muted-foreground py-8 text-center text-sm'>
-          {t('Loading...')}
-        </div>
-      ) : (
+      {clientQuery.isError ? (
+        <Alert variant='destructive'>
+          <AlertTitle>{t('Failed to load OAuth clients')}</AlertTitle>
+          <AlertDescription>
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={() => void clientQuery.refetch()}
+            >
+              {t('Retry')}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {clientQuery.isLoading ? (
+        <Skeleton className='h-32 w-full' aria-label={t('Loading...')} />
+      ) : null}
+      {!clientQuery.isError && !clientQuery.isLoading ? (
         <ClientTable
           clients={clients}
           onEdit={(client) => {
@@ -272,8 +306,9 @@ export function OauthProviderSection(props: OauthProviderSectionProps) {
             setFormDialogOpen(true)
           }}
           onResetSecret={(client) => setResetTarget(client)}
+          onPayments={role >= 100 ? setPaymentTarget : undefined}
         />
-      )}
+      ) : null}
 
       <ClientFormDialog
         open={formDialogOpen}
@@ -288,7 +323,9 @@ export function OauthProviderSection(props: OauthProviderSectionProps) {
       />
       <ConfirmDialog
         open={!!resetTarget}
-        onOpenChange={(open) => !open && setResetTarget(null)}
+        onOpenChange={(open) =>
+          !open && !resetSecret.isPending && setResetTarget(null)
+        }
         title={t('Reset client secret')}
         desc={t(
           'The current secret stops working immediately. Applications must be updated with the new secret.'
@@ -304,6 +341,14 @@ export function OauthProviderSection(props: OauthProviderSectionProps) {
         clientId={secretDialog?.clientId ?? ''}
         secret={secretDialog?.secret ?? ''}
       />
+      {paymentTarget && (
+        <PaymentApplicationSettings
+          clientID={paymentTarget.client_id}
+          clientName={paymentTarget.name}
+          open
+          onOpenChange={(open) => !open && setPaymentTarget(null)}
+        />
+      )}
     </SettingsSection>
   )
 }

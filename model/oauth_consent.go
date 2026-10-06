@@ -15,7 +15,7 @@ type OauthConsent struct {
 	Id            int    `json:"id" gorm:"primaryKey"`
 	UserId        int    `json:"user_id" gorm:"uniqueIndex:uk_oauth_consent_user_client;not null"`
 	OauthClientId int    `json:"oauth_client_id" gorm:"uniqueIndex:uk_oauth_consent_user_client;not null"`
-	GrantedScopes string `json:"granted_scopes" gorm:"type:varchar(256);not null"`
+	GrantedScopes string `json:"granted_scopes" gorm:"type:varchar(8192);not null"`
 	CreatedTime   int64  `json:"created_time" gorm:"autoCreateTime"`
 	UpdatedTime   int64  `json:"updated_time" gorm:"autoUpdateTime"`
 }

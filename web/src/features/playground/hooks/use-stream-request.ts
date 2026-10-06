@@ -23,19 +23,25 @@ import { getFreshAuthHeaders } from '@/lib/api'
 
 import { API_ENDPOINTS, ERROR_MESSAGES } from '../constants'
 import {
-  getStreamReadyStateError,
   isStreamClosedReadyState,
   isStreamDoneMessage,
   parseStreamErrorDetails,
-  parseStreamMessageUpdates,
 } from '../lib'
+import type { ResponseMetadata } from '../lib/streaming/response-metadata'
+import { parseStreamMessage } from '../lib/streaming/stream-utils'
 import type { ChatCompletionRequest } from '../types'
 
 interface StreamEventSource {
   readyState?: number
   addEventListener: (
     type: string,
-    listener: (event: Event & { data?: string; readyState?: number }) => void
+    listener: (
+      event: Event & {
+        data?: string
+        readyState?: number
+        responseCode?: number
+      }
+    ) => void
   ) => void
   close: () => void
   stream: () => void
@@ -45,6 +51,7 @@ interface StreamRequestCallbacks {
   onUpdate: (type: 'reasoning' | 'content', chunk: string) => void
   onComplete: () => void
   onError: (error: string, errorCode?: string) => void
+  onMetadata?: (metadata: ResponseMetadata) => void
 }
 
 interface StreamRequestControllerRuntime {
@@ -95,10 +102,19 @@ export function createStreamRequestController(
     }
     if (generation !== requestGeneration) return
 
-    const nextSource = runtime.createSource(payload, headers)
+    let nextSource: StreamEventSource
+    try {
+      nextSource = runtime.createSource(payload, headers)
+    } catch {
+      callbacks.onError(ERROR_MESSAGES.STREAM_START_ERROR)
+      return
+    }
     source = nextSource
     runtime.setStreaming(true)
     let completed = false
+    let hasFinishReason = false
+    let firstTokenReceived = false
+    let responseCode: number | undefined
 
     const isCurrent = () =>
       generation === requestGeneration && source === nextSource
@@ -110,58 +126,72 @@ export function createStreamRequestController(
       closeActiveSource(nextSource)
     }
 
+    const handleComplete = () => {
+      if (!isCurrent() || completed) return
+      completed = true
+      closeActiveSource(nextSource)
+      callbacks.onComplete()
+    }
+
+    nextSource.addEventListener('open', (event) => {
+      if (isCurrent()) responseCode = event.responseCode
+    })
+
     nextSource.addEventListener('message', (event) => {
       if (!isCurrent() || completed) return
       const data = event.data ?? ''
       if (isStreamDoneMessage(data)) {
-        completed = true
-        closeActiveSource(nextSource)
-        callbacks.onComplete()
+        handleComplete()
         return
       }
+      if (!data.trim()) return
 
       try {
-        const updates = parseStreamMessageUpdates(data)
+        const { updates, metadata, error } = parseStreamMessage(data)
+        if (error) {
+          handleError(error.errorMessage, error.errorCode)
+          return
+        }
+        hasFinishReason ||= Boolean(metadata.finishReason)
+        if (updates.length && !firstTokenReceived) {
+          metadata.firstTokenAt = Date.now()
+          firstTokenReceived = true
+        }
+        if (Object.keys(metadata).length) callbacks.onMetadata?.(metadata)
 
         for (const update of updates) {
           callbacks.onUpdate(update.type, update.chunk)
         }
-      } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error('Failed to parse SSE message:', error)
+      } catch {
         handleError(ERROR_MESSAGES.PARSE_ERROR)
       }
     })
 
     nextSource.addEventListener('error', (event) => {
       if (!isCurrent() || completed) return
-      if (!isStreamClosedReadyState(nextSource.readyState)) {
-        // eslint-disable-next-line no-console
-        console.error('SSE Error:', event)
-        const { errorCode, errorMessage } = parseStreamErrorDetails(event.data)
-        handleError(errorMessage, errorCode)
-      }
+      const { errorCode, errorMessage } = parseStreamErrorDetails(event.data)
+      handleError(errorMessage, errorCode)
     })
 
     nextSource.addEventListener('readystatechange', (event) => {
       if (!isCurrent() || completed) return
-      const errorMessage = getStreamReadyStateError(
-        event.readyState,
-        nextSource
-      )
-
-      if (errorMessage) {
-        handleError(errorMessage)
+      if (!isStreamClosedReadyState(event.readyState)) return
+      if (
+        responseCode !== undefined &&
+        (responseCode < 200 || responseCode >= 300)
+      ) {
+        handleError(`HTTP ${responseCode}: ${ERROR_MESSAGES.CONNECTION_CLOSED}`)
+        return
       }
+      if (hasFinishReason) handleComplete()
+      else handleError(ERROR_MESSAGES.CONNECTION_CLOSED)
     })
 
     try {
       if (!isCurrent()) return
       nextSource.stream()
-    } catch (error: unknown) {
+    } catch {
       if (!isCurrent() || completed) return
-      // eslint-disable-next-line no-console
-      console.error('Failed to start SSE stream:', error)
       handleError(ERROR_MESSAGES.STREAM_START_ERROR)
     }
   }
@@ -196,6 +226,7 @@ export function useStreamRequest() {
           headers,
           method: 'POST',
           payload: JSON.stringify(payload),
+          start: false,
         }) as StreamEventSource,
       setStreaming: setIsStreaming,
     })
@@ -206,12 +237,14 @@ export function useStreamRequest() {
       payload: ChatCompletionRequest,
       onUpdate: (type: 'reasoning' | 'content', chunk: string) => void,
       onComplete: () => void,
-      onError: (error: string, errorCode?: string) => void
+      onError: (error: string, errorCode?: string) => void,
+      onMetadata?: (metadata: ResponseMetadata) => void
     ) =>
       controllerRef.current?.send(payload, {
         onUpdate,
         onComplete,
         onError,
+        onMetadata,
       }),
     []
   )

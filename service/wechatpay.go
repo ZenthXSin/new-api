@@ -18,6 +18,7 @@ import (
 	"github.com/wechatpay-apiv3/wechatpay-go/core/option"
 	"github.com/wechatpay-apiv3/wechatpay-go/services/payments"
 	"github.com/wechatpay-apiv3/wechatpay-go/services/payments/native"
+	"github.com/wechatpay-apiv3/wechatpay-go/services/refunddomestic"
 )
 
 type weChatPayNativeAPI interface {
@@ -27,10 +28,15 @@ type weChatPayNativeAPI interface {
 
 type WeChatPayService struct {
 	nativeAPI     weChatPayNativeAPI
+	refundAPI     *refunddomestic.RefundsApiService
 	notifyHandler *notify.Handler
 }
 
 func NewWeChatPayService() (*WeChatPayService, error) {
+	return newWeChatPayServiceWithHTTPClient(nil)
+}
+
+func newWeChatPayServiceWithHTTPClient(httpClient *http.Client) (*WeChatPayService, error) {
 	privateKey, err := parseWeChatPayPrivateKey(setting.WeChatPayPrivateKey)
 	if err != nil {
 		return nil, err
@@ -48,14 +54,18 @@ func NewWeChatPayService() (*WeChatPayService, error) {
 		return nil, errors.New("微信支付 API v3 密钥必须为 32 字节")
 	}
 
-	client, err := core.NewClient(context.Background(),
+	options := []core.ClientOption{
 		option.WithMerchantCredential(
 			strings.TrimSpace(setting.WeChatPayMerchantID),
 			strings.TrimSpace(setting.WeChatPayMerchantSerialNumber),
 			privateKey,
 		),
 		option.WithWechatPayCertificate([]*x509.Certificate{platformCertificate}),
-	)
+	}
+	if httpClient != nil {
+		options = append(options, option.WithHTTPClient(httpClient))
+	}
+	client, err := core.NewClient(context.Background(), options...)
 	if err != nil {
 		return nil, fmt.Errorf("初始化微信支付客户端: %w", err)
 	}
@@ -68,14 +78,18 @@ func NewWeChatPayService() (*WeChatPayService, error) {
 
 	return &WeChatPayService{
 		nativeAPI:     &native.NativeApiService{Client: client},
+		refundAPI:     &refunddomestic.RefundsApiService{Client: client},
 		notifyHandler: handler,
 	}, nil
 }
 
 func (s *WeChatPayService) CreateNativeTransaction(ctx context.Context, amountCents int64, outTradeNo, notifyURL string, expireAt time.Time) (string, error) {
+	return s.createNativeTransaction(ctx, amountCents, outTradeNo, notifyURL, expireAt, "Account top-up")
+}
+
+func (s *WeChatPayService) createNativeTransaction(ctx context.Context, amountCents int64, outTradeNo, notifyURL string, expireAt time.Time, description string) (string, error) {
 	appID := strings.TrimSpace(setting.WeChatPayAppID)
 	merchantID := strings.TrimSpace(setting.WeChatPayMerchantID)
-	description := "Account top-up"
 	currency := "CNY"
 
 	response, _, err := s.nativeAPI.Prepay(ctx, native.PrepayRequest{

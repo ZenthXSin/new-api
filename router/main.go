@@ -13,7 +13,10 @@ import (
 )
 
 func SetRouter(router *gin.Engine, assets WebAssets) {
+	router.Use(middleware.OAuthCORS())
 	SetApiRouter(router)
+	SetOAuthRouter(router)
+	SetAppPaymentRouter(router)
 	SetDashboardRouter(router)
 	SetRelayRouter(router)
 	SetVideoRouter(router)
@@ -29,6 +32,7 @@ func SetRouter(router *gin.Engine, assets WebAssets) {
 		frontendBaseUrl = strings.TrimSuffix(frontendBaseUrl, "/")
 		router.NoRoute(func(c *gin.Context) {
 			c.Set(middleware.RouteTagKey, "web")
+			setOAuthPageSecurityHeaders(c)
 			c.Redirect(http.StatusMovedPermanently, fmt.Sprintf("%s%s", frontendBaseUrl, c.Request.RequestURI))
 		})
 	}

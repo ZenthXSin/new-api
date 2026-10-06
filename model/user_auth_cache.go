@@ -59,6 +59,7 @@ func writeUserCache(user *UserBase, includeQuota bool) error {
 	}
 	ttl := userCacheTTLSeconds()
 	const script = `
+if ARGV[11] == '1' and redis.call('EXISTS',KEYS[4]) ~= 0 then return -1 end
 local incoming = tonumber(ARGV[1])
 local pending = tonumber(redis.call('GET', KEYS[2]) or '0')
 local committed = tonumber(redis.call('GET', KEYS[3]) or '0')
@@ -80,17 +81,20 @@ redis.call('HSET', KEYS[1],
   'Status', ARGV[6], 'Role', ARGV[7], 'Username', ARGV[8],
   'Setting', ARGV[9], 'AuthVersion', ARGV[1], 'CacheSchema', ARGV[10])
 if ARGV[11] == '1' and redis.call('HEXISTS', KEYS[1], 'Quota') == 0 then
-  redis.call('HSET', KEYS[1], 'Quota', ARGV[12])
+  redis.call('HSET', KEYS[1], 'Quota', redis.call('GET', KEYS[5]) or ARGV[12])
 end
 redis.call('EXPIRE', KEYS[1], ARGV[13])
 return 1`
 	result, err := common.RDB.Eval(context.Background(), script,
-		[]string{getUserCacheKey(user.Id), getUserAuthFenceKey(user.Id), getUserAuthVersionKey(user.Id)},
+		[]string{getUserCacheKey(user.Id), getUserAuthFenceKey(user.Id), getUserAuthVersionKey(user.Id), appPaymentWalletGuardKey(user.Id), appPaymentWalletMirrorKey(user.Id)},
 		user.AuthVersion, user.Id, user.Group, user.Groups, user.Email, user.Status, user.Role,
 		user.Username, user.Setting, user.CacheSchema, includeQuotaArg, user.Quota, ttl,
 	).Int()
 	if err != nil {
 		return err
+	}
+	if result == -1 {
+		return ErrAppPaymentBalancePending
 	}
 	if result == 0 {
 		return ErrUserAuthCachePending

@@ -93,7 +93,13 @@ func UserCheckin(userId int) (*Checkin, error) {
 
 // userCheckinWithTransaction 使用事务执行签到（适用于 MySQL 和 PostgreSQL）
 func userCheckinWithTransaction(checkin *Checkin, userId int, quotaAwarded int) (*Checkin, error) {
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	finish, err := BeginAppPaymentQuotaMutation(userId)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
+	quotaWriteAttempted := false
+	err = DB.Transaction(func(tx *gorm.DB) error {
 		// 步骤1: 创建签到记录
 		// 数据库有唯一约束 (user_id, checkin_date)，可以防止并发重复签到
 		if err := tx.Create(checkin).Error; err != nil {
@@ -101,6 +107,7 @@ func userCheckinWithTransaction(checkin *Checkin, userId int, quotaAwarded int) 
 		}
 
 		// 步骤2: 在事务中增加用户额度
+		quotaWriteAttempted = true
 		if err := tx.Model(&User{}).Where("id = ?", userId).
 			Update("quota", gorm.Expr("quota + ?", quotaAwarded)).Error; err != nil {
 			return errors.New("签到失败：更新额度出错")
@@ -110,13 +117,14 @@ func userCheckinWithTransaction(checkin *Checkin, userId int, quotaAwarded int) 
 	})
 
 	if err != nil {
+		if quotaWriteAttempted {
+			MarkAppPaymentWalletUnsafe(userId)
+		}
 		return nil, err
 	}
 
-	// 事务成功后，异步更新缓存
-	go func() {
-		_ = cacheIncrUserQuota(userId, int64(quotaAwarded))
-	}()
+	// Keep the application payment guard until the committed credit is visible.
+	syncCreditUserQuotaCache(userId, quotaAwarded, "checkin")
 
 	return checkin, nil
 }

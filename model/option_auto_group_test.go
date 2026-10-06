@@ -15,3 +15,12 @@ func TestValidateOptionValueRejectsInvalidMaxTokenAutoGroups(t *testing.T) {
 	}
 	require.NoError(t, validateOptionValue("MaxTokenAutoGroups", "999999"))
 }
+
+func TestValidateNetworkTrafficOptions(t *testing.T) {
+	for _, value := range []string{"0", "-1", "NaN", "5.01", "invalid"} {
+		assert.Error(t, validateOptionValue("NetworkTrafficDailyBudgetGB", value))
+	}
+	require.NoError(t, validateOptionValue("NetworkTrafficDailyBudgetGB", "5"))
+	require.NoError(t, validateOptionValue("NetworkTrafficEnabled", "true"))
+	assert.Error(t, validateOptionValue("NetworkTrafficEnabled", "yes"))
+}

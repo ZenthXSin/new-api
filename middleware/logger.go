@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
+	networktraffic "github.com/QuantumNous/new-api/pkg/network_traffic"
 	"github.com/gin-gonic/gin"
 )
 
@@ -13,6 +14,10 @@ func RouteTag(tag string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Set(RouteTagKey, tag)
 		c.Next()
+		status := c.Writer.Status()
+		if tag == "relay" && c.GetInt("id") > 0 && !c.IsAborted() && ((c.Request.Method == "POST" && status >= 200 && status < 300) || status == 101) {
+			networktraffic.NotifyRequest()
+		}
 	}
 }
 

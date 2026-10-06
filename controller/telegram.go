@@ -132,6 +132,10 @@ func TelegramBind(c *gin.Context) {
 		}
 		return
 	}
+	if err := service.ValidateOAuthHostedBindingCallback(c.Param("flow_token"), pendingFlow.UserId, pendingFlow.SessionId); err != nil {
+		telegramBindFailure(c, telegramBindErrorFlowInvalid)
+		return
+	}
 	assertion, assertionExpiresAt, err := telegramAuthorizationClaim(params, time.Now())
 	if err != nil {
 		common.SysLog("TelegramBind authorization claim failed: " + err.Error())

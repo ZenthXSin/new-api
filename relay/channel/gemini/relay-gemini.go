@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	groupavailability "github.com/QuantumNous/new-api/pkg/group_availability"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -151,7 +152,7 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	responseText := strings.Builder{}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
-		// 首字终点定制:记录事件开始前的文本长度,用于判定该事件是否为空事件
+		// Track generated content separately from first-event timing.
 		beforeLen := responseText.Len()
 		var geminiResponse dto.GeminiChatResponse
 		if err := common.UnmarshalJsonStr(data, &geminiResponse); err != nil {
@@ -177,7 +178,7 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			}
 		}
 
-		// 首字终点定制:事件未产出新文本且无图片,则标记为空事件,不计入首字响应
+		// Exclude contentless events from response counts, not first-event timing.
 		if responseText.Len() == beforeLen && imageCount == 0 {
 			sr.MarkEmpty()
 		}
@@ -195,9 +196,7 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	})
 
 	if !hasBillableUsageMetadata {
-		// 首字终点定制:usage 回退条件与首字判定解耦——只要实际产生了文本或
-		// 图片即回退估算,而不是依赖 ReceivedResponseCount(空事件不再计数,
-		// 该计数已与"首字"语义绑定)。
+		// Estimate missing usage from generated text or images, not event timing.
 		if responseText.Len() > 0 || imageCount > 0 {
 			usage = service.ResponseText2Usage(c, responseText.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		} else {
@@ -328,6 +327,7 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 	service.CloseResponseBodyGracefully(resp)
 	logger.LogDebug(c, "Gemini response body: %s", responseBody)
 	var geminiResponse dto.GeminiChatResponse
+	groupavailability.ObserveCacheUsage(c, responseBody)
 	err = common.Unmarshal(responseBody, &geminiResponse)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -452,6 +452,7 @@ func GeminiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 	_ = resp.Body.Close()
 
 	var geminiResponse dto.GeminiImageResponse
+	groupavailability.ObserveCacheUsage(c, responseBody)
 	if jsonErr := common.Unmarshal(responseBody, &geminiResponse); jsonErr != nil {
 		return nil, types.NewOpenAIError(jsonErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
@@ -163,7 +164,7 @@ func RequestStripePay(c *gin.Context) {
 
 func StripeWebhook(c *gin.Context) {
 	ctx := c.Request.Context()
-	if !isStripeWebhookEnabled() {
+	if !isStripeWebhookEnabled() && !appStripeWebhookEnabled() {
 		logger.LogWarn(ctx, fmt.Sprintf("Stripe webhook 被拒绝 reason=webhook_disabled path=%q client_ip=%s", c.Request.RequestURI, c.ClientIP()))
 		c.AbortWithStatus(http.StatusForbidden)
 		return
@@ -188,6 +189,13 @@ func StripeWebhook(c *gin.Context) {
 		return
 	}
 
+	if dispatchStripeAppPayment(c, event) {
+		return
+	}
+	if !isStripeWebhookEnabled() {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
 	callerIp := c.ClientIP()
 	logger.LogInfo(ctx, fmt.Sprintf("Stripe webhook 验签成功 event_type=%s client_ip=%s path=%q", string(event.Type), callerIp, c.Request.RequestURI))
 	switch event.Type {
@@ -204,6 +212,15 @@ func StripeWebhook(c *gin.Context) {
 	}
 
 	c.Status(http.StatusOK)
+}
+
+func appStripeWebhookEnabled() bool {
+	for _, method := range service.AppPaymentMethods("") {
+		if method.ID == "stripe" {
+			return true
+		}
+	}
+	return false
 }
 
 func sessionCompleted(ctx context.Context, event stripe.Event, callerIp string) {

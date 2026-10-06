@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	groupavailability "github.com/QuantumNous/new-api/pkg/group_availability"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -201,8 +202,7 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 	}
 	var err *types.NewAPIError
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
-		// 首字终点定制:事件未产出新文本(如 usage 事件)则标记为空事件,
-		// 不计入首字响应。
+		// Exclude contentless events from response counts, not first-event timing.
 		beforeLen := claudeInfo.ResponseText.Len()
 		err = HandleStreamResponseData(c, info, claudeInfo, data)
 		if claudeInfo.ResponseText.Len() == beforeLen {
@@ -222,6 +222,7 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 
 func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo, httpResp *http.Response, data []byte) *types.NewAPIError {
 	var claudeResponse dto.ClaudeResponse
+	groupavailability.ObserveCacheUsage(c, data)
 	err := common.Unmarshal(data, &claudeResponse)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeBadResponseBody)

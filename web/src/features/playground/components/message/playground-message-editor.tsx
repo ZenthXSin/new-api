@@ -48,11 +48,8 @@ export function PlaygroundMessageEditor({
 }: PlaygroundMessageEditorProps) {
   const { t } = useTranslation()
   const [showLeaveDialog, setShowLeaveDialog] = useState(false)
-  const { canSave, hasChanged, showSaveAndSubmit } = getMessageEditorState(
-    message,
-    editText,
-    originalText
-  )
+  const { canSave, hasChanged, hasAttachments, showSaveAndSubmit } =
+    getMessageEditorState(message, editText, originalText)
 
   useEffect(() => {
     if (!hasChanged) return
@@ -152,6 +149,13 @@ export function PlaygroundMessageEditor({
 
   return (
     <>
+      {hasAttachments && (
+        <p className='text-muted-foreground mb-2 text-sm'>
+          {t(
+            'Existing attachments will be kept when you save or resend this message.'
+          )}
+        </p>
+      )}
       <CodeBlockEditor
         actions={editorActions}
         ariaLabel={t('Edit')}

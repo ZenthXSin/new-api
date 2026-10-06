@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -508,7 +509,18 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 			return nil, errors.New("已达到该套餐购买上限")
 		}
 	}
-	nowUnix := GetDBTimestamp()
+	// Reuse this transaction's connection; the global GetDBTimestamp helper
+	// would wait for a second connection when the pool contains only one.
+	var nowUnix int64
+	timeQuery := "SELECT UNIX_TIMESTAMP()"
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		timeQuery = "SELECT EXTRACT(EPOCH FROM NOW())::bigint"
+	} else if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		timeQuery = "SELECT strftime('%s','now')"
+	}
+	if err := tx.Raw(timeQuery).Scan(&nowUnix).Error; err != nil {
+		return nil, err
+	}
 	now := time.Unix(nowUnix, 0)
 	endUnix, err := calcPlanEndTime(now, plan)
 	if err != nil {
@@ -764,12 +776,26 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 	if userId <= 0 || planId <= 0 {
 		return errors.New("invalid userId or planId")
 	}
+	finishMutation, err := BeginAppPaymentQuotaMutation(userId)
+	if err != nil {
+		return err
+	}
+	defer finishMutation()
+	reserveLiveQuota := common.RedisEnabled && appPaymentWalletSchemaEnabled()
+	if reserveLiveQuota {
+		if _, err := GetUserCache(userId); err != nil {
+			return ErrAppPaymentBalancePending
+		}
+	}
 
 	var logPlanTitle string
 	var logMoney float64
 	var chargedQuota int
 	var upgradeGroup string
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	quotaWriteAttempted := false
+	reservedQuota := 0
+	reservationUncertain := false
+	err = DB.Transaction(func(tx *gorm.DB) error {
 		plan, err := getSubscriptionPlanByIdTx(tx, planId)
 		if err != nil {
 			return err
@@ -797,6 +823,24 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 			return errors.New("余额不足")
 		}
 		if requiredQuota > 0 {
+			if reserveLiveQuota {
+				// The user row is locked here: use only Redis, never the relay
+				// helper's database hydration/fallback from inside this transaction.
+				requestCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				code, reserveErr := common.RDB.Eval(requestCtx, userQuotaReserveScript,
+					[]string{getUserCacheKey(userId), appPaymentWalletGuardKey(userId), appPaymentWalletMirrorKey(userId)},
+					requiredQuota, userId, userCacheSchemaVersion, "1").Int()
+				cancel()
+				if reserveErr != nil || (code != 0 && code != 1) {
+					reservationUncertain = reserveErr != nil || code == -3
+					return ErrAppPaymentBalancePending
+				}
+				if code == 0 {
+					return ErrAppPaymentInsufficient
+				}
+				reservedQuota = requiredQuota
+			}
+			quotaWriteAttempted = true
 			if err := tx.Model(&User{}).Where("id = ?", userId).
 				Update("quota", gorm.Expr("quota - ?", requiredQuota)).Error; err != nil {
 				return err
@@ -835,10 +879,18 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 		return nil
 	})
 	if err != nil {
+		if reservedQuota > 0 {
+			if cacheErr := cacheIncrUserQuota(userId, int64(reservedQuota)); cacheErr != nil {
+				common.SysLog("subscription balance reservation compensation is pending")
+			}
+		}
+		if quotaWriteAttempted || reservationUncertain {
+			MarkAppPaymentWalletUnsafe(userId)
+		}
 		return err
 	}
 
-	if chargedQuota > 0 {
+	if chargedQuota > 0 && reservedQuota == 0 {
 		if err := cacheDecrUserQuota(userId, int64(chargedQuota)); err != nil {
 			common.SysLog("failed to decrease user quota cache after subscription balance purchase: " + err.Error())
 		}

@@ -20,6 +20,12 @@ import { t } from 'i18next'
 
 import { ERROR_MESSAGES, MESSAGE_ROLES, MESSAGE_STATUS } from '../../constants'
 import type { ChatCompletionResponse, Message } from '../../types'
+import {
+  applyResponseMetadata,
+  asRecord,
+  readResponseMetadata,
+  readResponseText,
+} from '../streaming/response-metadata'
 import { parseThinkTags } from './message-reasoning-utils'
 import {
   completeAssistantTiming,
@@ -70,14 +76,6 @@ export function processStreamingContent(
 
 export type StreamChunkType = 'reasoning' | 'content'
 
-function getAppendableChunk(currentContent: string, chunk: string): string {
-  if (!currentContent || !chunk.startsWith(currentContent)) {
-    return chunk
-  }
-
-  return chunk.slice(currentContent.length)
-}
-
 export function applyStreamingChunk(
   message: Message,
   type: StreamChunkType,
@@ -89,22 +87,19 @@ export function applyStreamingChunk(
 
   if (type === 'reasoning') {
     const reasoning = startReasoningTiming(message)
-    const appendableChunk = getAppendableChunk(reasoning.content, chunk)
 
     return {
       ...message,
       reasoning: {
         ...reasoning,
-        content: reasoning.content + appendableChunk,
+        content: reasoning.content + chunk,
       },
       isReasoningStreaming: true,
       status: MESSAGE_STATUS.STREAMING,
     }
   }
 
-  const currentVersion = getCurrentVersion(message)
-  const appendableChunk = getAppendableChunk(currentVersion.content, chunk)
-  const contentMessage = processStreamingContent(message, appendableChunk)
+  const contentMessage = processStreamingContent(message, chunk)
 
   return {
     ...(contentMessage.isReasoningStreaming
@@ -152,6 +147,8 @@ export function completeAssistantMessage(message: Message): Message {
   return completeAssistantTiming({
     ...finalizeMessage(message),
     status: MESSAGE_STATUS.COMPLETE,
+    isReasoningComplete: true,
+    isContentComplete: true,
   })
 }
 
@@ -181,7 +178,7 @@ type ChatCompletionChoice = ChatCompletionResponse['choices'][number]
 export function hasChatCompletionChoice(
   response: ChatCompletionResponse
 ): boolean {
-  return Boolean(response.choices?.[0])
+  return Boolean(response?.choices?.[0]?.message)
 }
 
 export function applyChatCompletionChoice(
@@ -190,10 +187,16 @@ export function applyChatCompletionChoice(
 ): Message {
   return completeAssistantTiming({
     ...finalizeMessage(
-      updateCurrentVersionContent(message, choice.message?.content || ''),
+      updateCurrentVersionContent(
+        message,
+        readResponseText(choice.message?.content) ||
+          readResponseText(asRecord(choice.message)?.refusal)
+      ),
       choice.message?.reasoning_content
     ),
     status: MESSAGE_STATUS.COMPLETE,
+    isReasoningComplete: true,
+    isContentComplete: true,
   })
 }
 
@@ -207,7 +210,10 @@ export function applyChatCompletionResponse(
     return null
   }
 
-  return applyChatCompletionChoice(message, choice)
+  return applyChatCompletionChoice(
+    applyResponseMetadata(message, readResponseMetadata(response)),
+    choice
+  )
 }
 
 /**

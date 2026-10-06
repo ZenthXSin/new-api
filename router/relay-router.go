@@ -22,9 +22,9 @@ func SetRelayRouter(router *gin.Engine) {
 	{
 		modelsRouter.GET("", func(c *gin.Context) {
 			switch {
-			case c.GetHeader("x-api-key") != "" && c.GetHeader("anthropic-version") != "":
+			case (c.GetHeader("x-api-key") != "" || c.GetBool("oauth_anthropic_protocol")) && c.GetHeader("anthropic-version") != "":
 				controller.ListModels(c, constant.ChannelTypeAnthropic)
-			case c.GetHeader("x-goog-api-key") != "" || c.Query("key") != "": // 单独的适配
+			case c.GetHeader("x-goog-api-key") != "" || c.GetBool("oauth_gemini_protocol") || c.Query("key") != "": // 单独的适配
 				controller.ListModels(c, constant.ChannelTypeGemini)
 			default:
 				controller.ListModels(c, constant.ChannelTypeOpenAI)
@@ -33,7 +33,7 @@ func SetRelayRouter(router *gin.Engine) {
 
 		modelsRouter.GET("/:model", func(c *gin.Context) {
 			switch {
-			case c.GetHeader("x-api-key") != "" && c.GetHeader("anthropic-version") != "":
+			case (c.GetHeader("x-api-key") != "" || c.GetBool("oauth_anthropic_protocol")) && c.GetHeader("anthropic-version") != "":
 				controller.RetrieveModel(c, constant.ChannelTypeAnthropic)
 			default:
 				controller.RetrieveModel(c, constant.ChannelTypeOpenAI)

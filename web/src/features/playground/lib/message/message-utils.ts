@@ -24,15 +24,22 @@ import type {
   MessageVersion,
   ChatCompletionMessage,
   ContentPart,
+  PlaygroundAttachment,
 } from '../../types'
 
 /**
  * Create a new message version
  */
-export function createMessageVersion(content: string): MessageVersion {
+export function createMessageVersion(
+  content: string,
+  attachments?: PlaygroundAttachment[]
+): MessageVersion {
   return {
     id: nanoid(),
     content,
+    ...(attachments?.length
+      ? { attachments: attachments.map((attachment) => ({ ...attachment })) }
+      : {}),
   }
 }
 
@@ -54,7 +61,10 @@ export function getMessageContent(message: Message): string {
  * Check whether a message has non-empty content in its current version.
  */
 export function hasMessageContent(message: Message): boolean {
-  return getMessageContent(message).trim() !== ''
+  return (
+    getMessageContent(message).trim() !== '' ||
+    Boolean(getCurrentVersion(message).attachments?.length)
+  )
 }
 
 /**
@@ -62,12 +72,24 @@ export function hasMessageContent(message: Message): boolean {
  */
 export function updateCurrentVersionContent(
   message: Message,
-  content: string
+  content: string,
+  attachments?: PlaygroundAttachment[]
 ): Message {
   const currentVersion = getCurrentVersion(message)
   return {
     ...message,
-    versions: [{ ...currentVersion, content }],
+    versions: [
+      {
+        ...currentVersion,
+        content,
+        ...(attachments !== undefined
+          ? {
+              attachments: attachments.map((attachment) => ({ ...attachment })),
+            }
+          : {}),
+      },
+      ...message.versions.slice(1),
+    ],
   }
 }
 
@@ -76,12 +98,13 @@ export function updateCurrentVersionContent(
  */
 export function createUserMessage(
   content: string,
-  createdAt: number = Date.now()
+  createdAt: number = Date.now(),
+  attachments?: PlaygroundAttachment[]
 ): Message {
   return {
     key: nanoid(),
     from: MESSAGE_ROLES.USER,
-    versions: [createMessageVersion(content)],
+    versions: [createMessageVersion(content, attachments)],
     createdAt,
   }
 }
@@ -154,10 +177,39 @@ export function getTextContent(content: string | ContentPart[]): string {
  */
 export function formatMessageForAPI(message: Message): ChatCompletionMessage {
   const currentVersion = getCurrentVersion(message)
-  return {
-    role: message.from,
-    content: currentVersion.content,
+  const attachments = currentVersion.attachments ?? []
+  if (attachments.length === 0) {
+    return { role: message.from, content: currentVersion.content }
   }
+  const parts: ContentPart[] = []
+  if (currentVersion.content) {
+    parts.push({ type: 'text', text: currentVersion.content })
+  }
+  for (const attachment of attachments) {
+    if (attachment.kind === 'text') {
+      if (attachment.text === undefined) {
+        throw new Error('Attachment content is unavailable')
+      }
+      parts.push({
+        type: 'text',
+        text: `--- ${attachment.name} ---\n${attachment.text}`,
+      })
+    } else if (attachment.kind === 'image') {
+      if (!attachment.dataUrl) {
+        throw new Error('Attachment content is unavailable')
+      }
+      parts.push({ type: 'image_url', image_url: { url: attachment.dataUrl } })
+    } else {
+      if (!attachment.dataUrl) {
+        throw new Error('Attachment content is unavailable')
+      }
+      parts.push({
+        type: 'file',
+        file: { filename: attachment.name, file_data: attachment.dataUrl },
+      })
+    }
+  }
+  return { role: message.from, content: parts }
 }
 
 /**

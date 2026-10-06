@@ -26,49 +26,85 @@ import type {
 
 interface ApiResponse<T = unknown> {
   success: boolean
-  message?: string
   data?: T
 }
 
-function toPayload(values: OauthClientFormValues) {
-  return {
-    name: values.name,
-    description: values.description ?? '',
-    redirect_uris: values.redirect_uris,
-    scopes: values.scopes,
-    is_public: values.is_public,
-    enabled: values.enabled,
-  }
-}
+const privateRequest = {
+  skipBusinessError: true,
+  skipErrorHandler: true,
+  skipRequestDedup: true,
+} as const
 
-export async function getOauthClients(): Promise<ApiResponse<OauthClient[]>> {
-  const res = await api.get('/api/oauth_client/')
-  return res.data
+export async function getOauthClients(
+  signal?: AbortSignal
+): Promise<OauthClient[]> {
+  try {
+    const res = await api.get<ApiResponse<OauthClient[]>>(
+      '/api/oauth_client/',
+      { ...privateRequest, signal }
+    )
+    if (!res.data.success || !Array.isArray(res.data.data)) throw new Error()
+    return res.data.data
+  } catch {
+    throw new Error('Failed to load OAuth clients')
+  }
 }
 
 export async function createOauthClient(
   values: OauthClientFormValues
-): Promise<ApiResponse<OauthClientSecretResponse>> {
-  const res = await api.post('/api/oauth_client/', toPayload(values))
-  return res.data
+): Promise<OauthClientSecretResponse> {
+  try {
+    const res = await api.post<ApiResponse<OauthClientSecretResponse>>(
+      '/api/oauth_client/',
+      values,
+      privateRequest
+    )
+    if (!res.data.success || !res.data.data?.client) throw new Error()
+    return res.data.data
+  } catch {
+    throw new Error('Failed to create client')
+  }
 }
 
 export async function updateOauthClient(
   id: number,
   values: OauthClientFormValues
-): Promise<ApiResponse<OauthClient>> {
-  const res = await api.put(`/api/oauth_client/${id}`, toPayload(values))
-  return res.data
+): Promise<OauthClient> {
+  try {
+    const res = await api.put<ApiResponse<OauthClient>>(
+      `/api/oauth_client/${id}`,
+      values,
+      privateRequest
+    )
+    if (!res.data.success || !res.data.data) throw new Error()
+    return res.data.data
+  } catch {
+    throw new Error('Failed to update client')
+  }
 }
 
-export async function deleteOauthClient(id: number): Promise<ApiResponse> {
-  const res = await api.delete(`/api/oauth_client/${id}`)
-  return res.data
+export async function deleteOauthClient(id: number): Promise<void> {
+  try {
+    const res = await api.delete<ApiResponse>(
+      `/api/oauth_client/${id}`,
+      privateRequest
+    )
+    if (!res.data.success) throw new Error()
+  } catch {
+    throw new Error('Failed to delete client')
+  }
 }
 
-export async function resetOauthClientSecret(
-  id: number
-): Promise<ApiResponse<{ client_secret: string }>> {
-  const res = await api.post(`/api/oauth_client/${id}/reset_secret`)
-  return res.data
+export async function resetOauthClientSecret(id: number): Promise<string> {
+  try {
+    const res = await api.post<ApiResponse<{ client_secret: string }>>(
+      `/api/oauth_client/${id}/reset_secret`,
+      undefined,
+      privateRequest
+    )
+    if (!res.data.success || !res.data.data?.client_secret) throw new Error()
+    return res.data.data.client_secret
+  } catch {
+    throw new Error('Failed to reset client secret')
+  }
 }

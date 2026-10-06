@@ -20,11 +20,6 @@ import { CircleAlert } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import {
-  dotColorMap,
-  textColorMap,
-  type StatusVariant,
-} from '@/components/status-badge'
-import {
   Popover,
   PopoverContent,
   PopoverHeader,
@@ -42,14 +37,24 @@ import { formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import {
+  TIMING_TEXT_COLOR_MAP as textColorMap,
   formatTimingBytes,
   formatTimingEndStatus,
   formatTimingMilliseconds,
   getFirstResponseTimeColor,
   getResponseTimeColor,
   getTimingConnectionPhases,
+  type TimingColor,
 } from '../lib/format'
 import type { DetailedTimingMetrics, LogOtherData } from '../types'
+
+const dotColorMap: Record<TimingColor | 'neutral', string> = {
+  success: 'bg-emerald-500',
+  warning: 'bg-amber-400',
+  orange: 'bg-orange-500',
+  danger: 'bg-red-500',
+  neutral: 'bg-neutral',
+}
 
 /**
  * Softened fills for the full-height timing bar. The bar sits directly beside
@@ -57,11 +62,11 @@ import type { DetailedTimingMetrics, LogOtherData } from '../types'
  * dots and badges) read as too high-contrast at that size; a translucent fill
  * keeps the status legible while matching the page's muted palette.
  */
-const barColorMap: Record<StatusVariant, string> = {
-  ...dotColorMap,
-  success: 'bg-success/90',
-  warning: 'bg-warning/80',
-  danger: 'bg-destructive/80',
+const barColorMap: Record<TimingColor | 'neutral', string> = {
+  success: 'bg-emerald-500/90',
+  warning: 'bg-amber-400/80',
+  orange: 'bg-orange-500/80',
+  danger: 'bg-red-500/80',
   neutral: 'bg-neutral/80',
 }
 
@@ -88,7 +93,7 @@ export function TimingMetricsCell(props: TimingMetricsCellProps) {
   const showFirstToken = props.isStream
   const firstTokenSeconds =
     props.frtMs != null && props.frtMs > 0 ? props.frtMs / 1000 : null
-  const firstTokenVariant: StatusVariant =
+  const firstTokenVariant: TimingColor | 'neutral' =
     firstTokenSeconds == null
       ? 'neutral'
       : getFirstResponseTimeColor(firstTokenSeconds)

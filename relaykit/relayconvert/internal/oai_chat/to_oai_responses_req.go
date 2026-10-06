@@ -234,10 +234,18 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 					"input_audio": part.InputAudio,
 				})
 			case dto.ContentTypeFile:
-				contentParts = append(contentParts, map[string]any{
-					"type": "input_file",
-					"file": part.File,
-				})
+				file := part.GetFile()
+				if file == nil || (file.FileId == "" && file.FileData == "") {
+					return nil, fmt.Errorf("file content requires file_id or file_data")
+				}
+				filePart := map[string]any{"type": "input_file"}
+				if file.FileId != "" {
+					filePart["file_id"] = file.FileId
+				} else {
+					filePart["filename"] = file.FileName
+					filePart["file_data"] = file.FileData
+				}
+				contentParts = append(contentParts, filePart)
 			case dto.ContentTypeVideoUrl:
 				contentParts = append(contentParts, map[string]any{
 					"type":      "input_video",
@@ -286,7 +294,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	}
 
 	var toolsRaw json.RawMessage
-	if req.Tools != nil {
+	if req.Tools != nil || req.WebSearchOptions != nil {
 		tools := make([]map[string]any, 0, len(req.Tools))
 		for _, tool := range req.Tools {
 			switch tool.Type {
@@ -308,6 +316,24 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 				}
 				tools = append(tools, m)
 			}
+		}
+		if req.WebSearchOptions != nil {
+			search := map[string]any{"type": dto.BuildInToolWebSearch}
+			if req.WebSearchOptions.SearchContextSize != "" {
+				search["search_context_size"] = req.WebSearchOptions.SearchContextSize
+			}
+			if len(req.WebSearchOptions.UserLocation) > 0 {
+				var location map[string]any
+				if err := kitutil.Unmarshal(req.WebSearchOptions.UserLocation, &location); err != nil {
+					return nil, fmt.Errorf("invalid web search user_location: %w", err)
+				}
+				if approximate, ok := location["approximate"].(map[string]any); ok {
+					approximate["type"] = "approximate"
+					location = approximate
+				}
+				search["user_location"] = location
+			}
+			tools = append(tools, search)
 		}
 		toolsRaw, _ = kitutil.Marshal(tools)
 	}

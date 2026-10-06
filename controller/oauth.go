@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -252,6 +253,10 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider, pendingFlow *model
 		}
 	}
 
+	if err := service.ValidateOAuthHostedBindingCallback(flowToken, pendingFlow.UserId, pendingFlow.SessionId); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "The authorization is no longer available"})
+		return
+	}
 	if _, err := model.ConsumeAuthFlow(flowToken, model.AuthFlowMatch{
 		Purpose:   model.AuthFlowPurposeOAuth,
 		Provider:  pendingFlow.Provider,
@@ -283,6 +288,9 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider, pendingFlow *model
 		}
 	}
 
+	if err := service.RecordOAuthHostedBindingSuccess(flowToken, pendingFlow.UserId, pendingFlow.SessionId, pendingFlow.Provider, oauthUser.ProviderUserID); err != nil {
+		common.SysError("OAuth hosted binding receipt could not be recorded")
+	}
 	common.ApiSuccessI18n(c, i18n.MsgOAuthBindSuccess, gin.H{
 		"action": "bind",
 	})

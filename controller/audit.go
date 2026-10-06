@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 
 	"github.com/gin-gonic/gin"
@@ -67,15 +68,22 @@ func auditContentEN(action string, params map[string]interface{}) string {
 
 // auditOperatorInfo 从上下文构建操作者身份信息（管理员 id/用户名/角色）。
 func auditOperatorInfo(c *gin.Context) map[string]interface{} {
-	return map[string]interface{}{
+	info := map[string]interface{}{
 		"admin_id":       c.GetInt("id"),
 		"admin_username": c.GetString("username"),
 		"admin_role":     c.GetInt("role"),
 		"auth_method":    auditAuthMethod(c),
 	}
+	for key, value := range middleware.OAuthAuditMetadata(c) {
+		info[key] = value
+	}
+	return info
 }
 
 func auditAuthMethod(c *gin.Context) string {
+	if metadata := middleware.OAuthAuditMetadata(c); metadata != nil {
+		return metadata["auth_method"].(string)
+	}
 	if c.GetBool("use_access_token") {
 		return "access_token"
 	}
@@ -111,5 +119,5 @@ func recordManageAuditFor(c *gin.Context, targetUserId int, action string, param
 // recordUserSecurityAudit 记录普通用户自己的安全敏感操作（如 passkey 绑定/解绑）。
 // 这类日志没有管理员操作者，不写 admin_info；同时不依赖 AdminAuth/RootAuth 的兜底。
 func recordUserSecurityAudit(c *gin.Context, userId int, action string, params map[string]interface{}) {
-	model.RecordOperationAuditLog(userId, auditContentEN(action, params), c.ClientIP(), action, params, nil, nil)
+	model.RecordOperationAuditLog(userId, auditContentEN(action, params), c.ClientIP(), action, params, nil, middleware.OAuthAuditMetadata(c))
 }

@@ -54,6 +54,12 @@ export const DEFAULT_CONFIG: PlaygroundConfig = {
   presence_penalty: 0,
   seed: null,
   stream: true,
+  system_prompt: '',
+  web_search: false,
+  search_context_size: 'medium',
+  reasoning_effort: 'default',
+  response_format: 'text',
+  stop: [],
 }
 
 export const DEFAULT_PARAMETER_ENABLED: ParameterEnabled = {

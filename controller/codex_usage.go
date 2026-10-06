@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel/codex"
 	"github.com/QuantumNous/new-api/service"
@@ -23,6 +24,7 @@ func GetCodexChannelUsage(c *gin.Context) {
 		service.FetchCodexWhamUsage,
 		"failed to fetch codex usage",
 		"获取用量信息失败，请稍后重试",
+		false,
 	)
 }
 
@@ -32,6 +34,7 @@ func GetCodexChannelRateLimitResetCredits(c *gin.Context) {
 		service.FetchCodexWhamRateLimitResetCredits,
 		"failed to fetch codex reset credits",
 		"获取重置次数详情失败，请稍后重试",
+		false,
 	)
 }
 
@@ -41,6 +44,7 @@ func ResetCodexChannelUsage(c *gin.Context) {
 		service.ConsumeCodexWhamRateLimitResetCredit,
 		"failed to reset codex usage",
 		"重置用量失败，请稍后重试",
+		true,
 	)
 }
 
@@ -57,16 +61,17 @@ func fetchCodexChannelWhamData(
 	fetch codexWhamFetchFunc,
 	logPrefix string,
 	userMessage string,
+	allowEmptyResult bool,
 ) {
 	channelId, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		common.ApiError(c, fmt.Errorf("invalid channel id: %w", err))
+		channelOperationError(c, fmt.Errorf("invalid channel id: %w", err), userMessage)
 		return
 	}
 
 	ch, err := model.GetChannelById(channelId, true)
 	if err != nil {
-		common.ApiError(c, err)
+		channelOperationError(c, err, userMessage)
 		return
 	}
 	if ch == nil {
@@ -101,7 +106,7 @@ func fetchCodexChannelWhamData(
 
 	client, err := service.GetHttpClientWithProxy(ch.GetSetting().Proxy)
 	if err != nil {
-		common.ApiError(c, err)
+		channelOperationError(c, err, userMessage)
 		return
 	}
 
@@ -152,6 +157,17 @@ func fetchCodexChannelWhamData(
 	}
 
 	ok := statusCode >= 200 && statusCode < 300
+	if _, delegated := middleware.GetOAuthPrincipal(c); delegated {
+		if ok {
+			data := projectOAuthCodexUsage(payload, oauthCodexUsageFields)
+			if len(data) > 0 || allowEmptyResult {
+				c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "upstream_status": statusCode, "data": data})
+				return
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": userMessage, "upstream_status": statusCode, "error_code": "channel_operation_failed"})
+		return
+	}
 	resp := gin.H{
 		"success":         ok,
 		"message":         "",

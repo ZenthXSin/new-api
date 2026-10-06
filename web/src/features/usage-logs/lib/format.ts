@@ -210,25 +210,33 @@ export function getReasoningEffortVariant(
   }
 }
 
+export type TimingColor = 'success' | 'warning' | 'orange' | 'danger'
+
+export const TIMING_TEXT_COLOR_MAP: Record<TimingColor | 'neutral', string> = {
+  success: 'text-emerald-600 dark:text-emerald-400',
+  warning: 'text-amber-600 dark:text-amber-400',
+  orange: 'text-orange-600 dark:text-orange-400',
+  danger: 'text-red-600 dark:text-red-400',
+  neutral: 'text-muted-foreground',
+}
+
 /**
- * Get time color based on duration (in seconds)
+ * Match Sub2API duration thresholds (in seconds).
  */
-export function getTimeColor(
-  seconds: number
-): 'success' | 'warning' | 'danger' {
-  if (seconds < 10) return 'success'
-  if (seconds < 30) return 'warning'
+export function getTimeColor(seconds: number): TimingColor {
+  if (seconds < 60) return 'success'
+  if (seconds < 180) return 'warning'
+  if (seconds < 300) return 'orange'
   return 'danger'
 }
 
 /**
- * Get first-response-token color based on latency (in seconds)
+ * Match Sub2API first-token thresholds (in seconds).
  */
-export function getFirstResponseTimeColor(
-  seconds: number
-): 'success' | 'warning' | 'danger' {
-  if (seconds < 5) return 'success'
-  if (seconds < 10) return 'warning'
+export function getFirstResponseTimeColor(seconds: number): TimingColor {
+  if (seconds < 10) return 'success'
+  if (seconds < 30) return 'warning'
+  if (seconds < 60) return 'orange'
   return 'danger'
 }
 
@@ -244,14 +252,13 @@ export function getThroughputColor(
 }
 
 /**
- * Get response color using throughput only when enough output tokens exist.
+ * Color duration independently of output size, matching Sub2API.
  */
 export function getResponseTimeColor(
   seconds: number,
-  completionTokens: number
-): 'success' | 'warning' | 'danger' {
-  if (completionTokens < 100 || seconds <= 0) return getTimeColor(seconds)
-  return getThroughputColor(completionTokens / seconds)
+  _completionTokens: number
+): TimingColor {
+  return getTimeColor(seconds)
 }
 
 /** Format a non-negative relay timing value without losing explicit zeroes. */

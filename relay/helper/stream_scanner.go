@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	groupavailability "github.com/QuantumNous/new-api/pkg/group_availability"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -82,6 +83,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 	// 无条件新建 StreamStatus
 	info.StreamStatus = relaycommon.NewStreamStatus()
+	groupavailability.BeginStream(c)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -196,7 +198,11 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		})
 	}
 
-	dataChan := make(chan string, 10)
+	type streamEvent struct {
+		data       string
+		receivedAt time.Time
+	}
+	dataChan := make(chan streamEvent, 10)
 
 	wg.Add(1)
 	gopool.Go(func() {
@@ -209,19 +215,19 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			wg.Done()
 		}()
 		sr := newStreamResult(info.StreamStatus)
-		for data := range dataChan {
+		for event := range dataChan {
+			groupavailability.ObserveStream(c, event.data)
+			// Use upstream arrival time, before conversion or downstream writes.
+			info.SetFirstResponseTimeAt(event.receivedAt)
 			sr.reset()
 			func() {
 				writeMutex.Lock()
 				defer writeMutex.Unlock()
 				ExtendWriteDeadline(c)
-				dataHandler(data, sr)
+				dataHandler(event.data, sr)
 			}()
-			// 首字终点定制:只有真正产生内容的事件才计为首字响应。
-			// 空事件(usage-only 等未增长响应文本的事件)不设置首字时间,
-			// 也不计入 ReceivedResponseCount,避免首字判定被空事件提前触发。
+			// Keep content accounting independent of first-event timing.
 			if !sr.IsStopped() && !sr.IsEmptyEvent() {
-				info.SetFirstResponseTime()
 				info.ReceivedResponseCount++
 			}
 			if sr.IsStopped() {
@@ -245,6 +251,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		}()
 
 		for scanner.Scan() {
+			receivedAt := time.Now()
 			// 检查是否需要停止
 			select {
 			case <-stopChan:
@@ -270,8 +277,9 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				continue
 			}
 			if !strings.HasPrefix(data, "[DONE]") {
+				event := streamEvent{data: data, receivedAt: receivedAt}
 				select {
-				case dataChan <- data:
+				case dataChan <- event:
 				case <-ctx.Done():
 					return
 				case <-stopChan:

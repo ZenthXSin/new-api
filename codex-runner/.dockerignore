@@ -1,0 +1,8 @@
+*
+!Dockerfile.workspace
+!runtime-vendor/
+!runtime-vendor/codex
+!runtime-vendor/codex-code-mode-host
+!workspace-git.py
+!workspace-process.py
+!migrate-codex-home.py

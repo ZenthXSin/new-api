@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -201,6 +202,9 @@ func GetTokenKey(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if !oauthTokenExportAllowed(c, token) {
+		return
+	}
 	common.ApiSuccess(c, gin.H{
 		"key": token.GetFullKey(),
 	})
@@ -209,9 +213,9 @@ func GetTokenKey(c *gin.Context) {
 func GetTokenStatus(c *gin.Context) {
 	tokenId := c.GetInt("token_id")
 	userId := c.GetInt("id")
-	token, err := model.GetTokenByIds(tokenId, userId)
-	if err != nil {
-		common.ApiError(c, err)
+	token, err := model.GetTokenById(tokenId)
+	if err != nil || token.UserId != userId {
+		common.ApiErrorI18n(c, i18n.MsgTokenGetInfoFailed)
 		return
 	}
 	expiredAt := token.ExpiredTime
@@ -228,28 +232,10 @@ func GetTokenStatus(c *gin.Context) {
 }
 
 func GetTokenUsage(c *gin.Context) {
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "No Authorization header",
-		})
-		return
-	}
-
-	parts := strings.Split(authHeader, " ")
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "Invalid Bearer token",
-		})
-		return
-	}
-	tokenKey := parts[1]
-
-	token, err := model.GetTokenByKey(strings.TrimPrefix(tokenKey, "sk-"), false)
-	if err != nil {
-		common.SysError("failed to get token by key: " + err.Error())
+	// Authentication already resolved the caller to an accounting token. OAuth
+	// credentials are intentionally removed before handlers/upstream forwarding.
+	token, err := model.GetTokenById(c.GetInt("token_id"))
+	if err != nil || token.UserId != c.GetInt("id") {
 		common.ApiErrorI18n(c, i18n.MsgTokenGetInfoFailed)
 		return
 	}
@@ -349,6 +335,18 @@ func AddToken(c *gin.Context) {
 		ExcludeProfitStat:  token.ExcludeProfitStat,
 		AutoGroups:         token.AutoGroups,
 	}
+	if principal, delegated := middleware.GetOAuthPrincipal(c); delegated {
+		if !service.OAuthScopeAllowed(principal, "relay:invoke") && !service.OAuthScopeAllowed(principal, "relay:read") && !service.OAuthScopeAllowed(principal, "relay:tasks") {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, "message": "OAuth relay permission is required to create a delegated API key"})
+			return
+		}
+		cleanToken.Key = "naok_" + cleanToken.Key
+		cleanToken.OAuthGrantID = principal.GrantID
+		cleanToken.OAuthGrantVersion = principal.GrantVersion
+		if cleanToken.ExpiredTime < 0 || cleanToken.ExpiredTime > principal.ExpiresAt {
+			cleanToken.ExpiredTime = principal.ExpiresAt
+		}
+	}
 	err = cleanToken.Insert()
 	if err != nil {
 		common.ApiError(c, err)
@@ -440,6 +438,9 @@ func UpdateToken(c *gin.Context) {
 			}
 		}
 	}
+	if principal, delegated := middleware.GetOAuthPrincipal(c); delegated && cleanToken.OAuthGrantID == principal.GrantID && (cleanToken.ExpiredTime < 0 || cleanToken.ExpiredTime > principal.ExpiresAt) {
+		cleanToken.ExpiredTime = principal.ExpiresAt
+	}
 	err = cleanToken.Update()
 	if err != nil {
 		common.ApiError(c, err)
@@ -491,9 +492,28 @@ func GetTokenKeysBatch(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	for i := range tokens {
+		if !oauthTokenExportAllowed(c, &tokens[i]) {
+			return
+		}
+	}
 	keysMap := make(map[int]string)
 	for _, t := range tokens {
 		keysMap[t.Id] = t.GetFullKey()
 	}
 	common.ApiSuccess(c, gin.H{"keys": keysMap})
+}
+
+// Full legacy keys remain visible only in the hosted owner-authenticated
+// workflow. Applications can export their own grant-bound children directly.
+func oauthTokenExportAllowed(c *gin.Context, token *model.Token) bool {
+	principal, delegated := middleware.GetOAuthPrincipal(c)
+	if !delegated {
+		return !token.OAuthInternal
+	}
+	if token.OAuthInternal || token.OAuthGrantID != principal.GrantID || token.OAuthGrantVersion != principal.GrantVersion {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, "code": "OAUTH_HOSTED_ACTION_REQUIRED", "action_endpoint": "/api/oauth2/actions", "message": "Complete this key operation in the New API hosted authorization page"})
+		return false
+	}
+	return true
 }

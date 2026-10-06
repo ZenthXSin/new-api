@@ -12,7 +12,14 @@ func CORS() gin.HandlerFunc {
 	config.AllowCredentials = true
 	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
 	config.AllowHeaders = []string{"*"}
-	return cors.New(config)
+	legacy := cors.New(config)
+	return func(c *gin.Context) {
+		if c.GetBool("oauth_cors_origin_allowed") {
+			c.Next()
+			return
+		}
+		legacy(c)
+	}
 }
 
 func Version() gin.HandlerFunc {

@@ -54,13 +54,12 @@ import {
   formatBackupCode,
   cleanBackupCode,
 } from '@/features/auth/lib/validation'
+import type { AuthFormProps } from '@/features/auth/types'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
-type OtpFormProps = React.HTMLAttributes<HTMLFormElement>
-
-export function OtpForm({ className, ...props }: OtpFormProps) {
+export function OtpForm({ className, redirectTo, ...props }: AuthFormProps) {
   const { t } = useTranslation()
   const [isLoading, setIsLoading] = useState(false)
   const [useBackupCode, setUseBackupCode] = useState(false)
@@ -97,7 +96,7 @@ export function OtpForm({ className, ...props }: OtpFormProps) {
       const code = useBackupCode ? cleanBackupCode(data.otp) : data.otp
       if (!pending2FAFlowToken) {
         toast.error(t('Login flow expired. Please sign in again.'))
-        redirectToLogin()
+        redirectToLogin(redirectTo)
         return
       }
       const res = await login2fa({
@@ -115,7 +114,7 @@ export function OtpForm({ className, ...props }: OtpFormProps) {
         throw new Error(t('Login failed'))
       }
 
-      await handleLoginSuccess(res.data)
+      await handleLoginSuccess(res.data, redirectTo)
       toast.success(t('Signed in'))
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -135,7 +134,7 @@ export function OtpForm({ className, ...props }: OtpFormProps) {
   }
 
   function handleBackToLogin() {
-    redirectToLogin()
+    redirectToLogin(redirectTo)
   }
 
   const isFormValid = useBackupCode

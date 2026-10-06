@@ -39,6 +39,8 @@ import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { useAuthStore } from '@/stores/auth-store'
+
 import { getUserGroups, getUserModels } from '../api'
 import {
   getGroupFallback,
@@ -67,6 +69,8 @@ export function usePlaygroundOptions({
   updateConfig,
 }: UsePlaygroundOptionsParams) {
   const { t } = useTranslation()
+  const userId = useAuthStore((state) => state.auth.user?.id)
+  const sessionId = useAuthStore((state) => state.auth.session?.sid)
 
   const {
     data: modelsData,
@@ -74,9 +78,9 @@ export function usePlaygroundOptions({
     isError: isModelsError,
     isLoading: isLoadingModels,
   } = useQuery({
-    queryKey: ['playground-models', currentGroup],
+    queryKey: ['playground-models', userId, sessionId, currentGroup],
     queryFn: () => getUserModels(currentGroup),
-    enabled: currentGroup !== '',
+    enabled: Boolean(userId) && currentGroup !== '',
   })
 
   const {
@@ -84,8 +88,9 @@ export function usePlaygroundOptions({
     error: groupsError,
     isError: isGroupsError,
   } = useQuery({
-    queryKey: ['playground-groups'],
+    queryKey: ['playground-groups', userId, sessionId],
     queryFn: getUserGroups,
+    enabled: Boolean(userId),
   })
 
   useEffect(() => {
@@ -139,5 +144,13 @@ export function usePlaygroundOptions({
 
   return {
     isLoadingModels,
+    availableModels: modelsData ?? [],
+    availableGroups: groupsData ?? [],
+    isSelectionValid: Boolean(
+      !isModelsError &&
+      !isGroupsError &&
+      modelsData?.some((model) => model.value === currentModel) &&
+      groupsData?.some((group) => group.value === currentGroup)
+    ),
   }
 }

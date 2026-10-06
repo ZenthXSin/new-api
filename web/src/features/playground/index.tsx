@@ -16,6 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+
+import { useAuthStore } from '@/stores/auth-store'
+
+import { ConversationToolbar } from './components/chat/conversation-toolbar'
 import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundInput } from './components/input/playground-input'
 import {
@@ -24,95 +31,219 @@ import {
   usePlaygroundOptions,
   usePlaygroundState,
 } from './hooks'
+import { completeAssistantMessage } from './lib/message/message-streaming-utils'
+import type { Message, PlaygroundAttachment } from './types'
 
 export function Playground() {
+  const userId = useAuthStore((state) => state.auth.user?.id)
+  const sessionId = useAuthStore((state) => state.auth.session?.sid)
+  return <PlaygroundSession key={`${userId}:${sessionId}`} />
+}
+
+function PlaygroundSession() {
+  const { t } = useTranslation()
+  const state = usePlaygroundState()
+  const [mutating, setMutating] = useState(false)
+  const actionLock = useRef(false)
+  const mounted = useRef(true)
+  const actor = useRef({
+    id: useAuthStore.getState().auth.user?.id,
+    sid: useAuthStore.getState().auth.session?.sid,
+  })
+  function isCurrentActor() {
+    const auth = useAuthStore.getState().auth
+    return (
+      auth.user?.id === actor.current.id &&
+      auth.session?.sid === actor.current.sid
+    )
+  }
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+
   const {
-    config,
-    parameterEnabled,
-    messages,
-    isLoadingMessages,
-    models,
-    groups,
-    updateMessages,
-    setModels,
-    setGroups,
-    updateConfig,
-    updateParameterEnabled,
-    clearMessages,
-  } = usePlaygroundState()
+    isLoadingModels,
+    isSelectionValid,
+    availableModels,
+    availableGroups,
+  } = usePlaygroundOptions({
+    currentGroup: state.config.group,
+    currentModel: state.config.model,
+    setGroups: state.setGroups,
+    setModels: state.setModels,
+    updateConfig: state.updateConfig,
+  })
+  const ready = isSelectionValid && !state.isLoadingMessages
+  const readyRef = useRef(ready)
+  readyRef.current = ready
+  const selection = useRef({
+    model: state.config.model,
+    group: state.config.group,
+  })
+  selection.current = { model: state.config.model, group: state.config.group }
 
   const { sendChat, stopGeneration, isGenerating } = useChatHandler({
-    config,
-    parameterEnabled,
-    onMessageUpdate: updateMessages,
+    config: state.config,
+    parameterEnabled: state.parameterEnabled,
+    onMessageUpdate: state.updateMessages,
+  })
+  const conversation = usePlaygroundConversation({
+    messages: state.messages,
+    updateMessages: state.updateMessages,
+    commitMessages: state.commitMessages,
+    sendChat: (messages) => {
+      if (
+        !mounted.current ||
+        !isCurrentActor() ||
+        !readyRef.current ||
+        selection.current.model !== state.config.model ||
+        selection.current.group !== state.config.group
+      ) {
+        const message = t(
+          'The request was not sent because the session or model selection changed.'
+        )
+        const pending = messages.at(-1)
+        if (
+          mounted.current &&
+          isCurrentActor() &&
+          pending?.from === 'assistant'
+        ) {
+          state.updateMessages((current) =>
+            current.map((item) =>
+              item.key === pending.key
+                ? {
+                    ...completeAssistantMessage(item),
+                    status: 'error',
+                    errorMessage: message,
+                    errorCode: 'not_sent',
+                  }
+                : item
+            )
+          )
+        }
+        throw new Error(message)
+      }
+      sendChat(messages)
+    },
   })
 
-  const {
-    editingMessageKey,
-    handleSendMessage,
-    handleRegenerateMessage,
-    handleEditMessage,
-    handleEditOpenChange,
-    applyEdit,
-    handleDeleteMessage,
-  } = usePlaygroundConversation({
-    messages,
-    updateMessages,
-    sendChat,
-  })
-
-  const handleClearMessages = () => {
-    handleEditOpenChange(false)
-    clearMessages()
+  async function runAction(work: () => Promise<void>, needsModel = false) {
+    if (!mounted.current || !isCurrentActor()) {
+      throw new Error(t('The session changed. Please send the message again.'))
+    }
+    if (actionLock.current || isGenerating || state.isLoadingMessages) {
+      throw new Error(t('Please wait for the current operation to finish.'))
+    }
+    if (needsModel && !readyRef.current) {
+      throw new Error(t('Select an available model and group before sending.'))
+    }
+    actionLock.current = true
+    setMutating(true)
+    try {
+      await work()
+    } finally {
+      actionLock.current = false
+      if (mounted.current) setMutating(false)
+    }
   }
 
-  const { isLoadingModels } = usePlaygroundOptions({
-    currentGroup: config.group,
-    currentModel: config.model,
-    setGroups,
-    setModels,
-    updateConfig,
-  })
+  function reportAction(work: () => Promise<void>, needsModel = false) {
+    void runAction(work, needsModel).catch((error: unknown) => {
+      toast.error(
+        error instanceof Error &&
+          !['account', 'invalid', 'limit', 'unavailable'].includes(
+            error.message
+          )
+          ? t(error.message)
+          : t('The conversation could not be updated. Please try again.')
+      )
+    })
+  }
+
+  function handleSend(text: string, attachments?: PlaygroundAttachment[]) {
+    return runAction(
+      () => conversation.handleSendMessage(text, attachments),
+      true
+    )
+  }
+
+  async function clearConversation() {
+    await runAction(state.clearMessages)
+    conversation.handleEditOpenChange(false)
+  }
+
+  async function importConversation(messages: Message[]) {
+    await runAction(() => state.commitMessages(messages))
+    conversation.handleEditOpenChange(false)
+  }
 
   return (
     <div className='relative flex size-full min-h-0 flex-col overflow-hidden'>
-      {/* Full-width scroll container: scrolling works even over side whitespace */}
+      <ConversationToolbar
+        messages={state.messages}
+        config={state.config}
+        parameterEnabled={state.parameterEnabled}
+        storageStatus={state.storageStatus}
+        storageError={state.storageError}
+        onImport={importConversation}
+        onRetrySave={state.retrySave}
+        onClear={clearConversation}
+        disabled={isGenerating || mutating || state.isLoadingMessages}
+      />
       <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
         <PlaygroundChat
-          messages={messages}
-          isLoadingMessages={isLoadingMessages}
-          onRegenerateMessage={handleRegenerateMessage}
-          onEditMessage={handleEditMessage}
-          onDeleteMessage={handleDeleteMessage}
-          onSelectPrompt={handleSendMessage}
-          isGenerating={isGenerating}
-          editingKey={editingMessageKey}
-          onCancelEdit={handleEditOpenChange}
-          onSaveEdit={(newContent) => applyEdit(newContent, false)}
-          onSaveEditAndSubmit={(newContent) => applyEdit(newContent, true)}
+          messages={state.messages}
+          isLoadingMessages={state.isLoadingMessages}
+          onRegenerateMessage={(message) =>
+            reportAction(
+              () => conversation.handleRegenerateMessage(message),
+              true
+            )
+          }
+          onEditMessage={conversation.handleEditMessage}
+          onDeleteMessage={(message) =>
+            reportAction(() =>
+              state.commitMessages(
+                state.messages.filter((item) => item.key !== message.key)
+              )
+            )
+          }
+          onSelectPrompt={(text) =>
+            reportAction(() => conversation.handleSendMessage(text), true)
+          }
+          isGenerating={isGenerating || mutating}
+          editingKey={conversation.editingMessageKey}
+          onCancelEdit={conversation.handleEditOpenChange}
+          onSaveEdit={(content) =>
+            reportAction(() => conversation.applyEdit(content, false))
+          }
+          onSaveEditAndSubmit={(content) =>
+            reportAction(() => conversation.applyEdit(content, true), true)
+          }
         />
       </div>
-
-      {/* Input area: center content and constrain to the same container width */}
       <div className='mx-auto w-full max-w-4xl'>
         <PlaygroundInput
-          config={config}
-          disabled={isGenerating}
-          groups={groups}
-          groupValue={config.group}
+          config={state.config}
+          disabled={isGenerating || mutating || state.isLoadingMessages}
+          groups={availableGroups}
+          groupValue={state.config.group}
           isGenerating={isGenerating}
           isModelLoading={isLoadingModels}
-          modelValue={config.model}
-          models={models}
-          onGroupChange={(value) => updateConfig('group', value)}
-          onConfigChange={updateConfig}
-          onClearMessages={handleClearMessages}
-          onModelChange={(value) => updateConfig('model', value)}
-          onParameterEnabledChange={updateParameterEnabled}
+          modelValue={state.config.model}
+          models={availableModels}
+          onGroupChange={(value) => state.updateConfig('group', value)}
+          onConfigChange={state.updateConfig}
+          onClearMessages={clearConversation}
+          onModelChange={(value) => state.updateConfig('model', value)}
+          onParameterEnabledChange={state.updateParameterEnabled}
           onStop={stopGeneration}
-          onSubmit={handleSendMessage}
-          parameterEnabled={parameterEnabled}
-          hasMessages={messages.length > 0}
+          onSubmit={handleSend}
+          parameterEnabled={state.parameterEnabled}
+          hasMessages={state.messages.length > 0}
         />
       </div>
     </div>

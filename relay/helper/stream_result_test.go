@@ -5,7 +5,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -57,18 +59,7 @@ func TestStreamResult_ResetClearsEmpty(t *testing.T) {
 	assert.False(t, sr.IsStopped(), "reset must clear the stopped flag")
 }
 
-// ---------- Scanner-level first-response ("首字") tests ----------
-
-// The scanner-level contract is observable through ReceivedResponseCount:
-// the scanner increments it together with SetFirstResponseTime under exactly
-// the same condition (!IsStopped() && !IsEmptyEvent()). The FirstResponseTime
-// fields themselves are not directly exercisable here because the
-// isFirstResponse gate is unexported and only initialized by genBaseRelayInfo
-// on the production path; the counter is the faithful observable proxy.
-
-// TestStreamScannerHandler_EmptyEventDoesNotCountAsResponse pins the 首字
-// contract: an event marked empty (no response content) must not count as a
-// received response, even when it arrives before any real content.
+// Event timing and content-response counts have separate contracts.
 func TestStreamScannerHandler_EmptyEventDoesNotCountAsResponse(t *testing.T) {
 	t.Parallel()
 
@@ -80,10 +71,9 @@ func TestStreamScannerHandler_EmptyEventDoesNotCountAsResponse(t *testing.T) {
 	})
 
 	assert.Zero(t, info.ReceivedResponseCount, "empty events must not count as received responses")
+	assert.NotEqual(t, info.StartTime.Add(-time.Second), info.FirstResponseTime, "empty data events must establish first-response time")
 }
 
-// TestStreamScannerHandler_ContentEventCountsAsResponse pins the complement:
-// a real content event counts as the first response.
 func TestStreamScannerHandler_ContentEventCountsAsResponse(t *testing.T) {
 	t.Parallel()
 
@@ -95,9 +85,6 @@ func TestStreamScannerHandler_ContentEventCountsAsResponse(t *testing.T) {
 	assert.Equal(t, 1, info.ReceivedResponseCount)
 }
 
-// TestStreamScannerHandler_EmptyThenContentEvent pins reset semantics across
-// events: the empty flag from a previous event must not leak into the next
-// event, so a later content event still counts as the first response.
 func TestStreamScannerHandler_EmptyThenContentEvent(t *testing.T) {
 	t.Parallel()
 
@@ -105,17 +92,19 @@ func TestStreamScannerHandler_EmptyThenContentEvent(t *testing.T) {
 	c, resp, info := setupStreamTest(t, strings.NewReader(body))
 
 	var eventNo atomic.Int64
+	var firstEventTime time.Time
 	StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {
 		if eventNo.Add(1) == 1 {
+			firstEventTime = info.FirstResponseTime
 			sr.MarkEmpty()
 		}
 	})
 
 	assert.Equal(t, 1, info.ReceivedResponseCount, "only the content event counts")
+	assert.NotEqual(t, info.StartTime.Add(-time.Second), firstEventTime, "timing must be set before handling the first empty event")
+	assert.Equal(t, firstEventTime, info.FirstResponseTime, "later content must not replace first-event time")
 }
 
-// TestStreamScannerHandler_StoppedEventDoesNotCountAsResponse pins that a
-// fatal stop before any content still must not record a response.
 func TestStreamScannerHandler_StoppedEventDoesNotCountAsResponse(t *testing.T) {
 	t.Parallel()
 
@@ -127,4 +116,71 @@ func TestStreamScannerHandler_StoppedEventDoesNotCountAsResponse(t *testing.T) {
 	})
 
 	assert.Zero(t, info.ReceivedResponseCount)
+	assert.NotEqual(t, info.StartTime.Add(-time.Second), info.FirstResponseTime, "an upstream error event still establishes first-response time")
+}
+
+func TestStreamScannerHandler_FirstEventTimingPrecedesHandling(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{name: "role_only", payload: `{"choices":[{"delta":{"role":"assistant"}}]}`},
+		{name: "usage_only", payload: `{"choices":[],"usage":{"total_tokens":1}}`},
+		{name: "responses_created", payload: `{"type":"response.created"}`},
+		{name: "claude_message_start", payload: `{"type":"message_start"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c, resp, info := setupStreamTest(t, strings.NewReader("data: "+tc.payload+"\n\ndata: [DONE]\n\n"))
+			info.Timing = common.NewRelayTiming(info.StartTime)
+			info.Timing.BeginAttempt(info.StartTime)
+
+			var got string
+			var firstTimeAtHandler time.Time
+			var timingSetAtHandler bool
+			StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {
+				got = data
+				firstTimeAtHandler = info.FirstResponseTime
+				timingSetAtHandler = !firstTimeAtHandler.Equal(info.StartTime.Add(-time.Second)) && info.Timing.HasValidEvent()
+				sr.MarkEmpty()
+			})
+
+			require.Equal(t, tc.payload, got)
+			assert.True(t, timingSetAtHandler, "record the event before conversion or downstream writes")
+			assert.Equal(t, firstTimeAtHandler, info.FirstResponseTime)
+			assert.Zero(t, info.ReceivedResponseCount)
+		})
+	}
+}
+
+func TestStreamScannerHandler_NonEventsDoNotStartTiming(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "empty"},
+		{name: "heartbeat", body: ": PING\n\n"},
+		{name: "metadata_only", body: "event: message\nid: 1\nretry: 1000\n\n"},
+		{name: "blank_data", body: "data:   \n\n"},
+		{name: "done_only", body: "data: [DONE]\n\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c, resp, info := setupStreamTest(t, strings.NewReader(tc.body))
+			info.Timing = common.NewRelayTiming(info.StartTime)
+			var handled bool
+			StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {
+				handled = true
+			})
+
+			assert.False(t, handled)
+			assert.False(t, info.HasSendResponse())
+			assert.False(t, info.Timing.HasValidEvent())
+			assert.Equal(t, info.StartTime.Add(-time.Second), info.FirstResponseTime)
+		})
+	}
 }

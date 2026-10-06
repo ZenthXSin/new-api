@@ -24,15 +24,16 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
+export type AttachmentActionId =
+  | 'upload-file'
+  | 'upload-photo'
+  | 'take-screenshot'
+  | 'take-photo'
+
 type AttachmentAction = {
-  action: string
+  action: AttachmentActionId
   icon: LucideIcon
   label: string
-}
-
-type InputToolNotice = {
-  description?: string
-  title: string
 }
 
 export const ATTACHMENT_ACTIONS = [
@@ -45,16 +46,3 @@ export const ATTACHMENT_ACTIONS = [
   },
   { action: 'take-photo', icon: CameraIcon, label: 'Take photo' },
 ] satisfies AttachmentAction[]
-
-export function getAttachmentActionNotice(action: string): InputToolNotice {
-  return {
-    description: action,
-    title: 'Feature in development',
-  }
-}
-
-export function getSearchActionNotice(): InputToolNotice {
-  return {
-    title: 'Search feature in development',
-  }
-}

@@ -36,8 +36,8 @@ export function getInitialParameterEnabled(): ParameterEnabled {
   return { ...DEFAULT_PARAMETER_ENABLED, ...loadParameterEnabled() }
 }
 
-export function getInitialMessages(): Message[] {
-  return loadMessages() || []
+export async function getInitialMessages(): Promise<Message[]> {
+  return (await loadMessages()) || []
 }
 
 export function applyMessageStateUpdate(

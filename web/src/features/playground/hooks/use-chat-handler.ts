@@ -34,6 +34,13 @@ import {
   isAssistantMessageFinal,
   isAssistantMessagePending,
 } from '../lib'
+import {
+  applyResponseMetadata,
+  asRecord,
+  mergeResponseMetadata,
+  type ResponseMetadata,
+} from '../lib/streaming/response-metadata'
+import { parseStreamErrorDetails } from '../lib/streaming/stream-utils'
 import type { Message, PlaygroundConfig, ParameterEnabled } from '../types'
 import { useStreamRequest } from './use-stream-request'
 
@@ -50,17 +57,21 @@ type PendingStreamChunks = {
   generation: number
   content: string
   reasoning: string
+  metadata: ResponseMetadata
 }
 
-function mergePendingStreamChunk(
-  currentChunk: string,
-  nextChunk: string
-): string {
-  if (!currentChunk || !nextChunk.startsWith(currentChunk)) {
-    return currentChunk + nextChunk
-  }
+type RequestTarget = { key: string; versionId: string | undefined } | null
 
-  return nextChunk
+function matchesTarget(
+  message: Message | undefined,
+  target: RequestTarget
+): boolean {
+  return Boolean(
+    message &&
+    target &&
+    message.key === target.key &&
+    message.versions[0]?.id === target.versionId
+  )
 }
 
 /**
@@ -76,10 +87,13 @@ export function useChatHandler({
   const [isRequesting, setIsRequesting] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null)
   const requestGenerationRef = useRef(0)
+  const requestTargetRef = useRef<RequestTarget>(null)
+  const firstTokenFlushedRef = useRef(false)
   const pendingStreamChunksRef = useRef<PendingStreamChunks>({
     generation: 0,
     content: '',
     reasoning: '',
+    metadata: {},
   })
   const streamFlushTimerRef = useRef<number | null>(null)
 
@@ -92,6 +106,7 @@ export function useChatHandler({
       generation,
       content: '',
       reasoning: '',
+      metadata: {},
     }
   }, [])
 
@@ -105,7 +120,11 @@ export function useChatHandler({
 
       const pendingChunks = pendingStreamChunksRef.current
       if (pendingChunks.generation !== generation) return
-      if (!pendingChunks.reasoning && !pendingChunks.content) {
+      if (
+        !pendingChunks.reasoning &&
+        !pendingChunks.content &&
+        !Object.keys(pendingChunks.metadata).length
+      ) {
         return
       }
 
@@ -113,11 +132,16 @@ export function useChatHandler({
         generation,
         content: '',
         reasoning: '',
+        metadata: {},
       }
+      const target = requestTargetRef.current
       onMessageUpdate((prev) => {
-        if (generation !== requestGenerationRef.current) return prev
+        if (!matchesTarget(prev.at(-1), target)) return prev
         return updateLastAssistantMessage(prev, (message) => {
-          let updatedMessage = message
+          let updatedMessage = applyResponseMetadata(
+            message,
+            pendingChunks.metadata
+          )
 
           if (pendingChunks.reasoning) {
             updatedMessage = applyStreamingChunk(
@@ -191,9 +215,23 @@ export function useChatHandler({
     (generation: number, type: 'reasoning' | 'content', chunk: string) => {
       if (generation !== requestGenerationRef.current) return
       if (pendingStreamChunksRef.current.generation !== generation) return
-      pendingStreamChunksRef.current[type] = mergePendingStreamChunk(
-        pendingStreamChunksRef.current[type],
-        chunk
+      pendingStreamChunksRef.current[type] += chunk
+      if (!firstTokenFlushedRef.current) {
+        firstTokenFlushedRef.current = true
+        flushStreamUpdates(generation)
+        return
+      }
+      scheduleStreamFlush(generation)
+    },
+    [flushStreamUpdates, scheduleStreamFlush]
+  )
+
+  const handleStreamMetadata = useCallback(
+    (generation: number, metadata: ResponseMetadata) => {
+      if (generation !== requestGenerationRef.current) return
+      pendingStreamChunksRef.current.metadata = mergeResponseMetadata(
+        pendingStreamChunksRef.current.metadata,
+        metadata
       )
       scheduleStreamFlush(generation)
     },
@@ -206,8 +244,9 @@ export function useChatHandler({
       if (generation !== requestGenerationRef.current) return
       flushStreamUpdates(generation)
       setIsRequesting(false)
+      const target = requestTargetRef.current
       onMessageUpdate((prev) => {
-        if (generation !== requestGenerationRef.current) return prev
+        if (!matchesTarget(prev.at(-1), target)) return prev
         return updateLastAssistantMessage(prev, (message) =>
           isAssistantMessageFinal(message)
             ? message
@@ -227,8 +266,9 @@ export function useChatHandler({
       const displayError = getDisplayError(error)
       toast.error(displayError)
       const errorTitle = t(ERROR_MESSAGES.API_REQUEST_ERROR)
+      const target = requestTargetRef.current
       onMessageUpdate((prev) => {
-        if (generation !== requestGenerationRef.current) return prev
+        if (!matchesTarget(prev.at(-1), target)) return prev
         return updateAssistantMessageWithError(
           prev,
           displayError,
@@ -245,6 +285,11 @@ export function useChatHandler({
     (messages: Message[]) => {
       const generation = requestGenerationRef.current + 1
       requestGenerationRef.current = generation
+      const target = messages.at(-1)
+      requestTargetRef.current = target
+        ? { key: target.key, versionId: target.versions[0]?.id }
+        : null
+      firstTokenFlushedRef.current = false
       abortControllerRef.current?.abort()
       abortControllerRef.current = null
       discardPendingStreamUpdates(generation)
@@ -258,7 +303,8 @@ export function useChatHandler({
         payload,
         (type, chunk) => handleStreamUpdate(generation, type, chunk),
         () => handleStreamComplete(generation),
-        (error, errorCode) => handleStreamError(generation, error, errorCode)
+        (error, errorCode) => handleStreamError(generation, error, errorCode),
+        (metadata) => handleStreamMetadata(generation, metadata)
       )
     },
     [
@@ -269,6 +315,7 @@ export function useChatHandler({
       handleStreamUpdate,
       handleStreamComplete,
       handleStreamError,
+      handleStreamMetadata,
     ]
   )
 
@@ -284,6 +331,11 @@ export function useChatHandler({
       const abortController = new AbortController()
 
       requestGenerationRef.current = generation
+      const lastMessage = messages.at(-1)
+      const target = lastMessage
+        ? { key: lastMessage.key, versionId: lastMessage.versions[0]?.id }
+        : null
+      requestTargetRef.current = target
       stopStream()
       discardPendingStreamUpdates(generation)
       abortControllerRef.current?.abort()
@@ -303,12 +355,19 @@ export function useChatHandler({
         }
 
         if (!hasChatCompletionChoice(response)) {
-          handleStreamError(generation, ERROR_MESSAGES.API_REQUEST_ERROR)
+          const details = parseStreamErrorDetails(JSON.stringify(response))
+          handleStreamError(
+            generation,
+            asRecord(response)?.error
+              ? details.errorMessage
+              : ERROR_MESSAGES.API_REQUEST_ERROR,
+            details.errorCode
+          )
           return
         }
 
         onMessageUpdate((prev) => {
-          if (requestGenerationRef.current !== generation) return prev
+          if (!matchesTarget(prev.at(-1), target)) return prev
           return updateLastAssistantMessage(prev, (message) => {
             const updatedMessage = applyChatCompletionResponse(
               message,
@@ -360,6 +419,7 @@ export function useChatHandler({
   // Stop generation
   const stopGeneration = useCallback(() => {
     const stoppedGeneration = requestGenerationRef.current
+    const target = requestTargetRef.current
     flushStreamUpdates(stoppedGeneration)
     const idleGeneration = stoppedGeneration + 1
     requestGenerationRef.current = idleGeneration
@@ -369,7 +429,7 @@ export function useChatHandler({
     abortControllerRef.current = null
     setIsRequesting(false)
     onMessageUpdate((prev) => {
-      if (requestGenerationRef.current !== idleGeneration) return prev
+      if (!matchesTarget(prev.at(-1), target)) return prev
       return updateLastAssistantMessage(prev, (message) =>
         isAssistantMessagePending(message)
           ? completeAssistantMessage(message)

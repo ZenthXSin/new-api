@@ -52,6 +52,7 @@ import {
   type PlaygroundParameterKey,
 } from '../../lib/parameters/playground-parameters'
 import type { ParameterEnabled, PlaygroundConfig } from '../../types'
+import { PlaygroundAdvancedParameters } from './playground-advanced-parameters'
 
 type PlaygroundParameterPanelProps = {
   config: PlaygroundConfig
@@ -191,6 +192,12 @@ function PlaygroundParameterContent({
           </div>
         )
       })}
+      <PlaygroundAdvancedParameters
+        config={config}
+        disabled={disabled}
+        onConfigChange={onConfigChange}
+        onParameterEnabledChange={onParameterEnabledChange}
+      />
     </div>
   )
 }

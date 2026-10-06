@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
@@ -997,10 +998,14 @@ func GetSyncableChannels(c *gin.Context) {
 	var syncableChannels []dto.SyncableChannel
 	for _, channel := range channels {
 		if channel.GetBaseURL() != "" {
+			baseURL := channel.GetBaseURL()
+			if _, delegated := middleware.GetOAuthPrincipal(c); delegated {
+				baseURL = ""
+			}
 			syncableChannels = append(syncableChannels, dto.SyncableChannel{
 				ID:      channel.Id,
 				Name:    channel.Name,
-				BaseURL: channel.GetBaseURL(),
+				BaseURL: baseURL,
 				Status:  channel.Status,
 				Type:    channel.Type,
 			})

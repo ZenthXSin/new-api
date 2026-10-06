@@ -176,6 +176,16 @@ func creditTopUpQuota(tx *gorm.DB, userId int, creditedQuota int, updates map[st
 	return ErrTopUpQuotaLimitExceeded
 }
 
+// Resolve the immutable top-up owner before opening the settlement transaction.
+// The mutation guard spans its durable credit and synchronous cache update.
+func beginTopUpQuotaMutation(tradeNo string) (func(), error) {
+	var topUp TopUp
+	if err := DB.Select("user_id").Where("trade_no = ?", tradeNo).First(&topUp).Error; err != nil {
+		return nil, ErrTopUpNotFound
+	}
+	return BeginAppPaymentQuotaMutation(topUp.UserId)
+}
+
 func (topUp *TopUp) Update() error {
 	var err error
 	err = DB.Save(topUp).Error
@@ -252,6 +262,13 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (
 	if tradeNo == "" {
 		return false, errors.New("未提供支付单号")
 	}
+	finish, err := beginTopUpQuotaMutation(tradeNo)
+	if err != nil {
+		return false, err
+	}
+	defer finish()
+	quotaWriteAttempted := false
+	var quotaOwner int
 
 	refCol := "`trade_no`"
 	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
@@ -289,8 +306,13 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (
 		if err := tx.Save(topUp).Error; err != nil {
 			return err
 		}
+		quotaWriteAttempted = true
+		quotaOwner = topUp.UserId
 		return creditTopUpQuota(tx, topUp.UserId, quotaToAdd, nil)
 	})
+	if err != nil && quotaWriteAttempted {
+		MarkAppPaymentWalletUnsafe(quotaOwner)
+	}
 	if err != nil {
 		if !errors.Is(err, ErrTopUpNotFound) && !errors.Is(err, ErrPaymentMethodMismatch) && !errors.Is(err, ErrTopUpStatusInvalid) {
 			common.SysError("epay topup failed: " + err.Error())
@@ -315,6 +337,13 @@ func RechargeWeChatPay(tradeNo string, paidAmountCents int64, providerTradeNo st
 	if tradeNo == "" || providerTradeNo == "" || paidAmountCents <= 0 {
 		return errors.New("无效的微信支付回调")
 	}
+	finish, err := beginTopUpQuotaMutation(tradeNo)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	quotaWriteAttempted := false
+	var quotaOwner int
 
 	refCol := "`trade_no`"
 	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
@@ -325,7 +354,7 @@ func RechargeWeChatPay(tradeNo string, paidAmountCents int64, providerTradeNo st
 	var quotaToAdd int
 	var affInviterID, affReward int
 	credited := false
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	err = DB.Transaction(func(tx *gorm.DB) error {
 		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(&topUp).Error; err != nil {
 			return ErrTopUpNotFound
 		}
@@ -369,6 +398,8 @@ func RechargeWeChatPay(tradeNo string, paidAmountCents int64, providerTradeNo st
 			return err
 		}
 
+		quotaWriteAttempted = true
+		quotaOwner = topUp.UserId
 		if err := creditTopUpQuota(tx, topUp.UserId, quotaToAdd, nil); err != nil {
 			return err
 		}
@@ -376,6 +407,9 @@ func RechargeWeChatPay(tradeNo string, paidAmountCents int64, providerTradeNo st
 		credited = true
 		return nil
 	})
+	if err != nil && quotaWriteAttempted {
+		MarkAppPaymentWalletUnsafe(quotaOwner)
+	}
 	if err != nil {
 		return err
 	}
@@ -393,6 +427,13 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 	if referenceId == "" {
 		return errors.New("未提供支付单号")
 	}
+	finish, err := beginTopUpQuotaMutation(referenceId)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	quotaWriteAttempted := false
+	var quotaOwner int
 
 	var quota int
 	var affInviterID, affReward int
@@ -430,6 +471,8 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		if err != nil || quota <= 0 {
 			return ErrInvalidTopUpQuota
 		}
+		quotaWriteAttempted = true
+		quotaOwner = topUp.UserId
 		if err := creditTopUpQuota(tx, topUp.UserId, quota, map[string]interface{}{
 			"stripe_customer": customerId,
 		}); err != nil {
@@ -438,6 +481,9 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		affInviterID, affReward = GrantTopUpAffiliateReward(tx, topUp.UserId, quota)
 		return nil
 	})
+	if err != nil && quotaWriteAttempted {
+		MarkAppPaymentWalletUnsafe(quotaOwner)
+	}
 
 	if err != nil {
 		common.SysError("topup failed: " + err.Error())
@@ -613,6 +659,13 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 	if tradeNo == "" {
 		return errors.New("未提供订单号")
 	}
+	finish, err := beginTopUpQuotaMutation(tradeNo)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	quotaWriteAttempted := false
+	var quotaOwner int
 
 	refCol := "`trade_no`"
 	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
@@ -625,7 +678,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 	var paymentMethod string
 	var affInviterID, affReward int
 
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	err = DB.Transaction(func(tx *gorm.DB) error {
 		topUp := &TopUp{}
 		// 行级锁，避免并发补单
 		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
@@ -666,6 +719,8 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		}
 
 		// 增加用户额度（立即写库，保持一致性）
+		quotaWriteAttempted = true
+		quotaOwner = topUp.UserId
 		if err := creditTopUpQuota(tx, topUp.UserId, quotaToAdd, nil); err != nil {
 			return err
 		}
@@ -676,6 +731,9 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		paymentMethod = topUp.PaymentMethod
 		return nil
 	})
+	if err != nil && quotaWriteAttempted {
+		MarkAppPaymentWalletUnsafe(quotaOwner)
+	}
 
 	if err != nil {
 		return err
@@ -691,6 +749,13 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 	if referenceId == "" {
 		return errors.New("未提供支付单号")
 	}
+	finish, err := beginTopUpQuotaMutation(referenceId)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	quotaWriteAttempted := false
+	var quotaOwner int
 
 	var quota int
 	var affInviterID, affReward int
@@ -746,12 +811,17 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 			}
 		}
 
+		quotaWriteAttempted = true
+		quotaOwner = topUp.UserId
 		if err := creditTopUpQuota(tx, topUp.UserId, quota, updateFields); err != nil {
 			return err
 		}
 		affInviterID, affReward = GrantTopUpAffiliateReward(tx, topUp.UserId, quota)
 		return nil
 	})
+	if err != nil && quotaWriteAttempted {
+		MarkAppPaymentWalletUnsafe(quotaOwner)
+	}
 
 	if err != nil {
 		common.SysError("creem topup failed: " + err.Error())
@@ -769,6 +839,13 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 	if tradeNo == "" {
 		return errors.New("未提供支付单号")
 	}
+	finish, err := beginTopUpQuotaMutation(tradeNo)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	quotaWriteAttempted := false
+	var quotaOwner int
 
 	var quotaToAdd int
 	var affInviterID, affReward int
@@ -810,12 +887,17 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 			return err
 		}
 
+		quotaWriteAttempted = true
+		quotaOwner = topUp.UserId
 		if err := creditTopUpQuota(tx, topUp.UserId, quotaToAdd, nil); err != nil {
 			return err
 		}
 		affInviterID, affReward = GrantTopUpAffiliateReward(tx, topUp.UserId, quotaToAdd)
 		return nil
 	})
+	if err != nil && quotaWriteAttempted {
+		MarkAppPaymentWalletUnsafe(quotaOwner)
+	}
 
 	if err != nil {
 		common.SysError("waffo topup failed: " + err.Error())
@@ -835,6 +917,13 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 	if tradeNo == "" {
 		return errors.New("未提供支付单号")
 	}
+	finish, err := beginTopUpQuotaMutation(tradeNo)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	quotaWriteAttempted := false
+	var quotaOwner int
 
 	var quotaToAdd int
 	var affInviterID, affReward int
@@ -876,12 +965,17 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 			return err
 		}
 
+		quotaWriteAttempted = true
+		quotaOwner = topUp.UserId
 		if err := creditTopUpQuota(tx, topUp.UserId, quotaToAdd, nil); err != nil {
 			return err
 		}
 		affInviterID, affReward = GrantTopUpAffiliateReward(tx, topUp.UserId, quotaToAdd)
 		return nil
 	})
+	if err != nil && quotaWriteAttempted {
+		MarkAppPaymentWalletUnsafe(quotaOwner)
+	}
 
 	if err != nil {
 		common.SysError("waffo pancake topup failed: " + err.Error())

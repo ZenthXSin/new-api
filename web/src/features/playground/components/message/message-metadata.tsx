@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
+import { formatNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import type { MessageAlignment } from '../../lib'
@@ -60,25 +61,77 @@ export function MessageMetadata(props: MessageMetadataProps) {
   const { t } = useTranslation()
   const messageTime = formatMessageTime(props.message.createdAt)
   const duration = formatDuration(props.message.durationMs, t)
+  const firstToken = formatDuration(props.message.firstTokenMs, t)
+  const usage = props.message.usage
+  const metrics: string[] = []
+  if (duration) metrics.push(t('Response time: {{duration}}', { duration }))
+  if (firstToken) {
+    metrics.push(t('First token: {{duration}}', { duration: firstToken }))
+  }
+  if (usage) {
+    metrics.push(
+      t('Input tokens: {{count}}', { count: formatNumber(usage.prompt_tokens) })
+    )
+    metrics.push(
+      t('Output tokens: {{count}}', {
+        count: formatNumber(usage.completion_tokens),
+      })
+    )
+    metrics.push(
+      t('Total tokens: {{count}}', { count: formatNumber(usage.total_tokens) })
+    )
+    if (usage.prompt_tokens_details?.cached_tokens !== undefined) {
+      metrics.push(
+        t('Cached input tokens: {{count}}', {
+          count: formatNumber(usage.prompt_tokens_details.cached_tokens),
+        })
+      )
+    }
+    if (usage.prompt_tokens_details?.cache_creation_tokens !== undefined) {
+      metrics.push(
+        t('Cache creation tokens: {{count}}', {
+          count: formatNumber(
+            usage.prompt_tokens_details.cache_creation_tokens
+          ),
+        })
+      )
+    }
+    if (usage.completion_tokens_details?.reasoning_tokens !== undefined) {
+      metrics.push(
+        t('Reasoning tokens: {{count}}', {
+          count: formatNumber(usage.completion_tokens_details.reasoning_tokens),
+        })
+      )
+    }
+  }
+  if (props.message.finishReason === 'length') {
+    metrics.push(t('Output limit reached'))
+  }
+  if (props.message.finishReason === 'content_filter') {
+    metrics.push(t('Response filtered'))
+  }
+  if (
+    props.message.finishReason === 'tool_calls' &&
+    !props.message.versions[0]?.content
+  ) {
+    metrics.push(t('Tool calls returned without text'))
+  }
 
-  if (!messageTime && !duration) {
+  if (!messageTime && !metrics.length) {
     return null
   }
 
   return (
     <div
       className={cn(
-        'text-muted-foreground mt-1 flex min-h-4 items-center gap-1.5 text-[11px] leading-none',
+        'text-muted-foreground mt-1 flex min-h-4 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-relaxed',
         props.alignment === 'right' && 'justify-end'
       )}
     >
       {messageTime && <time>{messageTime}</time>}
-      {duration && (
-        <>
-          {messageTime && <span aria-hidden='true'>·</span>}
-          <span>{t('Response time: {{duration}}', { duration })}</span>
-        </>
-      )}
+      {metrics.map((metric) => (
+        <span key={metric}>{metric}</span>
+      ))}
     </div>
   )
 }

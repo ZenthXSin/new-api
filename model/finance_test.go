@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -10,8 +11,122 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
+
+// External DSNs must name isolated test databases; log DSNs may name a separate
+// database to exercise deployments that keep consumption logs outside the main DB.
+func TestFinanceTrendDatabaseMatrix(t *testing.T) {
+	for _, dialect := range []struct {
+		name   common.DatabaseType
+		env    string
+		logEnv string
+	}{
+		{common.DatabaseTypeSQLite, "", ""},
+		{common.DatabaseTypeMySQL, "TEST_FINANCE_MYSQL_DSN", "TEST_FINANCE_MYSQL_LOG_DSN"},
+		{common.DatabaseTypePostgreSQL, "TEST_FINANCE_POSTGRES_DSN", "TEST_FINANCE_POSTGRES_LOG_DSN"},
+	} {
+		t.Run(string(dialect.name), func(t *testing.T) {
+			if dialect.env != "" && os.Getenv(dialect.env) == "" {
+				t.Skip(dialect.env + " is not configured")
+			}
+			openDB := func(dsn string) *gorm.DB {
+				var driver gorm.Dialector = sqlite.Open(":memory:")
+				switch dialect.name {
+				case common.DatabaseTypeMySQL:
+					driver = mysql.Open(dsn)
+				case common.DatabaseTypePostgreSQL:
+					driver = postgres.New(postgres.Config{DSN: dsn, PreferSimpleProtocol: true})
+				}
+				db, err := gorm.Open(driver, &gorm.Config{})
+				require.NoError(t, err)
+				sqlDB, err := db.DB()
+				require.NoError(t, err)
+				sqlDB.SetMaxOpenConns(1)
+				t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+				versionQuery := "SELECT version()"
+				if dialect.name == common.DatabaseTypeSQLite {
+					versionQuery = "SELECT sqlite_version()"
+				}
+				var version string
+				require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
+				t.Logf("database: %s", version)
+				return db
+			}
+			db := openDB(os.Getenv(dialect.env))
+			logDB := db
+			if logDSN := os.Getenv(dialect.logEnv); logDSN != "" || dialect.name == common.DatabaseTypeSQLite {
+				logDB = openDB(logDSN)
+			}
+			previousDB, previousLogDB := DB, LOG_DB
+			previousMainType, previousLogType := common.MainDatabaseType(), common.LogDatabaseType()
+			DB, LOG_DB = db, logDB
+			common.SetDatabaseTypes(dialect.name, dialect.name)
+			t.Cleanup(func() {
+				DB, LOG_DB = previousDB, previousLogDB
+				common.SetDatabaseTypes(previousMainType, previousLogType)
+			})
+			require.NoError(t, db.AutoMigrate(&User{}, &TopUp{}, &FinanceEntry{}))
+			require.NoError(t, logDB.AutoMigrate(&Log{}))
+
+			start := time.Date(2026, time.June, 1, 0, 0, 0, 0, time.Local)
+			day1, day2 := start.Unix(), start.AddDate(0, 0, 1).Unix()
+			end := start.AddDate(0, 0, 3).Unix() - 1
+			logs := []Log{
+				{CreatedAt: day1, Type: LogTypeConsume, Quota: 100, CostQuota: 30},
+				{CreatedAt: day1, Type: LogTypeConsume, Quota: 50, CostQuota: 10},
+				{CreatedAt: day1, Type: LogTypeRefund, Quota: 40, CostQuota: 5},
+				{CreatedAt: day1, Type: LogTypeConsume, Quota: 999, ExcludeProfitStat: true},
+				{CreatedAt: day2, Type: LogTypeConsume, Quota: 200, CostQuota: 60},
+				{CreatedAt: end + 1, Type: LogTypeConsume, Quota: 999},
+			}
+			require.NoError(t, logDB.Create(&logs).Error)
+			t.Cleanup(func() { require.NoError(t, logDB.Delete(&logs).Error) })
+			users := []User{
+				{Username: "finance-matrix-user-1", AffCode: "finance-matrix-1", CreatedAt: day1},
+				{Username: "finance-matrix-user-2", AffCode: "finance-matrix-2", CreatedAt: day1},
+				{Username: "finance-matrix-user-3", AffCode: "finance-matrix-3", CreatedAt: day2},
+			}
+			require.NoError(t, db.Create(&users).Error)
+			t.Cleanup(func() { require.NoError(t, db.Unscoped().Delete(&users).Error) })
+			topups := []TopUp{
+				{UserId: users[0].Id, TradeNo: "finance-matrix-paid-1", Money: 15, Status: common.TopUpStatusSuccess, CompleteTime: day1},
+				{UserId: users[0].Id, TradeNo: "finance-matrix-paid-2", Money: 5, Status: common.TopUpStatusSuccess, CompleteTime: day1},
+				{UserId: users[1].Id, TradeNo: "finance-matrix-paid-3", Money: 25, Status: common.TopUpStatusSuccess, CompleteTime: day2},
+				{UserId: users[2].Id, TradeNo: "finance-matrix-pending", Money: 99, Status: common.TopUpStatusPending, CompleteTime: day2},
+			}
+			require.NoError(t, db.Create(&topups).Error)
+			t.Cleanup(func() { require.NoError(t, db.Delete(&topups).Error) })
+			entries := []FinanceEntry{{EntryType: "income", Amount: 2}, {EntryType: "expense", Amount: 1}}
+			for i := range entries {
+				insertFinanceEntryAt(t, &entries[i], day1)
+			}
+			t.Cleanup(func() { require.NoError(t, db.Delete(&entries).Error) })
+
+			cost, err := GetCostTrendByDay(day1, end)
+			require.NoError(t, err)
+			assert.Equal(t, []CostDayStat{
+				{Date: "2026-06-01", RevenueQuota: 110, CostQuota: 45, GrossProfitQuota: 65, RequestCount: 2},
+				{Date: "2026-06-02", RevenueQuota: 200, CostQuota: 60, GrossProfitQuota: 140, RequestCount: 1},
+				{Date: "2026-06-03"},
+			}, cost)
+			growth, err := GetUserGrowthByDay(day1, end)
+			require.NoError(t, err)
+			assert.Equal(t, []UserDayStat{
+				{Date: "2026-06-01", NewUsers: 2, PaidUsers: 1, PaidMoney: 20},
+				{Date: "2026-06-02", NewUsers: 1, PaidUsers: 1, PaidMoney: 25},
+				{Date: "2026-06-03"},
+			}, growth)
+			manual, err := GetManualAdjustmentByDay(day1, end)
+			require.NoError(t, err)
+			assert.Equal(t, map[string]ManualDayAdjust{
+				"2026-06-01": {IncomeMoney: 2, ExpenseMoney: 1, IncomeQuota: int64(2 * common.QuotaPerUnit), ExpenseQuota: int64(common.QuotaPerUnit)},
+			}, manual)
+		})
+	}
+}
 
 func insertFinanceLog(t *testing.T, ts int64, logType int, quota int, costQuota int, exclude bool) {
 	t.Helper()

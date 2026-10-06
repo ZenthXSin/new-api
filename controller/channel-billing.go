@@ -13,6 +13,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel/advancedcustom"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -530,12 +531,12 @@ func updateStandardChannelBalance(channel *model.Channel) (float64, error) {
 func UpdateChannelBalance(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		common.ApiError(c, err)
+		channelOperationError(c, err, "余额查询失败，请在本站查看渠道诊断")
 		return
 	}
 	channel, err := model.CacheGetChannel(id)
 	if err != nil {
-		common.ApiError(c, err)
+		channelOperationError(c, err, "余额查询失败，请在本站查看渠道诊断")
 		return
 	}
 	if channel.ChannelInfo.IsMultiKey {
@@ -547,7 +548,11 @@ func UpdateChannelBalance(c *gin.Context) {
 	}
 	result, err := updateChannelBalance(channel)
 	if err != nil {
-		common.ApiError(c, err)
+		channelOperationError(c, err, "余额查询失败，请在本站查看渠道诊断")
+		return
+	}
+	if _, delegated := middleware.GetOAuthPrincipal(c); delegated && result.RawResponse != "" {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "上游余额响应无法安全解析，请在本站查看渠道诊断", "error_code": "channel_response_not_supported"})
 		return
 	}
 	response := gin.H{
@@ -596,7 +601,7 @@ func UpdateAllChannelsBalance(c *gin.Context) {
 	// TODO: make it async
 	err := updateAllChannelsBalance()
 	if err != nil {
-		common.ApiError(c, err)
+		channelOperationError(c, err, "余额查询失败，请在本站查看渠道诊断")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{

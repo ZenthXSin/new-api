@@ -201,13 +201,34 @@ func ApplyChannelGroupFilter(query *gorm.DB, group string) *gorm.DB {
 
 // Value implements driver.Valuer interface
 func (c ChannelInfo) Value() (driver.Value, error) {
-	return common.Marshal(&c)
+	data, err := common.Marshal(&c)
+	if err != nil {
+		return nil, err
+	}
+	// PostgreSQL simple protocol infers []byte as bytea, not JSON text.
+	return string(data), nil
 }
 
 // Scan implements sql.Scanner interface
-func (c *ChannelInfo) Scan(value interface{}) error {
-	bytesValue, _ := value.([]byte)
-	return common.Unmarshal(bytesValue, c)
+func (c *ChannelInfo) Scan(value any) error {
+	var data []byte
+	switch value := value.(type) {
+	case nil:
+	case []byte:
+		data = value
+	case string:
+		data = []byte(value)
+	default:
+		return fmt.Errorf("unsupported channel info database value: %T", value)
+	}
+	var decoded ChannelInfo
+	if data != nil {
+		if err := common.Unmarshal(data, &decoded); err != nil {
+			return err
+		}
+	}
+	*c = decoded
+	return nil
 }
 
 func (channel *Channel) GetKeys() []string {

@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { MESSAGE_ROLES, MESSAGE_STATUS } from '../../constants'
 import type { Message } from '../../types'
+import { normalizeSources } from '../streaming/response-metadata'
 import { parseThinkTags } from './message-reasoning-utils'
 
 type MessageContentStateBase = {
@@ -81,7 +82,7 @@ export function getMessageContentState(
   versionContent: string
 ): MessageContentState {
   const isAssistant = message.from === MESSAGE_ROLES.ASSISTANT
-  const sources = message.sources ?? []
+  const sources = normalizeSources(message.sources)
   const reasoningContent = isAssistant ? message.reasoning?.content : undefined
   const showLoader = shouldShowMessageLoader(
     message,

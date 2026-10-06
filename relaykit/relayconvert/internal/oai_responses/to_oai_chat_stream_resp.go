@@ -32,6 +32,7 @@ type ResponsesToChatStreamState struct {
 	pendingArgsByOutputIndex   map[int]string
 	pendingArgsByItemID        map[string]string
 	usageText                  strings.Builder
+	seenCitations              map[string]bool
 }
 
 type responsesStreamTool struct {
@@ -86,7 +87,16 @@ func ResponsesStreamEventToChatChunks(event *dto.ResponsesStreamResponse, state 
 		return nil, nil
 	case responsesEventOutputTextDelta:
 		return state.textDelta(event.Delta), nil
+	case "response.output_text.annotation.added":
+		return state.citationDelta(dto.ResponsesURLCitations([]any{event.Annotation})), nil
 	case responsesEventOutputItemAdded, responsesEventOutputItemDone:
+		if event.Item != nil && event.Item.Type == responsesOutputTypeMessage {
+			var annotations []dto.ChatAnnotation
+			for _, content := range event.Item.Content {
+				annotations = append(annotations, dto.ResponsesURLCitations(content.Annotations)...)
+			}
+			return state.citationDelta(annotations), nil
+		}
 		if event.Item == nil || !isResponsesToolOutputType(event.Item.Type) {
 			return nil, nil
 		}
@@ -168,6 +178,11 @@ func (s *ResponsesToChatStreamState) terminalOutputChunks(response *dto.OpenAIRe
 	var chunks []dto.ChatCompletionsStreamResponse
 	for i := range response.Output {
 		out := &response.Output[i]
+		if out.Type == responsesOutputTypeMessage {
+			for _, content := range out.Content {
+				chunks = append(chunks, s.citationDelta(dto.ResponsesURLCitations(content.Annotations))...)
+			}
+		}
 		switch {
 		case out.Type == responsesOutputTypeMessage && !s.hasSentText:
 			var text strings.Builder
@@ -190,6 +205,28 @@ func (s *ResponsesToChatStreamState) terminalOutputChunks(response *dto.OpenAIRe
 		}
 	}
 	return chunks
+}
+
+func (s *ResponsesToChatStreamState) citationDelta(annotations []dto.ChatAnnotation) []dto.ChatCompletionsStreamResponse {
+	if s.seenCitations == nil {
+		s.seenCitations = make(map[string]bool)
+	}
+	var fresh []dto.ChatAnnotation
+	for _, annotation := range annotations {
+		if annotation.URLCitation == nil {
+			continue
+		}
+		key := annotation.URLCitation.URL
+		if !s.seenCitations[key] {
+			s.seenCitations[key] = true
+			fresh = append(fresh, annotation)
+		}
+	}
+	if len(fresh) == 0 {
+		return nil
+	}
+	chunks := s.ensureStart()
+	return append(chunks, s.makeChunk(dto.ChatCompletionsStreamResponseChoiceDelta{Annotations: fresh}, nil))
 }
 
 func (s *ResponsesToChatStreamState) reasoningDelta(delta string) []dto.ChatCompletionsStreamResponse {
@@ -554,6 +591,7 @@ func (s *ResponsesToChatStreamState) keyForEvent(event *dto.ResponsesStreamRespo
 }
 
 type ResponsesBufferedAccumulator struct {
+	annotations          []any
 	text                 strings.Builder
 	reasoning            strings.Builder
 	tools                []*responsesBufferedTool
@@ -584,11 +622,18 @@ func (a *ResponsesBufferedAccumulator) ProcessEvent(event *dto.ResponsesStreamRe
 		return
 	}
 	switch event.Type {
+	case "response.output_text.annotation.added":
+		a.annotations = append(a.annotations, event.Annotation)
 	case responsesEventOutputTextDelta:
 		a.text.WriteString(event.Delta)
 	case responsesEventReasoningSummaryDelta, responsesEventReasoningTextDelta:
 		a.reasoning.WriteString(event.Delta)
 	case responsesEventOutputItemAdded, responsesEventOutputItemDone:
+		if event.Item != nil && event.Item.Type == responsesOutputTypeMessage && event.Type == responsesEventOutputItemDone {
+			for _, content := range event.Item.Content {
+				a.annotations = append(a.annotations, content.Annotations...)
+			}
+		}
 		if event.Item != nil && isResponsesToolOutputType(event.Item.Type) {
 			tool := a.ensureTool(event)
 			if args := event.Item.ArgumentsString(); args != "" {
@@ -629,12 +674,12 @@ func (a *ResponsesBufferedAccumulator) BuildOutput() []dto.ResponsesOutput {
 			},
 		})
 	}
-	if a.text.Len() > 0 {
+	if a.text.Len() > 0 || len(a.annotations) > 0 {
 		out = append(out, dto.ResponsesOutput{
 			Type: responsesOutputTypeMessage,
 			Role: "assistant",
 			Content: []dto.ResponsesOutputContent{
-				{Type: "output_text", Text: a.text.String()},
+				{Type: "output_text", Text: a.text.String(), Annotations: a.annotations},
 			},
 		})
 	}

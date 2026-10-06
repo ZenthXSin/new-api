@@ -38,8 +38,8 @@ export const PLAYGROUND_PARAMETER_CONTROLS = [
     labelKey: 'Temperature',
     descriptionKey: 'Controls randomness and creativity',
     valueType: 'slider',
-    min: 0.1,
-    max: 1,
+    min: 0,
+    max: 2,
     step: 0.1,
   },
   {
@@ -47,7 +47,7 @@ export const PLAYGROUND_PARAMETER_CONTROLS = [
     labelKey: 'Top P',
     descriptionKey: 'Limits token selection to a probability mass',
     valueType: 'slider',
-    min: 0.1,
+    min: 0,
     max: 1,
     step: 0.1,
   },
@@ -74,7 +74,7 @@ export const PLAYGROUND_PARAMETER_CONTROLS = [
     labelKey: 'Max Tokens',
     descriptionKey: 'Caps the response length',
     valueType: 'number',
-    min: 0,
+    min: 1,
     max: 200000,
     step: 1,
   },
@@ -96,15 +96,15 @@ export function normalizeParameterNumberValue(
   key: PlaygroundParameterKey,
   value: string | number
 ): number | null {
+  const control = PLAYGROUND_PARAMETER_CONTROLS.find((item) => item.key === key)
   if (value === '') {
-    return key === 'seed' ? null : 0
+    return key === 'seed' ? null : Math.max(0, control?.min ?? 0)
   }
 
-  const control = PLAYGROUND_PARAMETER_CONTROLS.find((item) => item.key === key)
   const parsed = typeof value === 'number' ? value : Number.parseFloat(value)
 
-  if (!control || Number.isNaN(parsed)) {
-    return key === 'seed' ? null : 0
+  if (!control || !Number.isFinite(parsed)) {
+    return key === 'seed' ? null : Math.max(0, control?.min ?? 0)
   }
 
   const clamped = Math.min(control.max, Math.max(control.min, parsed))

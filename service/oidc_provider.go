@@ -8,17 +8,16 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"slices"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 const (
@@ -52,16 +51,22 @@ type OidcAuthorizeInput struct {
 	Nonce               string
 	CodeChallenge       string
 	CodeChallengeMethod string
+	Resources           []string
 }
 
 type oidcAuthorizationCodePayload struct {
-	ClientId            string `json:"client_id"`
-	RedirectUri         string `json:"redirect_uri"`
-	Scope               string `json:"scope"`
-	Nonce               string `json:"nonce,omitempty"`
-	CodeChallenge       string `json:"code_challenge,omitempty"`
-	CodeChallengeMethod string `json:"code_challenge_method,omitempty"`
-	State               string `json:"state,omitempty"`
+	ClientId            string   `json:"client_id"`
+	RedirectUri         string   `json:"redirect_uri"`
+	Scope               string   `json:"scope"`
+	Nonce               string   `json:"nonce,omitempty"`
+	CodeChallenge       string   `json:"code_challenge,omitempty"`
+	CodeChallengeMethod string   `json:"code_challenge_method,omitempty"`
+	State               string   `json:"state,omitempty"`
+	Resources           []string `json:"resources"`
+	UserAuthVersion     int64    `json:"user_auth_version"`
+	UserAuthFingerprint string   `json:"user_auth_fingerprint"`
+	ClientAuthVersion   string   `json:"client_auth_version"`
+	GrantID             int      `json:"grant_id,omitempty"`
 }
 
 type oidcAccessTokenClaims struct {
@@ -98,10 +103,10 @@ func NormalizeOidcScopes(requested string, client *model.OauthClient) ([]string,
 	result := make([]string, 0, len(fields))
 	seen := make(map[string]struct{}, len(fields))
 	for _, scope := range fields {
-		if !model.IsOauthScopeSupported(scope) {
+		if scope != "full" && !model.IsOauthScopeSupported(scope) {
 			return nil, fmt.Errorf("%w: %s", ErrOidcScopeNotRequested, scope)
 		}
-		if _, ok := allowed[scope]; !ok {
+		if _, ok := allowed[scope]; scope != "full" && !ok {
 			return nil, fmt.Errorf("%w: %s", ErrOidcScopeNotRequested, scope)
 		}
 		if _, ok := seen[scope]; ok {
@@ -115,14 +120,19 @@ func NormalizeOidcScopes(requested string, client *model.OauthClient) ([]string,
 
 // ValidateOidcPKCE checks a PKCE code_verifier against the stored challenge.
 func ValidateOidcPKCE(challenge, method, verifier string) error {
-	if challenge == "" {
-		return nil
+	if ValidateOidcPKCEChallenge(challenge, method) != nil {
+		return ErrOidcPKCEInvalid
 	}
 	verifier = strings.TrimSpace(verifier)
 	if verifier == "" || len(verifier) < 43 || len(verifier) > 128 {
 		return ErrOidcPKCEInvalid
 	}
-	if method != "" && method != oidcPKCEMethodS256 {
+	for _, character := range verifier {
+		if !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || strings.ContainsRune("-._~", character)) {
+			return ErrOidcPKCEInvalid
+		}
+	}
+	if method != oidcPKCEMethodS256 {
 		return ErrOidcPKCEInvalid
 	}
 	digest := sha256.Sum256([]byte(verifier))
@@ -133,110 +143,68 @@ func ValidateOidcPKCE(challenge, method, verifier string) error {
 	return nil
 }
 
-// CreateOidcAuthorizationCode stores a single-use authorization code bound to
-// the user, client and request parameters via the shared AuthFlow table.
+// ValidateOidcPKCEChallenge requires S256 for public and confidential clients.
+func ValidateOidcPKCEChallenge(challenge, method string) error {
+	if method != oidcPKCEMethodS256 || len(challenge) != 43 {
+		return ErrOidcPKCEInvalid
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(challenge)
+	if err != nil || len(decoded) != 32 || base64.RawURLEncoding.EncodeToString(decoded) != challenge {
+		return ErrOidcPKCEInvalid
+	}
+	return nil
+}
+
+// CreateOidcAuthorizationCode binds the user's explicit consent to the client,
+// current authorization state, redirect, scope snapshot and PKCE challenge.
 func CreateOidcAuthorizationCode(input OidcAuthorizeInput) (string, error) {
-	if input.Client == nil || input.UserId <= 0 || input.RedirectUri == "" || len(input.Scopes) == 0 {
+	if input.Client == nil || input.UserId <= 0 || !input.Client.HasRedirectURI(input.RedirectUri) || len(input.Scopes) == 0 || slices.Contains(input.Scopes, "full") {
 		return "", ErrOidcRequestInvalid
 	}
-	if input.Client.IsPublic && input.CodeChallenge == "" {
+	if err := ValidateOidcPKCEChallenge(input.CodeChallenge, input.CodeChallengeMethod); err != nil {
+		return "", err
+	}
+	user, err := model.GetUserById(input.UserId, true)
+	if err != nil || user.Status != common.UserStatusEnabled || user.AuthVersion <= 0 {
 		return "", ErrOidcRequestInvalid
+	}
+	scopes, err := OAuthScopesForConsent(input.UserId, input.Client, input.Scopes)
+	if err != nil {
+		return "", err
+	}
+	resources, err := OAuthNormalizeResources(input.Resources)
+	if err != nil {
+		return "", err
 	}
 	payload := oidcAuthorizationCodePayload{
-		ClientId:            input.Client.ClientId,
-		RedirectUri:         input.RedirectUri,
-		Scope:               strings.Join(input.Scopes, " "),
-		Nonce:               input.Nonce,
-		CodeChallenge:       input.CodeChallenge,
-		CodeChallengeMethod: input.CodeChallengeMethod,
-		State:               input.State,
+		ClientId: input.Client.ClientId, RedirectUri: input.RedirectUri, Scope: strings.Join(scopes, " "), Nonce: input.Nonce,
+		CodeChallenge: input.CodeChallenge, CodeChallengeMethod: input.CodeChallengeMethod, State: input.State,
+		Resources: resources, UserAuthVersion: user.AuthVersion, UserAuthFingerprint: oauthUserFingerprint(user), ClientAuthVersion: oauthClientFingerprint(input.Client),
 	}
 	payloadBytes, err := common.Marshal(payload)
 	if err != nil {
 		return "", err
 	}
-	code, _, err := model.CreateAuthFlow(model.AuthFlowCreate{
-		Purpose:   oidcCodePurpose,
-		UserId:    input.UserId,
-		Payload:   string(payloadBytes),
-		ExpiresAt: time.Now().Add(oidcCodeTTL),
-	})
-	if err != nil {
-		return "", err
-	}
-	return code, nil
+	code, _, err := model.CreateAuthFlow(model.AuthFlowCreate{Purpose: oidcCodePurpose, UserId: input.UserId, Payload: string(payloadBytes), ExpiresAt: time.Now().Add(oidcCodeTTL)})
+	return code, err
 }
 
-// ConsumeOidcAuthorizationCode atomically redeems a code for one client.
-func ConsumeOidcAuthorizationCode(code string, client *model.OauthClient, redirectUri string) (*oidcAuthorizationCodePayload, int, error) {
-	if code == "" || client == nil {
-		return nil, 0, ErrOidcRequestInvalid
-	}
-	var payload oidcAuthorizationCodePayload
-	var userId int
-	_, err := model.ConsumeAuthFlowWithAction(code, model.AuthFlowMatch{Purpose: oidcCodePurpose}, func(_ *gorm.DB, flow *model.AuthFlow) error {
-		if strings.TrimSpace(flow.Payload) == "" {
-			return ErrOidcRequestInvalid
-		}
-		if err := common.Unmarshal([]byte(flow.Payload), &payload); err != nil {
-			return ErrOidcRequestInvalid
-		}
-		if payload.ClientId != client.ClientId || payload.RedirectUri != redirectUri {
-			return ErrOidcRequestInvalid
-		}
-		userId = flow.UserId
-		return nil
-	})
-	if err != nil {
-		if errors.Is(err, model.ErrAuthFlowConsumed) {
-			return nil, 0, model.ErrAuthFlowConsumed
-		}
-		if errors.Is(err, model.ErrAuthFlowExpired) {
-			return nil, 0, model.ErrAuthFlowExpired
-		}
-		return nil, 0, ErrOidcRequestInvalid
-	}
-	return &payload, userId, nil
-}
-
-// IssueOidcTokens signs the access token and (for openid requests) the
-// id_token with the provider's RS256 key.
-func IssueOidcTokens(client *model.OauthClient, user *model.User, scopes []string, nonce string) (accessToken string, idToken string, expiresIn int64, err error) {
+func issueOidcIDToken(client *model.OauthClient, user *model.User, scopes []string, nonce string) (idToken string, err error) {
 	settings := system_setting.GetOauthProviderSettings()
-	if !settings.Enabled {
-		return "", "", 0, ErrOidcProviderDisabled
-	}
-	issuer := settings.GetIssuer()
-	if issuer == "" {
-		return "", "", 0, ErrOidcRequestInvalid
+	if !settings.Enabled || settings.GetIssuer() == "" {
+		return "", ErrOidcProviderDisabled
 	}
 	privateKey, kid, err := model.GetOrCreateOauthSigningKey()
 	if err != nil {
-		return "", "", 0, err
+		return "", err
 	}
-	scope := strings.Join(scopes, " ")
+	return issueOidcIDTokenWithKey(client, user, scopes, nonce, privateKey, kid)
+}
+
+func issueOidcIDTokenWithKey(client *model.OauthClient, user *model.User, scopes []string, nonce string, privateKey *rsa.PrivateKey, kid string) (idToken string, err error) {
+	settings := system_setting.GetOauthProviderSettings()
+	issuer := settings.GetIssuer()
 	now := time.Now()
-	expiresIn = int64(settings.GetAccessTokenTTL() / time.Second)
-
-	accessClaims := oidcAccessTokenClaims{
-		Scope:    scope,
-		TokenUse: oidcAccessTokenUse,
-		ClientId: client.ClientId,
-		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    issuer,
-			Subject:   fmt.Sprintf("%d", user.Id),
-			Audience:  jwt.ClaimStrings{client.ClientId},
-			ExpiresAt: jwt.NewNumericDate(now.Add(settings.GetAccessTokenTTL())),
-			NotBefore: jwt.NewNumericDate(now.Add(-5 * time.Second)),
-			IssuedAt:  jwt.NewNumericDate(now),
-			ID:        uuid.NewString(),
-		},
-	}
-	accessToken, err = signOidcToken(accessClaims, privateKey, kid)
-	if err != nil {
-		return "", "", 0, err
-	}
-
 	scopeSet := make(map[string]struct{}, len(scopes))
 	for _, scope := range scopes {
 		scopeSet[scope] = struct{}{}
@@ -271,10 +239,10 @@ func IssueOidcTokens(client *model.OauthClient, user *model.User, scopes []strin
 		}
 		idToken, err = signOidcToken(idClaims, privateKey, kid)
 		if err != nil {
-			return "", "", 0, err
+			return "", err
 		}
 	}
-	return accessToken, idToken, expiresIn, nil
+	return idToken, nil
 }
 
 func signOidcToken(claims jwt.Claims, privateKey *rsa.PrivateKey, kid string) (string, error) {
@@ -283,41 +251,15 @@ func signOidcToken(claims jwt.Claims, privateKey *rsa.PrivateKey, kid string) (s
 	return token.SignedString(privateKey)
 }
 
-// ParseOidcAccessToken verifies an RS256 access token issued by this provider
-// and returns the subject user id and granted scopes.
+// ParseOidcAccessToken only accepts current, persisted access credentials.
+// Legacy identity-only JWT access tokens require one new authorization after
+// this upgrade; ID tokens remain JWTs and are never resource credentials.
 func ParseOidcAccessToken(raw string) (userId int, scopes []string, err error) {
-	settings := system_setting.GetOauthProviderSettings()
-	if !settings.Enabled {
-		return 0, nil, ErrOidcProviderDisabled
-	}
-	issuer := settings.GetIssuer()
-	claims := &oidcAccessTokenClaims{}
-	parsed, parseErr := jwt.NewParser(jwt.WithValidMethods([]string{"RS256"})).ParseWithClaims(raw, claims, func(token *jwt.Token) (interface{}, error) {
-		kid, _ := token.Header["kid"].(string)
-		key, keyErr := loadOidcSigningKeyByKid(kid)
-		if keyErr != nil {
-			return nil, ErrOidcTokenInvalid
-		}
-		return &key.PublicKey, nil
-	})
-	if parseErr != nil || !parsed.Valid {
+	principal, recognized, err := AuthenticateOAuthAccessToken(raw)
+	if !recognized || err != nil || !slices.Contains(principal.Resources, OAuthResourceDashboard) {
 		return 0, nil, ErrOidcTokenInvalid
 	}
-	if claims.Issuer != issuer || claims.TokenUse != oidcAccessTokenUse || claims.Subject == "" {
-		return 0, nil, ErrOidcTokenInvalid
-	}
-	userId, convErr := strconv.Atoi(claims.Subject)
-	if convErr != nil || userId <= 0 {
-		return 0, nil, ErrOidcTokenInvalid
-	}
-	return userId, strings.Fields(claims.Scope), nil
-}
-
-func loadOidcSigningKeyByKid(kid string) (*rsa.PrivateKey, error) {
-	if kid == "" {
-		return model.LoadActiveOidcSigningKey()
-	}
-	return model.LoadOidcSigningKeyByKid(kid)
+	return principal.UserID, principal.Scopes, nil
 }
 
 // BuildOidcDiscovery returns the OIDC discovery document for the issuer.
@@ -331,13 +273,14 @@ func BuildOidcDiscovery() map[string]interface{} {
 		"revocation_endpoint":                   issuer + "/revoke",
 		"jwks_uri":                              issuer + "/.well-known/jwks.json",
 		"response_types_supported":              []string{"code"},
-		"grant_types_supported":                 []string{"authorization_code"},
+		"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
 		"subject_types_supported":               []string{"public"},
 		"id_token_signing_alg_values_supported": []string{"RS256"},
-		"scopes_supported":                      []string{"openid", "profile", "email"},
-		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post", "none"},
-		"claims_supported":                      []string{"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "name", "preferred_username", "email", "email_verified", "groups", "quota", "used_quota", "quota_per_unit"},
-		"code_challenge_methods_supported":      []string{"S256"},
+		"scopes_supported":                      model.OAuthSupportedScopes(),
+		"authorization_response_iss_parameter_supported": true,
+		"token_endpoint_auth_methods_supported":          []string{"client_secret_basic", "client_secret_post", "none"},
+		"claims_supported":                               []string{"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "name", "preferred_username", "email", "email_verified", "groups", "quota", "used_quota", "quota_per_unit"},
+		"code_challenge_methods_supported":               []string{"S256"},
 	}
 }
 

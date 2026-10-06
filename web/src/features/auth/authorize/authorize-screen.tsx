@@ -16,12 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
-
-import { api } from '@/lib/api'
-import { useAuthStore } from '@/stores/auth-store'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -29,248 +26,265 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { useAuthStore } from '@/stores/auth-store'
 
-export type AuthorizeSearchParams = {
-  client_id?: string
-  redirect_uri?: string
-  scope?: string
-  state?: string
-  nonce?: string
-  code_challenge?: string
-  code_challenge_method?: string
-  error?: string
-  error_description?: string
+import {
+  buildConsentQuery,
+  loadConsent,
+  respondToConsent,
+  type AuthorizeSearchParams,
+  type ConsentPreview,
+} from './api'
+import { ConsentPermissions } from './components/consent-permissions'
+import { safeOAuthWebUrl } from './lib/authorization-redirect'
+
+export type { AuthorizeSearchParams } from './api'
+
+function AuthorizationMessage(props: { title: string; description?: string }) {
+  const { t } = useTranslation()
+  return (
+    <Card className='w-full max-w-lg'>
+      <CardHeader>
+        <CardTitle>{t(props.title)}</CardTitle>
+        {props.description && (
+          <CardDescription className='break-words'>
+            {t(props.description)}
+          </CardDescription>
+        )}
+      </CardHeader>
+    </Card>
+  )
 }
 
-interface ConsentResponse {
-  success: boolean
-  message?: string
-  require_consent?: boolean
-  redirect?: string
-  client?: { name: string; description: string }
-  scopes?: string[]
-}
+function AuthorizationRedirect(props: { url: string; denied: boolean }) {
+  useEffect(() => {
+    window.location.replace(props.url)
+  }, [props.url])
 
-const SCOPE_LABELS: Record<string, string> = {
-  openid: 'Confirm your identity',
-  profile: 'View your username, display name, groups and balance',
-  email: 'View your email address',
-}
-
-function buildConsentQuery(props: AuthorizeSearchParams): string {
-  const params = new URLSearchParams()
-  const keys = [
-    'client_id',
-    'redirect_uri',
-    'scope',
-    'state',
-    'nonce',
-    'code_challenge',
-    'code_challenge_method',
-  ] as const
-  for (const key of keys) {
-    const value = props[key]
-    if (value) params.set(key, value)
-  }
-  return params.toString()
+  return (
+    <AuthorizationMessage
+      title={props.denied ? 'Authorization denied' : 'Authorization complete'}
+      description='Redirecting you back to the application...'
+    />
+  )
 }
 
 export function AuthorizeScreen(props: AuthorizeSearchParams) {
-  const { t } = useTranslation()
-  const authUser = useAuthStore((s) => s.auth.user)
-  const [clientName, setClientName] = useState('')
-  const [clientDescription, setClientDescription] = useState('')
-  const [scopes, setScopes] = useState<string[]>([])
-  const [pendingRedirect, setPendingRedirect] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [submitting, setSubmitting] = useState(false)
-  const [loadError, setLoadError] = useState('')
-
-  const consentQuery = buildConsentQuery(props)
-
-  useEffect(() => {
-    if (!authUser) return
-    let cancelled = false
-    setLoading(true)
-    void api
-      .get(`/api/oauth2/consent?${consentQuery}`)
-      .then((res) => {
-        if (cancelled) return
-        const data = res.data as ConsentResponse
-        if (!data.success) {
-          setLoadError(data.message || t('Failed to load authorization request'))
-          return
-        }
-        if (data.redirect) {
-          setPendingRedirect(data.redirect)
-          return
-        }
-        setClientName(data.client?.name || props.client_id || '')
-        setClientDescription(data.client?.description || '')
-        setScopes(data.scopes || [])
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        setLoadError(
-          error instanceof Error
-            ? error.message
-            : t('Failed to load authorization request')
-        )
-      })
-      .then(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authUser, consentQuery])
-
-  useEffect(() => {
-    if (pendingRedirect) {
-      window.location.replace(pendingRedirect)
-    }
-  }, [pendingRedirect])
-
-  const respond = async (approve: boolean) => {
-    setSubmitting(true)
-    try {
-      const body = {
-        client_id: props.client_id,
-        redirect_uri: props.redirect_uri,
-        scope: props.scope,
-        state: props.state,
-        nonce: props.nonce,
-        code_challenge: props.code_challenge,
-        code_challenge_method: props.code_challenge_method,
-        approve,
-      }
-      const res = await api.post('/api/oauth2/consent', body)
-      const data = res.data as ConsentResponse
-      if (!data.success || !data.redirect) {
-        toast.error(data.message || t('Failed to process authorization'))
-        return
-      }
-      setPendingRedirect(data.redirect)
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : t('An error occurred')
-      )
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
+  const authUser = useAuthStore((state) => state.auth.user)
+  const sessionID = useAuthStore((state) => state.auth.session?.sid || '')
   if (props.error) {
     return (
-      <Card className='w-full max-w-md'>
-        <CardHeader>
-          <CardTitle>{t('Authorization failed')}</CardTitle>
-          <CardDescription>{props.error_description || props.error}</CardDescription>
-        </CardHeader>
-      </Card>
+      <AuthorizationMessage
+        title='Authorization failed'
+        description='The authorization request is invalid or was declined. Return to the application and try again.'
+      />
     )
   }
-
   if (!authUser) {
     return (
-      <Card className='w-full max-w-md'>
-        <CardHeader>
-          <CardTitle>{t('Sign in to continue')}</CardTitle>
-          <CardDescription>
-            {t(
-              'You need to sign in to authorize this application. Redirecting to sign in...'
-            )}
-          </CardDescription>
-        </CardHeader>
-      </Card>
+      <AuthorizationMessage
+        title='Sign in to continue'
+        description='You need to sign in to authorize this application. Redirecting to sign in...'
+      />
     )
   }
+  const requestKey = `${authUser.id}:${sessionID}:${buildConsentQuery(props)}`
+  return (
+    <AuthorizationRequest
+      key={requestKey}
+      params={props}
+      requestKey={requestKey}
+      username={authUser.username}
+    />
+  )
+}
 
-  if (pendingRedirect) {
-    return (
-      <Card className='w-full max-w-md'>
-        <CardHeader>
-          <CardTitle>{t('Authorization complete')}</CardTitle>
-          <CardDescription>
-            {t('Redirecting you back to the application...')}
-          </CardDescription>
-        </CardHeader>
-      </Card>
-    )
+function AuthorizationRequest(props: {
+  params: AuthorizeSearchParams
+  requestKey: string
+  username: string
+}) {
+  const { t } = useTranslation()
+  const [responseError, setResponseError] = useState(false)
+  const [retrySelection, setRetrySelection] = useState<string[] | undefined>()
+  const query = useQuery({
+    queryKey: ['oauth-consent', props.requestKey],
+    queryFn: ({ signal }) => loadConsent(props.params, signal),
+    retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    meta: { errorToast: false },
+  })
+
+  if (query.isPending || query.isFetching) {
+    return <AuthorizationMessage title='Loading...' />
   }
-
-  if (loading) {
+  if (query.isError || !query.data) {
     return (
-      <Card className='w-full max-w-md'>
-        <CardHeader>
-          <CardTitle>{t('Loading...')}</CardTitle>
-        </CardHeader>
-      </Card>
-    )
-  }
-
-  if (loadError) {
-    return (
-      <Card className='w-full max-w-md'>
+      <Card className='w-full max-w-lg'>
         <CardHeader>
           <CardTitle>{t('Authorization failed')}</CardTitle>
-          <CardDescription>{loadError}</CardDescription>
+          <CardDescription>
+            {t('Failed to load authorization request')}
+          </CardDescription>
         </CardHeader>
+        <CardFooter>
+          <Button
+            type='button'
+            variant='outline'
+            onClick={() => void query.refetch()}
+          >
+            {t('Retry')}
+          </Button>
+        </CardFooter>
       </Card>
     )
   }
-
   return (
-    <Card className='w-full max-w-md'>
-      <CardHeader>
+    <ConsentForm
+      key={query.data.consentToken}
+      params={props.params}
+      preview={query.data}
+      username={props.username}
+      responseError={responseError}
+      initialScopes={retrySelection?.filter((scope) =>
+        query.data.scopes.includes(scope)
+      )}
+      onFailed={(scopes) => {
+        setRetrySelection(scopes)
+        setResponseError(true)
+        void query.refetch()
+      }}
+    />
+  )
+}
+
+function ConsentForm(props: {
+  params: AuthorizeSearchParams
+  preview: ConsentPreview
+  username: string
+  responseError: boolean
+  initialScopes?: string[]
+  onFailed: (scopes: string[]) => void
+}) {
+  const { t } = useTranslation()
+  const [selectedScopes, setSelectedScopes] = useState(
+    props.initialScopes || props.preview.scopes
+  )
+  const [redirect, setRedirect] = useState<{
+    url: string
+    denied: boolean
+  } | null>(null)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+  const mutation = useMutation({
+    mutationFn: (approve: boolean) =>
+      respondToConsent(props.params, props.preview, approve, selectedScopes),
+    retry: false,
+    meta: { errorToast: false },
+    onSuccess: (result) => {
+      if (mounted.current) setRedirect(result)
+    },
+    onError: () => {
+      if (mounted.current) props.onFailed(selectedScopes)
+    },
+  })
+  if (redirect) return <AuthorizationRedirect {...redirect} />
+
+  const clientURI = safeOAuthWebUrl(props.preview.client.uri || '')
+  const callbackURI = safeOAuthWebUrl(props.params.redirect_uri || '')
+  return (
+    <Card className='w-full max-w-2xl min-w-0'>
+      <CardHeader className='min-w-0 grid-cols-[minmax(0,1fr)]'>
         <CardTitle>{t('Authorize application')}</CardTitle>
-        <CardDescription>
+        <CardDescription className='min-w-0 break-words'>
           {t('"{{name}}" wants to access your account', {
-            name: clientName,
+            name: props.preview.client.name,
           })}
-          {clientDescription ? ` — ${clientDescription}` : ''}
         </CardDescription>
+        {props.preview.client.description && (
+          <p className='text-muted-foreground min-w-0 text-sm break-words'>
+            {props.preview.client.description}
+          </p>
+        )}
+        {callbackURI && (
+          <p className='text-muted-foreground min-w-0 text-sm break-all'>
+            {t('Application address')}
+            {': '}
+            {callbackURI.origin}
+          </p>
+        )}
+        {clientURI && (
+          <a
+            className='text-primary text-sm break-all underline underline-offset-4'
+            href={clientURI.href}
+            target='_blank'
+            rel='noopener noreferrer'
+          >
+            {clientURI.hostname}
+          </a>
+        )}
       </CardHeader>
-      <CardContent className='space-y-4'>
-        <Alert>
-          <AlertTitle>{t('This application will be able to:')}</AlertTitle>
-          <AlertDescription>
-            <ul className='list-inside list-disc space-y-1'>
-              {scopes.map((scope) => (
-                <li key={scope}>
-                  {SCOPE_LABELS[scope]
-                    ? t(SCOPE_LABELS[scope])
-                    : scope}
-                </li>
-              ))}
-            </ul>
-          </AlertDescription>
-        </Alert>
+      <CardContent className='space-y-5'>
+        {props.responseError && (
+          <Alert variant='destructive'>
+            <AlertTitle>{t('Failed to process authorization')}</AlertTitle>
+            <AlertDescription>
+              {t(
+                'The request has been refreshed. Review the permissions before trying again.'
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
+        <ConsentPermissions
+          capabilities={props.preview.capabilities}
+          resources={props.preview.resources}
+          selectedScopes={selectedScopes}
+          disabled={mutation.isPending}
+          onChange={setSelectedScopes}
+        />
         <p className='text-muted-foreground text-xs'>
-          {t('Signed in as')} <strong>{authUser.username}</strong>
+          {t('Signed in as')}{' '}
+          <strong className='break-all'>{props.username}</strong>
         </p>
-        <div className='flex gap-2'>
+      </CardContent>
+      <CardFooter className='flex-col items-stretch gap-3'>
+        <p className='text-muted-foreground text-xs'>
+          {t(
+            'You can reduce or revoke this access later in Authorized applications.'
+          )}
+        </p>
+        <div className='flex flex-wrap gap-2'>
           <Button
+            type='button'
             variant='outline'
             className='flex-1'
-            disabled={submitting}
-            onClick={() => respond(false)}
+            disabled={mutation.isPending}
+            onClick={() => mutation.mutate(false)}
           >
             {t('Deny')}
           </Button>
           <Button
+            type='button'
             className='flex-1'
-            disabled={submitting}
-            onClick={() => respond(true)}
+            disabled={mutation.isPending || selectedScopes.length === 0}
+            onClick={() => mutation.mutate(true)}
           >
             {t('Approve')}
           </Button>
         </div>
-      </CardContent>
+      </CardFooter>
     </Card>
   )
 }

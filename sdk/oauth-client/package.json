@@ -1,0 +1,19 @@
+{
+  "name": "@new-api/oauth-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "New API delegated OAuth client, server payment client and matching local profit calculator",
+  "license": "AGPL-3.0-or-later",
+  "exports": {
+    ".": "./index.mjs",
+    "./profit": "./profit.mjs",
+    "./payments": "./payments.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "example": "node examples/server.mjs",
+    "example:payments": "node examples/payment-server.mjs"
+  },
+  "engines": { "node": ">=22.13" }
+}

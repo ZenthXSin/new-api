@@ -84,6 +84,11 @@ export function SidebarModulesCard() {
           description: t('System data statistics'),
         },
         {
+          key: 'group_availability',
+          title: t('Group Availability'),
+          description: t('Observed health of accessible groups.'),
+        },
+        {
           key: 'token',
           title: t('Token Management'),
           description: t('API token management'),

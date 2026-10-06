@@ -55,15 +55,19 @@ export function useAuthRedirect() {
   /**
    * Redirect to 2FA page
    */
-  const redirectTo2FA = () => {
-    navigate({ to: '/otp', replace: true })
+  const redirectTo2FA = (redirectTo?: string) => {
+    const redirect =
+      sanitizeAuthRedirect(redirectTo, window.location.origin) ?? undefined
+    navigate({ to: '/otp', search: { redirect }, replace: true })
   }
 
   /**
    * Redirect to login page
    */
-  const redirectToLogin = () => {
-    navigate({ to: '/sign-in', replace: true })
+  const redirectToLogin = (redirectTo?: string) => {
+    const redirect =
+      sanitizeAuthRedirect(redirectTo, window.location.origin) ?? undefined
+    navigate({ to: '/sign-in', search: { redirect }, replace: true })
   }
 
   /**

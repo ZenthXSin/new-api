@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	groupavailability "github.com/QuantumNous/new-api/pkg/group_availability"
 	"github.com/QuantumNous/new-api/relay/channel/openrouter"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -118,6 +119,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var toolCount int
 	var usage = &dto.Usage{}
 	var lastStreamData string
+	var pendingStreamData string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
 	seenStreamToolCalls := make(map[string]struct{})
 	var streamFunctionCallNames []string
@@ -126,11 +128,12 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
-		if lastStreamData != "" {
-			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+		if pendingStreamData != "" {
+			if err := HandleStreamFormat(c, info, pendingStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
 				sr.Error(err)
 			}
+			pendingStreamData = ""
 		}
 		if len(data) > 0 {
 			// 对音频模型，保存倒数第二个stream data
@@ -140,8 +143,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 			lastStreamData = data
 			collectStreamFunctionCallNames(data, seenStreamToolCalls, &streamFunctionCallNames)
-			// 首字终点定制:processTokenData 未产出新文本(如 usage-only 事件)
-			// 则标记该事件为空事件,不计入首字响应。
+			// Exclude contentless events from response counts, not first-event timing.
 			beforeLen := responseTextBuilder.Len()
 			if err := processTokenData(info.RelayMode, data, &responseTextBuilder, &toolCount); err != nil {
 				logger.LogError(c, "error processing stream token data: "+err.Error())
@@ -149,6 +151,22 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			}
 			if responseTextBuilder.Len() == beforeLen {
 				sr.MarkEmpty()
+			}
+
+			// Only retain events that need final usage filtering or conversion.
+			// Ordinary deltas must not wait for another upstream event to arrive.
+			var streamResponse dto.ChatCompletionsStreamResponse
+			if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil {
+				usageOnly := streamResponse.Usage != nil && len(streamResponse.Choices) == 0
+				if (info.RelayFormat == types.RelayFormatOpenAI && usageOnly && !info.ShouldIncludeUsage && service.ValidUsage(streamResponse.Usage)) ||
+					(info.RelayFormat != types.RelayFormatOpenAI && (usageOnly || streamResponse.IsFinished())) {
+					pendingStreamData = data
+					return
+				}
+			}
+			if err := HandleStreamFormat(c, info, data, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+				common.SysLog("error handling stream format: " + err.Error())
+				sr.Error(err)
 			}
 		}
 	})
@@ -179,8 +197,8 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	}
 
 	if info.RelayFormat == types.RelayFormatOpenAI {
-		if shouldSendLastResp {
-			_ = sendStreamData(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
+		if pendingStreamData != "" && shouldSendLastResp {
+			_ = sendStreamData(c, info, pendingStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
 		}
 	}
 
@@ -195,7 +213,35 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		info.CountBillableToolCall(dto.BuildInCallFunctionCall, name)
 	}
 
-	HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
+	switch info.RelayFormat {
+	case types.RelayFormatOpenAI:
+		HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
+	case types.RelayFormatClaude:
+		if pendingStreamData != "" || info.SendResponseCount > 0 {
+			// Finalize with a usage-only event when the last delta was already sent.
+			// A retained terminal delta must also carry usage for Claude conversion.
+			finalResponse := helper.GenerateFinalUsageResponse(responseId, createAt, model, *usage)
+			if pendingStreamData != "" {
+				if err := common.UnmarshalJsonStr(pendingStreamData, &finalResponse); err != nil {
+					logger.LogError(c, "error decoding final stream response: "+err.Error())
+					return usage, nil
+				}
+				finalResponse.Usage = usage
+			}
+			finalData, err := common.Marshal(finalResponse)
+			if err != nil {
+				logger.LogError(c, "error encoding final stream response: "+err.Error())
+				return usage, nil
+			}
+			info.SendResponseCount++
+			HandleFinalResponse(c, info, string(finalData), responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
+		}
+	case types.RelayFormatGemini:
+		if pendingStreamData != "" {
+			info.SendResponseCount++
+			HandleFinalResponse(c, info, pendingStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
+		}
+	}
 
 	return usage, nil
 }
@@ -250,6 +296,7 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		}
 	}
 
+	groupavailability.ObserveCacheUsage(c, responseBody)
 	err = common.Unmarshal(responseBody, &simpleResponse)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)

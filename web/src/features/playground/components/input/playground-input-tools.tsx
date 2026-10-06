@@ -30,6 +30,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuGroup,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
@@ -40,9 +41,8 @@ import {
 
 import {
   ATTACHMENT_ACTIONS,
-  getAttachmentActionNotice,
-  getSearchActionNotice,
-} from '../../lib'
+  type AttachmentActionId,
+} from '../../lib/input/input-tool-utils'
 import type { ParameterEnabled, PlaygroundConfig } from '../../types'
 import { PlaygroundParameterPanel } from './playground-parameter-panel'
 
@@ -50,7 +50,8 @@ type PlaygroundInputToolsProps = {
   config: PlaygroundConfig
   disabled?: boolean
   hasMessages?: boolean
-  onClearMessages?: () => void
+  onClearMessages?: () => void | Promise<void>
+  onAttachmentAction: (action: AttachmentActionId) => void
   onConfigChange: <K extends keyof PlaygroundConfig>(
     key: K,
     value: PlaygroundConfig[K]
@@ -67,6 +68,7 @@ export function PlaygroundInputTools({
   disabled,
   hasMessages = false,
   onClearMessages,
+  onAttachmentAction,
   onConfigChange,
   onParameterEnabledChange,
   parameterEnabled,
@@ -74,22 +76,19 @@ export function PlaygroundInputTools({
   const { t } = useTranslation()
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
 
-  const handleFileAction = (action: string) => {
-    const notice = getAttachmentActionNotice(action)
-    toast.info(t(notice.title), {
-      description: notice.description,
-    })
-  }
-
-  const handleSearchAction = () => {
-    const notice = getSearchActionNotice()
-    toast.info(t(notice.title))
-  }
-
-  const handleClearMessages = () => {
-    onClearMessages?.()
-    setClearConfirmOpen(false)
-    toast.success(t('Conversation cleared'))
+  const [clearing, setClearing] = useState(false)
+  const handleClearMessages = async () => {
+    if (clearing) return
+    setClearing(true)
+    try {
+      await onClearMessages?.()
+      setClearConfirmOpen(false)
+      toast.success(t('Conversation cleared'))
+    } catch {
+      toast.error(t('Could not clear the conversation. Please try again.'))
+    } finally {
+      setClearing(false)
+    }
   }
 
   return (
@@ -117,15 +116,17 @@ export function PlaygroundInputTools({
               <p>{t('Attach')}</p>
             </TooltipContent>
             <DropdownMenuContent align='start'>
-              {ATTACHMENT_ACTIONS.map(({ action, icon: Icon, label }) => (
-                <DropdownMenuItem
-                  key={action}
-                  onClick={() => handleFileAction(action)}
-                >
-                  <Icon className='mr-2' size={16} />
-                  {t(label)}
-                </DropdownMenuItem>
-              ))}
+              <DropdownMenuGroup>
+                {ATTACHMENT_ACTIONS.map(({ action, icon: Icon, label }) => (
+                  <DropdownMenuItem
+                    key={action}
+                    onClick={() => onAttachmentAction(action)}
+                  >
+                    <Icon className='mr-2' size={16} />
+                    {t(label)}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
         </Tooltip>
@@ -137,15 +138,18 @@ export function PlaygroundInputTools({
                 aria-label={t('Search')}
                 className='text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
                 disabled={disabled}
-                onClick={handleSearchAction}
-                variant='ghost'
+                aria-pressed={Boolean(config.web_search)}
+                onClick={() => onConfigChange('web_search', !config.web_search)}
+                variant={config.web_search ? 'secondary' : 'ghost'}
               >
                 <GlobeIcon size={16} />
               </PromptInputButton>
             }
           />
           <TooltipContent>
-            <p>{t('Search')}</p>
+            <p>
+              {t(config.web_search ? 'Web search enabled' : 'Search the web')}
+            </p>
           </TooltipContent>
         </Tooltip>
 
@@ -183,7 +187,8 @@ export function PlaygroundInputTools({
           'All playground messages saved in this browser will be removed. This cannot be undone.'
         )}
         confirmText={t('Clear')}
-        handleConfirm={handleClearMessages}
+        handleConfirm={() => void handleClearMessages()}
+        isLoading={clearing}
         open={clearConfirmOpen}
         onOpenChange={setClearConfirmOpen}
         title={t('Clear chat history?')}

@@ -33,6 +33,20 @@ func SetWebRouter(router *gin.Engine, assets WebAssets) {
 			return
 		}
 		c.Header("Cache-Control", "no-cache")
+		setOAuthPageSecurityHeaders(c)
 		c.Data(http.StatusOK, "text/html; charset=utf-8", assets.IndexPage)
 	})
+}
+
+// Consent and hosted confirmations must remain top-level, uncached documents.
+// Headers on their JSON endpoints alone do not protect the browser page.
+func setOAuthPageSecurityHeaders(c *gin.Context) {
+	path := c.Request.URL.Path
+	if path != "/authorize" && path != "/authorize/" && !strings.HasPrefix(path, "/oauth/actions/") && !strings.HasPrefix(path, "/payments/checkout/") {
+		return
+	}
+	c.Header("X-Frame-Options", "DENY")
+	c.Header("Content-Security-Policy", "frame-ancestors 'none'")
+	c.Header("Referrer-Policy", "no-referrer")
+	c.Header("Cache-Control", "no-store")
 }

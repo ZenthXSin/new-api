@@ -71,10 +71,14 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	adaptor.Init(info)
 
 	passThroughGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
+	playgroundResponses, searchErr := playgroundSearchViaResponses(c, info, request, passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled)
+	if searchErr != nil {
+		return searchErr
+	}
 	if info.RelayMode == relayconstant.RelayModeChatCompletions &&
 		!passThroughGlobal &&
 		!info.ChannelSetting.PassThroughBodyEnabled &&
-		service.ShouldChatCompletionsUseResponsesGlobal(info.ChannelId, info.ChannelType, info.OriginModelName) {
+		(playgroundResponses || service.ShouldChatCompletionsUseResponsesGlobal(info.ChannelId, info.ChannelType, info.OriginModelName)) {
 		applySystemPromptIfNeeded(c, info, request)
 		usage, newApiErr := chatCompletionsViaResponses(c, info, adaptor, request)
 		if newApiErr != nil {
@@ -174,6 +178,9 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		}
 
 		logger.LogDebug(c, "text request body: %s", jsonData)
+		if playgroundSearchRequested(c, request) && !playgroundSearchPresent(jsonData, info.ApiType, false) {
+			return playgroundSearchError()
+		}
 
 		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {

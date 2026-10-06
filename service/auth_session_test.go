@@ -32,7 +32,7 @@ func setupAuthSessionTestDB(t *testing.T) *model.User {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.AuthFlow{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.AuthFlow{}, &model.OAuthGrant{}, &model.OAuthAccessToken{}, &model.OAuthRefreshToken{}, &model.OAuthAction{}))
 	model.DB = db
 	common.RedisEnabled = false
 	common.UserSessionActiveLimit = common.DefaultUserSessionActiveLimit
@@ -276,7 +276,25 @@ func TestCleanupAuthArtifactsRemovesOnlyExpiredRecords(t *testing.T) {
 		ExpiresAt: now.Add(time.Minute),
 	}).Error)
 
+	expiredAction := model.OAuthAction{
+		ID: "expired-oauth-action", UserID: 1, ClientID: "cleanup-client", GrantID: 1,
+		AuthVersion: 1, GrantVersion: 1, Operation: "apikey.reveal", Parameters: "{}",
+		ParametersHash: "parameter-hash", ReceiptHash: "receipt-hash", Status: "completed",
+		ExpiresAt: now.Add(-time.Minute).Unix(), ResultCiphertext: "expired-ciphertext",
+	}
+	activeAction := expiredAction
+	activeAction.ID = "active-oauth-action"
+	activeAction.ExpiresAt = now.Add(time.Minute).Unix()
+	require.NoError(t, model.DB.Create(&expiredAction).Error)
+	require.NoError(t, model.DB.Create(&activeAction).Error)
+
 	cleanupAuthArtifacts()
+
+	var actions []model.OAuthAction
+	require.NoError(t, model.DB.Find(&actions).Error)
+	require.Len(t, actions, 1)
+	assert.Equal(t, "active-oauth-action", actions[0].ID)
+	assert.Equal(t, "expired-ciphertext", actions[0].ResultCiphertext)
 
 	var sessionCount int64
 	require.NoError(t, model.DB.Model(&model.UserSession{}).Count(&sessionCount).Error)

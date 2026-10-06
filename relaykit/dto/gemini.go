@@ -447,7 +447,31 @@ type GeminiChatCandidate struct {
 }
 
 type GeminiGroundingMetadata struct {
-	WebSearchQueries []string `json:"webSearchQueries,omitempty"`
+	WebSearchQueries []string               `json:"webSearchQueries,omitempty"`
+	GroundingChunks  []GeminiGroundingChunk `json:"groundingChunks,omitempty"`
+}
+
+type GeminiGroundingChunk struct {
+	Web *GeminiGroundingWeb `json:"web,omitempty"`
+}
+
+type GeminiGroundingWeb struct {
+	URI   string `json:"uri"`
+	Title string `json:"title"`
+}
+
+func (g *GeminiGroundingMetadata) ChatAnnotations() []ChatAnnotation {
+	var result []ChatAnnotation
+	if g != nil {
+		for _, chunk := range g.GroundingChunks {
+			if chunk.Web != nil {
+				if annotation := NewURLCitationAnnotation(chunk.Web.URI, chunk.Web.Title); annotation != nil {
+					result = append(result, *annotation)
+				}
+			}
+		}
+	}
+	return result
 }
 
 type GeminiChatSafetyRating struct {

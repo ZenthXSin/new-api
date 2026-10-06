@@ -10,9 +10,8 @@ import (
 type StreamResult struct {
 	status  *relaycommon.StreamStatus
 	stopped bool
-	// empty marks a data event that carried no actual response content
-	// (e.g. usage-only chunks). Empty events must not count as the first
-	// response ("首字") for first-response-time accounting.
+	// Empty events do not increment ReceivedResponseCount, but still
+	// establish first-response time when they are the first data event.
 	empty bool
 }
 

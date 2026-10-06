@@ -33,6 +33,7 @@ import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
@@ -87,7 +88,7 @@ export function MessageActions({
   const { copiedText, copyToClipboard } = useCopyToClipboard()
   const { guardAction } = useMessageActionGuard(isGenerating)
 
-  const { content, hasContent, isAssistant, isLoading, isUser } =
+  const { content, hasContent, hasText, isAssistant, isLoading, isUser } =
     getMessageActionState(message)
   const isCopied = copiedText === content
 
@@ -108,7 +109,7 @@ export function MessageActions({
   const visibilityClass = getMessageActionsVisibilityClass(alwaysVisible)
   const actions: MessageActionItem[] = []
 
-  if (hasContent) {
+  if (hasText) {
     actions.push({
       className: isCopied ? 'text-green-600' : '',
       icon: isCopied ? Check : Copy,
@@ -119,7 +120,7 @@ export function MessageActions({
     })
   }
 
-  if (isAssistant && hasContent && !isLoading && onToggleSource) {
+  if (isAssistant && hasText && !isLoading && onToggleSource) {
     actions.push({
       icon: FileCode2,
       label: isSourceVisible
@@ -195,24 +196,26 @@ export function MessageActions({
             <span className='sr-only'>{t('Open menu')}</span>
           </DropdownMenuTrigger>
           <DropdownMenuContent align='end' className='w-44'>
-            {actions.map((action) => {
-              const Icon = action.icon
+            <DropdownMenuGroup>
+              {actions.map((action) => {
+                const Icon = action.icon
 
-              return (
-                <DropdownMenuItem
-                  className='min-h-11'
-                  disabled={action.disabled}
-                  key={action.label}
-                  onClick={action.onClick}
-                  variant={action.variant}
-                >
-                  {t(action.label)}
-                  <DropdownMenuShortcut>
-                    <Icon className='size-4' />
-                  </DropdownMenuShortcut>
-                </DropdownMenuItem>
-              )
-            })}
+                return (
+                  <DropdownMenuItem
+                    className='min-h-11'
+                    disabled={action.disabled}
+                    key={action.label}
+                    onClick={action.onClick}
+                    variant={action.variant}
+                  >
+                    {t(action.label)}
+                    <DropdownMenuShortcut>
+                      <Icon className='size-4' />
+                    </DropdownMenuShortcut>
+                  </DropdownMenuItem>
+                )
+              })}
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

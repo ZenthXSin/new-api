@@ -12,7 +12,8 @@ import (
 type OauthProviderSettings struct {
 	Enabled bool   `json:"enabled"`
 	Issuer  string `json:"issuer"`
-	// AccessTokenTTLMinutes controls how long issued access/id tokens live.
+	// AccessTokenTTLMinutes retains the existing configuration key for ID-token
+	// lifetime only. Delegated resource access tokens expire after 15 minutes.
 	AccessTokenTTLMinutes int `json:"access_token_ttl_minutes"`
 }
 
@@ -40,7 +41,9 @@ func (s *OauthProviderSettings) GetIssuer() string {
 	return strings.TrimRight(strings.TrimSpace(s.Issuer), "/")
 }
 
-// GetAccessTokenTTL returns the configured access token lifetime.
+// GetAccessTokenTTL returns the ID-token lifetime. The name and persisted
+// configuration key remain stable for existing installations; resource access
+// tokens use service.OAuthAccessTokenTTL.
 func (s *OauthProviderSettings) GetAccessTokenTTL() time.Duration {
 	minutes := s.AccessTokenTTLMinutes
 	if minutes < minOauthAccessTokenTTLMinutes {

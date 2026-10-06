@@ -48,7 +48,9 @@ import {
   type MessageAlignment,
 } from '../../lib'
 import { getMessageContentStyles } from '../../lib/message/message-styles'
+import { getCurrentVersion } from '../../lib/message/message-utils'
 import type { Message } from '../../types'
+import { MessageAttachments } from './message-attachments'
 import { MessageError } from './message-error'
 import { MessageMetadata } from './message-metadata'
 
@@ -80,6 +82,12 @@ export function PlaygroundMessageContent({
     sources,
   } = getMessageContentState(message, versionContent)
   const isError = isErrorMessage(message)
+  const attachments = getCurrentVersion(message).attachments
+  const hasResponseContent =
+    showMessageContent &&
+    (!isError ||
+      Boolean(message.errorMessage) ||
+      message.errorCode === 'interrupted')
   const isMessageFinal =
     message.status !== MESSAGE_STATUS.LOADING &&
     message.status !== MESSAGE_STATUS.STREAMING
@@ -126,42 +134,37 @@ export function PlaygroundMessageContent({
         </div>
       )}
 
-      {isError && (
-        <>
-          <MessageError message={message} className='mb-2' />
-          <MessageMetadata alignment={alignment} message={message} />
-          {errorActions}
-        </>
-      )}
+      <MessageAttachments attachments={attachments} />
 
-      {!isError && showMessageContent && (
-        <>
-          {isSourceVisible ? (
-            <CodeBlock
-              code={versionContent}
-              className='my-0 group-[.is-assistant]:w-full group-[.is-assistant]:max-w-[78ch]'
-              collapsedLines={24}
-              defaultCollapsed={false}
-              language='markdown'
-              maxExpandedLines={48}
-              showLineNumbers
-              showToolbar
-              title={t('Raw response')}
-            >
-              <CodeBlockCopyButton />
-            </CodeBlock>
-          ) : (
-            <MessageContent
-              variant='flat'
-              className={cn(getMessageContentStyles())}
-            >
-              <Response final={isMessageFinal}>{displayContent}</Response>
-            </MessageContent>
-          )}
-          <MessageMetadata alignment={alignment} message={message} />
-          {actions}
-        </>
+      {hasResponseContent &&
+        (isSourceVisible ? (
+          <CodeBlock
+            code={versionContent}
+            className='my-0 group-[.is-assistant]:w-full group-[.is-assistant]:max-w-[78ch]'
+            collapsedLines={24}
+            defaultCollapsed={false}
+            language='markdown'
+            maxExpandedLines={48}
+            showLineNumbers
+            showToolbar
+            title={t('Raw response')}
+          >
+            <CodeBlockCopyButton />
+          </CodeBlock>
+        ) : (
+          <MessageContent
+            variant='flat'
+            className={cn(getMessageContentStyles())}
+          >
+            <Response final={isMessageFinal}>{displayContent}</Response>
+          </MessageContent>
+        ))}
+      {isError && <MessageError message={message} className='mb-2' />}
+      {(isMessageFinal || hasResponseContent || hasReasoning) && (
+        <MessageMetadata alignment={alignment} message={message} />
       )}
+      {(!isError || hasResponseContent) && actions}
+      {isError && errorActions}
     </div>
   )
 }

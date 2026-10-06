@@ -27,6 +27,8 @@ import {
 } from './section-registry.tsx'
 
 const defaultOperationsSettings: OperationsSettings = {
+  NetworkTrafficEnabled: false,
+  NetworkTrafficDailyBudgetGB: 5,
   DefaultCollapseSidebar: false,
   DemoSiteEnabled: false,
   SelfUseModeEnabled: false,
