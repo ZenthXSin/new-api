@@ -1,5 +1,7 @@
 # New API
 
+![new-api](/web/public/logo.png)
+
 [English](./README.md) · [简体中文](./README.zh_CN.md)
 
 > An independently maintained customization of [New API](https://github.com/QuantumNous/new-api), combining its multi-model API gateway with a browser-based Codex workbench and application services.
