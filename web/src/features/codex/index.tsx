@@ -1714,7 +1714,16 @@ function CodexSession(props: CodexProps & { actor: string }) {
                           group: currentGroup,
                           effort: currentEffort,
                           mode,
+                          ...(running ? { busyAction: 'queue' } : {}),
                         })
+                      }
+                      replyDisabled={
+                        creationBlocked ||
+                        workspace.archived ||
+                        workspace.conversationArchived ||
+                        !ready ||
+                        !modelSupported ||
+                        catalog.isLoading
                       }
                       running={taskRunning}
                       approvals={detail.data?.pendingApprovals ?? []}

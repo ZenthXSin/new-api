@@ -75,6 +75,7 @@ type CodexConversationProps = {
   approvals: CodexApproval[]
   onApprove: (id: string, answer: CodexApprovalAnswer) => Promise<void>
   actionsDisabled?: boolean
+  replyDisabled?: boolean
   scrollToLatestKey?: string | number
   branches?: CodexProjectConversation[]
   conversationId?: string
@@ -491,6 +492,10 @@ function ConversationContent(props: CodexConversationProps) {
                 disabled={
                   props.running || props.actionsDisabled || actionPending
                 }
+                replyDisabled={
+                  (props.replyDisabled ?? props.actionsDisabled) ||
+                  actionPending
+                }
                 onDelete={props.onDelete ? turnActions.remove : undefined}
                 onRetry={props.onRetry ? turnActions.retry : undefined}
               />
@@ -544,6 +549,7 @@ const ConversationTurn = memo(function ConversationTurn(props: {
   laterReplies: string[]
   hasContinued: boolean
   onReply?: (prompt: string) => Promise<void>
+  replyDisabled?: boolean
   branchNavigation?: {
     index: number
     total: number
@@ -668,7 +674,7 @@ const ConversationTurn = memo(function ConversationTurn(props: {
                     item={final}
                     replies={props.laterReplies}
                     hasContinued={props.hasContinued}
-                    disabled={props.disabled}
+                    disabled={props.replyDisabled}
                     onReply={props.onReply}
                   />
                 )}

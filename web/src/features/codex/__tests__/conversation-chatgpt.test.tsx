@@ -659,12 +659,49 @@ describe('Asynchronous questions in assistant messages', () => {
     ).toBeVisible()
   })
 
-  test('busy or read-only conversations keep questions visible with disabled controls', () => {
+  test('a running conversation accepts answers and preserves them across streaming updates', async () => {
+    const user = userEvent.setup()
+    const onReply = vi.fn().mockResolvedValue(undefined)
+    const active = structuredClone(questionThread)
+    active.turns[0].status = 'inProgress'
+    const view = render(
+      <CodexConversation
+        {...defaults}
+        thread={active}
+        running
+        onReply={onReply}
+      />
+    )
+    const answer = screen.getByRole('textbox', {
+      name: 'Your answer: Preferred typeface?',
+    })
+    expect(answer).toBeEnabled()
+    await user.type(answer, 'System font')
+    await user.click(screen.getByRole('radio', { name: 'Dark' }))
+    const updated = structuredClone(active)
+    updated.turns[0].items[1].text += '\nMore details.'
+    view.rerender(
+      <CodexConversation
+        {...defaults}
+        thread={updated}
+        running
+        onReply={onReply}
+      />
+    )
+    expect(answer).toHaveValue('System font')
+    await user.click(screen.getByRole('button', { name: 'Submit answers' }))
+    expect(onReply).toHaveBeenCalledWith(
+      'Which theme?\nDark\n\nPreferred typeface?\nSystem font'
+    )
+    expect(screen.getByText('System font', { selector: 'dd' })).toBeVisible()
+  })
+
+  test('a read-only conversation keeps questions visible with disabled controls', () => {
     render(
       <CodexConversation
         {...defaults}
         thread={questionThread}
-        running
+        actionsDisabled
         onReply={vi.fn()}
       />
     )
@@ -675,6 +712,33 @@ describe('Asynchronous questions in assistant messages', () => {
     expect(
       screen.getByRole('button', { name: 'Submit answers' })
     ).toBeDisabled()
+  })
+
+  test('a running task can accept replies while message mutations remain blocked', async () => {
+    const user = userEvent.setup()
+    const onReply = vi.fn().mockResolvedValue(undefined)
+    render(
+      <CodexConversation
+        {...defaults}
+        thread={questionThread}
+        running
+        actionsDisabled
+        replyDisabled={false}
+        onReply={onReply}
+        onDelete={vi.fn()}
+      />
+    )
+    await user.click(screen.getByRole('radio', { name: 'Light' }))
+    await user.click(screen.getByRole('radio', { name: 'Sans' }))
+    await user.click(screen.getByRole('button', { name: 'Submit answers' }))
+    expect(onReply).toHaveBeenCalledWith(
+      'Which theme?\nLight\n\nPreferred typeface?\nSans'
+    )
+    for (const button of screen.getAllByRole('button', {
+      name: 'Delete message',
+    })) {
+      expect(button).toBeDisabled()
+    }
   })
 })
 
