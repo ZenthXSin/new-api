@@ -285,6 +285,41 @@ func TestBuildTestLogOtherInjectsTieredInfo(t *testing.T) {
 	require.NotEmpty(t, other["expr_b64"])
 }
 
+func TestBuildTestLogOtherPreservesOpenAICacheCreation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-6.1-sol",
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+	}
+	priceData := types.PriceData{CacheCreationRatio: 1.25}
+
+	for _, tc := range []struct {
+		name    string
+		details dto.InputTokenDetails
+		want    int
+	}{
+		{name: "native cache write", details: dto.InputTokenDetails{CacheWriteTokens: 1470}, want: 1470},
+		{name: "legacy cache creation", details: dto.InputTokenDetails{CachedCreationTokens: 1470}, want: 1470},
+		{name: "both aliases count once", details: dto.InputTokenDetails{CacheWriteTokens: 1470, CachedCreationTokens: 1400}, want: 1470},
+		{name: "no cache creation", details: dto.InputTokenDetails{}},
+		{name: "negative cache creation", details: dto.InputTokenDetails{CacheWriteTokens: -1, CachedCreationTokens: -2}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			usage := &dto.Usage{PromptTokens: 1473, CompletionTokens: 19, PromptTokensDetails: tc.details}
+			other := buildTestLogOther(ctx, info, priceData, usage, nil)
+			if tc.want == 0 {
+				assert.NotContains(t, other, "cache_creation_tokens")
+				assert.NotContains(t, other, "cache_write_tokens")
+				return
+			}
+			assert.Equal(t, tc.want, other["cache_creation_tokens"])
+			assert.Equal(t, tc.want, other["cache_write_tokens"])
+			assert.Equal(t, 1.25, other["cache_creation_ratio"])
+		})
+	}
+}
+
 func TestResolveChannelTestUserIDUsesRequestUser(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
