@@ -29,6 +29,8 @@ def main():
     parser.add_argument('--release', required=True)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[2])
+    parser.add_argument('--api-base-image', default='debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a')
+    parser.add_argument('--worker-base-image', help='Optional compatible prebuilt worker image; by default build Dockerfile.workspace')
     parser.add_argument('--max-active', type=int)
     parser.add_argument('--efforts')
     parser.add_argument('--memory-mb', type=int)
@@ -73,7 +75,8 @@ def main():
     run(['go', 'build', '-trimpath', '-ldflags', '-s -w -X github.com/QuantumNous/new-api/common.Version=' + version, '-o', str(binary), '.'], cwd=snapshot, env=environment)
     for name in ('LICENSE', 'NOTICE', 'THIRD-PARTY-LICENSES.md'):
         shutil.copy2(snapshot / name, binary.parent / name)
-    (binary.parent / 'Dockerfile').write_text('''FROM new-api:group-health-10k-zh-20261009
+    (binary.parent / 'Dockerfile').write_text('FROM ' + args.api_base_image + '''
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata libasan8 wget && rm -rf /var/lib/apt/lists/* && update-ca-certificates
 COPY new-api /new-api
 COPY LICENSE NOTICE THIRD-PARTY-LICENSES.md /licenses/
 WORKDIR /data
@@ -84,7 +87,10 @@ ENTRYPOINT ["/new-api"]
     worker_image = 'new-api:codex-worker-' + args.release
     run(['docker', 'build', '--label', 'new-api.codex.release=' + args.release, '-t', api_image, str(binary.parent)])
     worker_dockerfile = output / 'Dockerfile.worker'
-    worker_dockerfile.write_text('FROM new-api:codex-worker-percent-20261006\nCOPY --chmod=755 runtime-vendor/codex /usr/local/bin/codex\nCOPY --chmod=755 runtime-vendor/codex-code-mode-host /usr/local/bin/codex-code-mode-host\nCOPY --chmod=755 runtime-vendor/gh /usr/local/bin/gh\nCOPY --chmod=644 workspace-git.py workspace-process.py migrate-codex-home.py /opt/new-api-codex/\n')
+    if args.worker_base_image:
+        worker_dockerfile.write_text('FROM ' + args.worker_base_image + '\nCOPY --chmod=755 runtime-vendor/codex /usr/local/bin/codex\nCOPY --chmod=755 runtime-vendor/codex-code-mode-host /usr/local/bin/codex-code-mode-host\nCOPY --chmod=755 runtime-vendor/gh /usr/local/bin/gh\nCOPY --chmod=644 workspace-git.py workspace-process.py migrate-codex-home.py /opt/new-api-codex/\n')
+    else:
+        worker_dockerfile.write_text((snapshot / 'codex-runner/Dockerfile.workspace').read_text())
     run(['docker', 'build', '--label', 'new-api.codex.release=' + args.release, '-t', worker_image, '-f', str(worker_dockerfile), str(snapshot / 'codex-runner')])
     archive = output / 'runner.tar.gz'
     with tarfile.open(archive, 'w:gz') as bundle:

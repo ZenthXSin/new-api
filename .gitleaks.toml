@@ -1,0 +1,54 @@
+title = "New API source secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Explicit fake GitHub credentials used by isolated runtime tests"
+condition = "AND"
+paths = ['''^codex-runner/(?:runtime\.test\.mjs|test/github-credentials\.test\.mjs)$''']
+regexes = ['''^gho_(?:fixture_PRIVATE|PRIVATE_FIXTURE)_1234567890$''']
+
+[[allowlists]]
+description = "Token lookup fixtures contain deliberately fake token values"
+condition = "AND"
+paths = ['''^controller/token_test\.go$''']
+regexes = ['''^(?:abcd1234efgh5678|ijkl1234mnop5678|qrst1234uvwx5678|yzab1234cdef5678)$''']
+
+[[allowlists]]
+description = "Saved variable name in payment tests, not a string credential"
+condition = "AND"
+paths = ['''^service/wechatpay_test\.go$''']
+regexes = ['''^previousAPIV3Key$''']
+
+[[allowlists]]
+description = "systemctl command line property name"
+condition = "AND"
+paths = ['''^scripts/codex-release/setup-frp\.py$''']
+regexes = ['''^--property=MainPID$''']
+
+[[allowlists]]
+description = "Published model request identifiers required by the provider API"
+condition = "AND"
+paths = ['''^relay/channel/task/jimeng/adaptor\.go$''']
+regexes = ['''^jimeng_(?:vgfm_t2v_l20|v30_pro|ti2v_v30_pro)$''']
+
+[[allowlists]]
+description = "Public Auth-Version response marker, not an authentication secret"
+condition = "AND"
+paths = ['''^middleware/auth\.go$''']
+regexes = ['''^864b7076dbcd0a3c01b5520316720ebf$''']
+
+[[allowlists]]
+description = "Explicit invalid SSH key fixture for connection form validation"
+condition = "AND"
+paths = ['''^web/src/features/codex/__tests__/ssh-connections\.test\.tsx$''']
+regexTarget = "line"
+regexes = [''''-----BEGIN OPENSSH PRIVATE KEY-----\\nfixture\\n-----END OPENSSH PRIVATE KEY-----',?''']
+
+[[allowlists]]
+description = "PEM delimiter removal code; no encoded private key is present"
+condition = "AND"
+paths = ['''^relay/channel/vertex/service_account\.go$''']
+regexTarget = "secret"
+regexes = ['''^-----BEGIN PRIVATE KEY-----", ""\)\n\s*privateKeyPEM = strings\.ReplaceAll\(privateKeyPEM, "-----END PRIVATE KEY-----$''']

@@ -15,14 +15,14 @@ import tempfile
 import time
 import urllib.request
 
-COMPOSE = Path('/etc/new-api/production-compose.private.json')
-PROJECT = 'new-api'
-RUNNER = Path('/opt/new-api-codex')
-DATA = Path('/var/lib/new-api-codex')
-KEY = Path('/etc/new-api-codex/runner.key')
-RUNNER_URL = 'http://172.31.241.1:7310'
-SERVICE = 'new-api-codex.service'
-DROPIN = Path('/etc/systemd/system/new-api-codex.service.d/90-codex-release.conf')
+COMPOSE = Path(os.environ.get('CODEX_RELEASE_COMPOSE', '/etc/new-api/compose.private.json'))
+PROJECT = os.environ.get('CODEX_RELEASE_PROJECT', 'new-api')
+RUNNER = Path(os.environ.get('CODEX_RELEASE_RUNNER', '/opt/new-api-codex'))
+DATA = Path(os.environ.get('CODEX_RELEASE_DATA', '/var/lib/new-api-codex'))
+KEY = Path(os.environ.get('CODEX_RELEASE_KEY', '/etc/new-api-codex/runner.key'))
+RUNNER_URL = os.environ.get('CODEX_RELEASE_RUNNER_URL', 'http://172.31.241.1:7310')
+SERVICE = os.environ.get('CODEX_RELEASE_SERVICE', 'new-api-codex.service')
+DROPIN = Path(os.environ.get('CODEX_RELEASE_DROPIN', '/etc/systemd/system/new-api-codex.service.d/90-codex-release.conf'))
 ACTIVE = {'starting', 'running', 'waiting_approval', 'queued', 'inProgress'}
 
 

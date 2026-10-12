@@ -308,57 +308,15 @@ runner 以 root systemd 服务管理 Docker；服务配置文件系统只读保�
 
 ## 升级、备份与回滚
 
-2026-10-07 重做以 `/srv/new-api/codex-gui-slider-20261007/source` 为原版基线，在 `/srv/new-api/codex-chatgpt-rebuild-20261007/source` 工作副本中修改。备份必须区分 UI 源码/构建、runner 程序与状态格式、以及项目/原生 home/授权数据；会话 Markdown/JSON 或项目 ZIP 均不能代替完整数据备份。正式网页通过 Go `go:embed web/dist` 构建，更新前端通常需要同步构建并替换应用镜像。新发布的完成与回退命令只能引用本轮实际产物；以下内容保留的是 2026-10-06 的发布历史。
+成套构建与发布流程见 [发布说明](RELEASE.zh-CN.md)。备份应覆盖应用数据库、Runner 配置及整个数据目录，并保存程序、镜像和文件权限。项目 ZIP 与会话导出不包含用户 home、依赖缓存和服务配置，不能替代完整备份。
 
-本轮 UI 发布目录为 `/srv/new-api/codex-zcode-ui-20261006/`，源码位于 `source/`。已上线的用户环境版本保存在 `/srv/new-api/codex-user-environment-20261006/`；更早的项目容器版本为 `/srv/new-api/codex-admin-20261005/`。不同目录的镜像、数据布局和验收证据需要对应使用。
-
-此次 UI 发布更新 New API 应用构建，保留已部署的 runner、用户容器、网络规则和数据布局，不再次搬迁生产项目。发布前保存当前 compose、应用镜像及健康基线，排空现有请求后仅替换 New API 应用，随后核对公开 HTML / JavaScript / CSS 资源与构建一致。具体发布脚本及结果以本轮发布目录记录为准。
-
-UI 失败恢复可以退回上一应用镜像 `new-api:codex-user-environment-20261006`，不恢复旧项目快照、不降级 runner、不回退账号、订单或额度数据库。要回到 2026-10-05 的“每项目一个容器”旧版则属于数据布局回退，不能当作 UI 回退操作。
-
-完整备份应覆盖 `/var/lib/new-api-codex/`、`/etc/new-api-codex/`、运行镜像和程序版本，保留所有者及权限。备份前让个人环境停止写入或使用一致性快照；项目 ZIP 不包括 home、依赖缓存和服务配置，不能替代完整灾备。恢复时使用相互匹配的程序与整组数据，核对用户 ID、项目与 home 的 `1000:1000` 所有者和密钥文件 `0600` 权限，启动后不自动重放任务。
-
-上一环境版本的完整迁移备份为 `/srv/new-api/codex-user-environment-20261006/private/codex-data-before.tar.gz`，清单为同目录 `codex-data-before.manifest.json`，备份 SHA-256 为 `275a7c01691539c7c960c2bfb3ded5661f76b56a2476b6abe6d8a08a76d0674a`。该发布目录的 `deploy-runner.py --rollback` 只用于当时维护窗口中、升级后尚未产生新任务的失败恢复；现在直接还原这个历史快照会丢失后续内容，不作为本轮 UI 回退命令。需要回退旧布局时，先另行保存当前完整数据并核对新增会话和文件。
-
-维护时可使用 `systemctl status new-api-codex new-api-codex-network` 和 `journalctl -u new-api-codex`。重启 runner 会中断执行，先在页面停止任务并等待落盘；不要手动删除容器挂载目录来解决保存失败或磁盘不足。
-
-## 发布与验收记录
-
-### 已部署的每用户 Docker 版本
-
-`codex-user-environment-20261006` 于北京时间 2026-10-06 12:40:50 完成部署，12:41:14 通过公开站点验收，应用镜像 ID 为 `sha256:41e869a822e6491a3132784ca36824a709fd0d4cdb2319c4af5bd18276a9f44c`。`final-health.json` 确认公开入口、HTML / 主资源、未登录保护、runner 服务与 Nginx 恢复正常；六个其他服务在该发布窗口保持原容器及启动时间。
-
-生产原有 4 个项目归入用户 ID 1 的个人环境，项目 UUID、3 条已有原生线程及一条未建立线程的项目保留。`verification/runner-deployment.json` 记录项目文件和原生 home、状态与会话历史保持一致，唯一环境 `new-api-codex-user-1` 已启动后休眠；该检查没有发送模型请求。对应迁移备份与清单见上节。
-
-该版本前端 73 项、runner 管理 30 项、容器与迁移 23 项测试通过，真实 Docker / Codex `0.160.0` 的 38 项检查覆盖同用户复用、不同用户隔离、Code / Ask、删除保留、停止进程及旧会话恢复。英文桌面与中文深色手机共 106 项浏览器检查通过，0 页面和控制台错误；真实 runner 使用本地 Responses fixture，付费上游调用为 0。证据均保存在 `/srv/new-api/codex-user-environment-20261006/verification/`，是已部署环境版本的记录，不替代本轮 ZCode UI 验收。
-
-开发期间 Sub2API 曾于 UTC 02:39:35 自行重启一次，未由该发布触发。该版原始基线与部署前复核差异一并保留，以上“其他服务未变”结论仅针对其正式发布窗口。
-
-### 历史记录：2026-10-06 ZCode 源码复用版本
-
-本轮已于北京时间 2026-10-06 19:54:00 部署，20:00:12 完成公网验收。正式应用镜像为 `new-api:codex-zcode-ui-20261006`，ID 为 `sha256:321c04cc801f1da05eb6130d15dcc2aa59bfbea05913c4990ff56b298b1843b8`，发布记录为本轮目录中的 `artifact.json`、`deployment.json`、`deployment-drain.json`、`final-health.json`。
-
-11 个测试文件、86 项前端测试通过，TypeScript、目标文件 lint 和生产构建通过，证据为 `verification/frontend-verification.json`。公开 HTML、主资源 `static/js/index.255afc911b.js` 及两份页面 CSS 均与该构建一致；主资源 SHA-256 为 `d3a01e7d960eb350d30b39e47fd1dd454ceb15d08bd6a7a1781d43cb72ac05e9`。
-
-最终实际镜像在隔离 New API、真实登录、runner、Docker 和 Codex App Server 上完成中文桌面 67 项、中文深色手机 67 项，共 134 项浏览器检查。覆盖项目创建、环境启动／休眠、多项目占用、任务执行与中断、审批入口、恢复会话、文件编辑／冲突／撤销重做／保存快捷键、真实补丁行号、导出，以及 Markdown 的增量与静态恢复、中文列表和复选框、表格、行内与块公式、代码高亮、复制、换行、长内容不溢出。0 页面错误、0 控制台错误；模型上游使用本地 Responses fixture，0 付费调用。该结果不表示进行过所有生产模型的收费端到端测试。证据为 `verification/browser-acceptance.json` 及两份对应视口 JSON／截图。
-
-发布只替换 New API 应用，runner 程序和配置保持原指纹，未执行数据迁移；六个其他服务在本轮维护窗口保持原容器与启动时间。请求排空后升级，Nginx 原配置已恢复；公开 Codex、分组可用性及 OAuth 授权记录相关受保护接口对未登录请求返回 401。上一用户环境迁移的 4 项目文件及会话保留证据见前节，本轮没有把历史迁移记录冒充再次迁移检查。
-
-隔离站实际交互记录 `verification/hands-on.json` 确认通过页面创建项目、提交 Markdown 任务、观察增量与完成渲染、代码换行、桌面侧栏、手机抽屉与创建弹窗。没有页面错误或付费模型调用；点击复制动作已执行，但该人工过程没有验证无头浏览器的剪贴板写入权限，不据此宣称剪贴板结果已经人工核实。最终镜像的自动浏览器检查另行实际核验代码复制内容，记录在上述 134 项结果中；上一版 106 项结果没有计入本轮统计。
-
-本轮七语言各补齐 9 条新增展示文案，238 个源／动态引用键检查通过，无缺项或插值差异，动态问候登记到 `web/src/i18n/static-keys.ts`，旧译文保持不变。检查脚本及结果位于本轮 `docs/verify-i18n.py` 和 `docs/i18n-verification.json`，覆盖源键、动态键和插值一致性；这不等于每种语言都完成浏览器验收。
-
-源码许可检查结果位于本轮 `docs/license-verification.json`：保留的 ZCode LICENSE 与上游 NOTICE 均与固定提交原文哈希一致，AI Elements 和 shadcn 的相关复制声明原样保存。第三方完整来源、各模块适配和 New API 原有归属见 vendor 目录；正式构建在 `/licenses/zcode/` 提供许可证、上游 NOTICE、相关复制声明和来源说明。公开站点的 LICENSE、NOTICE.md、COPIED-SOURCE-NOTICES.md 和 README.md 四份文件均已核对哈希，证据为 `verification/public-license-check.json`。
+维护前等待全部会话、待审批和排队消息结束；不要用历史数据快照覆盖已产生的新任务。回滚应使用对应发布包的事务记录，并核对应用与 Runner 版本兼容性。
 
 ## 文档与参考
 
-本文件为当前源码说明。2026-10-06 版本曾同步至 `docs/codex/README.zh-CN.md`，该外部副本并未因本次源码更新自动同步。已有 OAuth SDK 和历史压缩包是独立产物；只读审计 `private-review-report` 也属于历史记录，不能代替当前实现与验收结果。
-
 - [Codex App Server](https://developers.openai.com/codex/app-server/)
 - [Codex SDK](https://developers.openai.com/codex/sdk/)
-
-本项目使用固定版本协议及实际运行测试验证集成，引用官方资料不替代本项目的验收证据。
-
+- [公开源码与私有配置](../open-source-security.zh-CN.md)
 
 ## Codex 管理与订阅试运行
 

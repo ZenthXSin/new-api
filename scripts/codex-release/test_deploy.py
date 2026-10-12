@@ -3,12 +3,40 @@
 import contextlib
 import io
 import json
+import os
+import runpy
 from pathlib import Path
 import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
 import deploy
+
+
+class DeploymentConfigurationTests(unittest.TestCase):
+    def test_public_defaults_do_not_depend_on_a_private_installation(self):
+        with patch.dict(os.environ, {}, clear=True):
+            settings = runpy.run_path(str(Path(deploy.__file__)))
+        self.assertEqual(settings['COMPOSE'], Path('/etc/new-api/compose.private.json'))
+        self.assertEqual(settings['PROJECT'], 'new-api')
+
+    def test_explicit_installation_settings_override_each_public_default(self):
+        environment = {
+            'CODEX_RELEASE_COMPOSE': '/srv/example/compose.private.json',
+            'CODEX_RELEASE_PROJECT': 'example-installation',
+            'CODEX_RELEASE_RUNNER': '/srv/example/runner',
+            'CODEX_RELEASE_DATA': '/srv/example/data',
+            'CODEX_RELEASE_KEY': '/srv/example/runner.key',
+            'CODEX_RELEASE_RUNNER_URL': 'http://127.0.0.1:17310',
+            'CODEX_RELEASE_SERVICE': 'example-codex.service',
+            'CODEX_RELEASE_DROPIN': '/srv/example/release.conf',
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            settings = runpy.run_path(str(Path(deploy.__file__)))
+        for name in ['COMPOSE', 'RUNNER', 'DATA', 'KEY', 'DROPIN']:
+            self.assertEqual(settings[name], Path(environment['CODEX_RELEASE_' + name]))
+        for name in ['PROJECT', 'RUNNER_URL', 'SERVICE']:
+            self.assertEqual(settings[name], environment['CODEX_RELEASE_' + name])
 
 
 class DeploymentTransactionTests(unittest.TestCase):

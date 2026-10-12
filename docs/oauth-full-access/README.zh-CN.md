@@ -18,39 +18,25 @@ OAuth 全功能开放平台与为外部软件收款的应用支付功能已上�
 
 ## 2. 文件、入口和运行条件
 
-| 项目 | 位置 |
+| 功能 | 路径 |
 | --- | --- |
-| 本中文总文档 | `docs/oauth-full-access/README.zh-CN.md`，链接到 `docs/oauth-full-access/README.zh-CN.md` |
-| 当前已上线源代码 | `/srv/new-api/playground-markdown-fix-20261004/source` |
-| 上一生产基线源代码 | `/srv/new-api/playground-complete-20261004/source` |
-| 仓库内同步文档 | `docs/oauth-full-access/README.zh-CN.md` |
 | SDK 使用说明 | `sdk/oauth-client/README.md` |
-| 应用收款服务端 SDK | `sdk/oauth-client/payments.mjs` |
-| 软件会员收款示例 | `sdk/oauth-client/examples/payment-server.mjs` |
-| 应用收款接入说明 | `docs/oauth-full-access/payments.md` |
 | 零依赖 JavaScript SDK | `sdk/oauth-client/index.mjs` |
-| 外部接入示例 | `sdk/oauth-client/examples/server.mjs` |
+| 应用收款 SDK | `sdk/oauth-client/payments.mjs` |
+| 接入示例 | `sdk/oauth-client/examples/server.mjs` |
+| 软件会员收款示例 | `sdk/oauth-client/examples/payment-server.mjs` |
 | 利润计算 SDK | `sdk/oauth-client/profit.mjs` |
-| 利润计算详细说明 | `docs/oauth-full-access/profit.md` |
-| 全路由机器目录 | `docs/oauth-full-access/routes.json` |
-| 可读路由目录 | `docs/oauth-full-access/routes.md` |
-| 固定托管操作与参数 | `docs/oauth-full-access/actions.json` |
-| 能力机器目录 | `docs/oauth-full-access/capabilities.json` |
+| 路由及能力目录 | `docs/oauth-full-access/routes.json`、`capabilities.json` |
+| 固定托管操作 | `docs/oauth-full-access/actions.json` |
 | OpenAPI 授权索引 | `docs/oauth-full-access/openapi.authorization.json` |
-| 原业务 DTO 文档 | `docs/openapi/api.json`、`docs/openapi/relay.json` |
-| 生成器 | `docs/oauth-full-access/generate/main.go` |
-| 首次 OAuth 完整验收证据 | `/srv/new-api/oauth-full-access-20261002/` 与其 `verification/` |
-| OAuth 早期发布证据 | `/srv/new-api/oauth-final-20261003/`、`/srv/new-api/oauth-complete-20261003/` |
-| 当前发布与验证证据 | `/srv/new-api/playground-markdown-fix-20261004/` |
-| 操练场完整功能首次发布证据 | `/srv/new-api/playground-complete-20261004/` |
-| 支付首次发布完整证据 | `/srv/new-api/app-payments-20261003/` |
-| 操练场完整操作说明 | `docs/playground/README.zh-CN.md`、`docs/playground/README.zh-CN.md` |
+| 目录生成器 | `docs/oauth-full-access/generate/main.go` |
+| 操练场说明 | `docs/playground/README.zh-CN.md` |
 
-SDK不需要安装第三方npm依赖，使用fetch、Web Crypto与Web Streams。测试及利润代码生成器使用Node.js 22.13或更高版本，本次环境为Node.js 24.21.0。SDK源代码沿用项目AGPL许可及QuantumNous版权说明。
+SDK 使用 fetch、Web Crypto 与 Web Streams，不需要额外 npm 依赖。运行环境和私有发布记录由安装方管理。
 
 ## 3. 管理员如何启用和注册应用
 
-本站当前已启用服务。其他部署由超级管理员打开 `/system-settings/auth/oauth-provider`，在 OAuth 提供方设置中启用服务，issuer填写对外可访问的固定地址，例如 `https://你的NewAPI域名/oidc`。发行者必须与客户端配置及发现文档完全一致。反向代理应把 `/oidc/*`、`/api/oauth2/*` 和业务API路由转发到同一站点。已启用客户端登记回调的Web origin可跨域调用API，使用Bearer且不带cookies，CORS覆盖PATCH与支持的模型SDK自定义headers；任意未登记来源不会自动获准。
+由超级管理员打开 `/system-settings/auth/oauth-provider`，在 OAuth 提供方设置中启用服务，issuer填写对外可访问的固定地址，例如 `https://你的NewAPI域名/oidc`。发行者必须与客户端配置及发现文档完全一致。反向代理应把 `/oidc/*`、`/api/oauth2/*` 和业务API路由转发到同一站点。已启用客户端登记回调的Web origin可跨域调用API，使用Bearer且不带cookies，CORS覆盖PATCH与支持的模型SDK自定义headers；任意未登记来源不会自动获准。
 
 超级管理员创建客户端时配置名称、用途、精确回调地址、公共或机密类型、允许申请的具体scope以及是否启用。自有应用与第三方应用使用同一套权限执行逻辑，没有通过“自有”标签绕过用户同意或角色检查。
 
@@ -202,72 +188,11 @@ OAuth校验发生在请求入口，不逐SSE片段请求远程OAuth服务器。�
 
 发布前应完成应用二进制、前端、SQLite/MySQL/PostgreSQL迁移与权限回归，生成路由目录，并备份数据库及compose/env。运行中的MySQL/Redis不因应用镜像发布重建。OAuth启用配置与应用注册属于站点状态，镜像部署并不意味着已经为第三方创建了客户端。
 
-## 11. 发布、回退与验收记录
+## 11. 发布、回退与验收
 
-### 当前发布：2026-10-04 19:32操练场Markdown修复
+部署前备份应用数据库、配置、签名密钥和 webhook 密钥。程序版本及数据库格式应配套恢复；应用回退不等于撤销 OAuth 授权，也不应覆盖已生成的订单、事件或余额。
 
-当前版本为 `playground-markdown-fix-20261004`，源码 `/srv/new-api/playground-markdown-fix-20261004/source`，镜像 `new-api:playground-markdown-fix-20261004`，ID `sha256:4da116137c4f363975e8548da174cf64e67375e0db322d238324da37396bb5e3`。北京时间19:32:39部署、19:32:42本机与公网版本、issuer、S256 PKCE、匿名保护和页面安全响应头通过，7容器健康。前端资源 `static/js/index.159e4fa041.js` 的SHA-256为 `116d2953bfa3bcc4b16f3f3c4896da3d53a70c0e0d5d15afc757de5a2d225e13`，本机与公网均与构建一致。
-
-本轮长回复超过20000字符仍保持Markdown；代码围栏及代码内think/消息标签保留，真实推理中的未闭合反引号不会隐藏后续回答；四种明确分隔符公式使用KaTeX，无效或未闭合公式保留源码。详细行为与限制见 `docs/playground/README.zh-CN.md`。冻结实现15个文件仅前端，后端、SDK和机器目录保持；正式文档在发布确认后同步。前端44文件262项、TypeScript/lint/format/构建、桌面与手机浏览器34项、新镜像7组OAuth真实HTTP和带数据二次启动通过。浏览器使用本地响应fixture，没有真实模型请求；本轮没有重跑下方历史支付或三库验收。
-
-本次仅切换New API应用，无新增数据库表结构迁移或数据库/Redis备份，保留此前发布备份，不能将旧备份当作本次发布时点快照。旧连接退出后留出12秒批写窗口，观察到1次开始和1次完成、无批写错误，Nginx原配置恢复，数据库与Redis保持。证据均在 `/srv/new-api/playground-markdown-fix-20261004/`：`artifact.json`、`source-verification.json`、`web-tests.log`、`web-verification.json`、`browser-verification.json`、`sdk-http-acceptance.json`、`image-health.json`、`deployment.json`、`final-health.json` 和 `deployment-drain.json`。2026-10-03支付SDK及其旧压缩包均未修改。
-
-直接上一镜像 `new-api:playground-complete-20261004` 支持同一IndexedDB历史格式、opaque OAuth和应用支付。回退至此会恢复旧Markdown渲染行为，不等于撤销授权或删除订单/本地历史；无需为此清理浏览器数据库或恢复旧业务余额。更早版本的限制见下方历史记录。
-
-### 历史发布：2026-10-04 11:29操练场补全
-
-当时版本为 `playground-complete-20261004`，源码 `/srv/new-api/playground-complete-20261004/source`，镜像 `new-api:playground-complete-20261004`，ID `sha256:f587847c7d1dcb06a59e3e53d38873a1db6c5e50e29f67664c0f165fcb009585`。北京时间11:29:10部署、11:29:47本机与公网健康检查通过，7容器健康，MySQL/Redis等服务未重启。前端资源 `static/js/index.cd6cd00288.js` 与构建哈希一致。
-
-该次完整Go测试/vet、前端34文件194项、发布前浏览器76项及原OAuth/支付隔离真实HTTP回归均通过；补充繁中暗色手机后，最终浏览器114项通过。没有新增OAuth路由与scope，SDK代码未变，原2026-10-03支付SDK压缩包保留原发布内容。证据见 `/srv/new-api/playground-complete-20261004/` 的 `go-verification.json`、`web-verification.json`、`browser-verification.json`、`verification/playground-browser-final-summary.json`、`sdk-http-acceptance.json`、`payment-http-acceptance.json`、`payment-redis-http-acceptance.json`、`deployment.json`、`final-health.json`、`playground-live-health.json`、`backup-info.json` 和 `deployment-drain.json`。
-
-当时的上一镜像 `new-api:app-payments-20261003` 同时支持opaque OAuth和应用支付。恢复此更早应用版本不等于撤销所有授权或删除支付数据；仍需先处理在途请求与确认数据库兼容。新版操练场的IndexedDB本地历史不会被该旧UI读取，回退前按需导出。下述更早availability版本没有应用支付的限制，属于支付首次发布的历史回退说明。
-
-### 历史发布：2026-10-03应用支付
-
-当时上线版本为 `app-payments-20261003`，源码与证据目录为 `/srv/new-api/app-payments-20261003`，部署时间为北京时间 2026-10-03 20:32:55，最终健康检查为 2026-10-03 20:33:16。镜像 `new-api:app-payments-20261003`，ID 为 `sha256:250d657d7a37efc61e3cc2fc149c8c64aadbd499d6533bdc0678b6bf4600e247`，前端主资源为 `static/js/index.5f6c918f8e.js`。本机与公网版本、issuer、S256 PKCE、匿名保护、OAuth/收银台页面安全响应头和主 JavaScript SHA-256 一致，7 个服务容器全部 healthy。此次仅切换 New API 应用，MySQL、Redis、Sub2API 和其他数据库服务未重启。发布前已保存 MySQL 数据库备份并核对 gzip 完整性；本轮没有另行制作 Redis 快照。
-
-下表相对路径均在 `/srv/new-api/app-payments-20261003/`。早期失败日志保留用于追溯；表中指向最终通过的汇总，不能用同目录第一次失败结果替代。
-
-| 范围 | 最终结果 | 证据 |
-| --- | --- | --- |
-| 完整 Go 质量检查 | 全量 go test 与 go vet 通过 | `go-verification.json` |
-| 支付控制器与认证边界 | 5 组真实 HTTP 集成；跨应用/用户/订单、nonce/JTI、严格 JSON、Root hosted 操作及余额报价边界通过 | `controller-payment-review-zh.md`、`controller-payment-tests.log`、`controller-payment-boundaries.log` |
-| 渠道与钱包交叉 | Stripe/微信验签、Epay 分流、付款/退款恢复、订阅余额交叉组合通过；没有真实商户扣款 | `provider-subscription-final.log` |
-| 三库迁移 | SQLite 3.50.4 / MySQL 8.4.11 / PostgreSQL 18.6 fresh、升级与二次迁移通过，7 张新增表和已有值保留 | `payment-db-controller-migration-results.json` |
-| 三库账务 | 余额幂等、全额退款、并发、持久隔离和恢复测试三库通过 | `payment-db-accounting-verified-results.json` |
-| 首次缓存初始化并发补验 | 最后增加的首次 mirror 竞争用例在 MySQL / PostgreSQL 独立通过；SQLite 已含最终完整回归 | `payment-db-final-race-results.json` |
-| SDK 单元与契约 | 48 项通过：原 OAuth/利润 32 项，新增支付/验签/持久发货 16 项 | `sdk-tests.log` |
-| OAuth 新镜像真实 HTTP | 7 组通过；普通用户 19 scope / 248 路由 / 23 操作，Root 46 / 460 / 44，精确匹配机器目录 | `sdk-http-acceptance.json` |
-| 支付新镜像真实 HTTP | SQLite 与 SQLite+Redis 各 4 组：Basic、跨秒幂等、真实会话确认、一次扣款/退款、隔离和 outbox | `payment-http-acceptance.json`、`payment-redis-http-acceptance.json` |
-| 镜像生命周期 | 三组空库启动、匿名保护、真实流程与有数据二次启动通过 | `image-health.json`、`payment-image-health.json`、`payment-redis-image-health.json` |
-| 前端回归与构建 | 14 文件 / 137 项，TypeScript、目标 lint/format、生产构建通过；81 条新增文案七语言补齐 | `frontend-payment-report.md`、`web-payment-tests.log` |
-| 浏览器最终产物 | 英文桌面与中文手机各 18 项，共 36 项，无运行异常；后端为本地 fixture | `verification/payment-desktop-browser.json`、`verification/payment-mobile-browser.json` |
-| 机器目录 | 46 项能力、460 条路由、44 个托管操作，与实际注册匹配 | `sdk-catalog-generation.log`、`source/docs/oauth-full-access/*.json` |
-| 发布与公网健康 | 当前版本、本机/公网协议、资源与服务健康通过 | `deployment.json`、`final-health.json` |
-| 发布切换 | 旧连接全部退出后留 12 秒批写窗口，2 次批写开始/完成匹配、无错误，Nginx 原配置恢复 | `deployment-drain.json` |
-| 启动日志 | 钱包缓存初始化、panic、迁移和支付 worker 错误均为 0 | `startup-review.json` |
-| 发布前数据库备份 | gzip 完整性验证通过，备份为私有数据 | `backup-info.json` |
-
-外部渠道以本地固定数据、签名测试和 mock 验证；SDK 镜像验收只对空白可丢弃实例写入测试账号与额度。通知测试目标固定为被 IP 防护拦截的 localhost，没有真实商户支付或通知送达。这些证据不能等同于全部 460 条业务均进行了真实上游或真实付款端到端验收。
-
-历史发布：`/srv/new-api/oauth-complete-20261003/` 在 10:27 发布了渠道诊断脱敏、PostgreSQL JSON 修复和完整 OAuth，证据包括其 `go-verification.json`、`oauth-db-channel-fix-results.json`、`sdk-http-acceptance.json` 与 `verification/browser-final-summary.json`（300 项旧版浏览器断言）。随后 `/srv/new-api/availability-invalid-request-20261003/` 在 11:10 修复无效请求对分组健康统计的污染，证据见其 `handoff.md`、`deployment.json` 和 `final-health.json`。这些是历史基线证据，不与本轮 36 项支付浏览器结果混算。
-
-常用本地验证命令（当前发布源）：
-
-```sh
-cd /srv/new-api/playground-markdown-fix-20261004/source
-go run ./docs/oauth-full-access/generate
-node --test sdk/oauth-client/test/*.test.mjs
-node sdk/oauth-client/scripts/update-profit.mjs --check
-# 两个脚本分别使用独立的全新可丢弃 loopback 实例。
-# 禁止连接生产数据库、上游或已有 Root 的实例。
-NEW_API_TEST_URL=http://127.0.0.1:3198 node sdk/oauth-client/examples/verify-isolated.mjs
-NEW_API_TEST_URL=http://127.0.0.1:3199 node sdk/oauth-client/examples/verify-payments-isolated.mjs
-```
-
-2026-10-03支付首次发布前保留的上一镜像为 `new-api:availability-invalid-request-20261003`，数据库备份和运行配置属于私有运维资料，不得复制进公开仓库或 SDK 压缩包。上一版支持本次 opaque OAuth，回退应用镜像不等于撤销全部 OAuth 授权；只有进一步退到引入 opaque 之前的旧认证版本才不能识别这些 token。
-
-上一版没有新应用支付 API 与钱包恢复 worker。一旦已经发生真实应用订单，不能把直接切回旧镜像视作完整支付恢复方案：应先停止新应用收款，保留数据库和 Redis 快照，核对 pending/refunding、待投递事件和钱包 guard，并按实际账务状态制定恢复步骤。不要删新增表、清理 guard 或把旧数据库余额写回缓存。恢复旧备份会影响备份之后的交易，必须停写并核对时点。余额故障的具体语义见第 17 节。
+SDK 与 HTTP 验收脚本应连接新建的可丢弃实例，使用测试客户端和本地 fixture，避免连接生产数据库或真实支付渠道。部署地址、镜像 ID、证据目录和回滚记录保存在各安装环境的私有发布目录，公开源码不包含个人部署清单。
 
 ## 12. 常见问题
 

@@ -47,3 +47,21 @@ node_modules
 /codex-runner/runtime-vendor/
 __pycache__/
 *.pyc
+
+# Installation secrets, certificates, runtime state, and private release records.
+.env*
+!.env.example
+!.env.*.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.private.*
+auth.json
+.codex/
+.ops-backups/
+docker-compose.production.yml
+/certificate.pem
+/deployment/
+/validation/
+/releases/

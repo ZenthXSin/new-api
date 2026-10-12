@@ -1,6 +1,6 @@
 # New API 操练场完整功能说明
 
-文档日期：2026-10-04。Markdown修复已于北京时间19:32:39部署上线，19:32:42完成本机与公网健康检查。当前源码为 `/srv/new-api/playground-markdown-fix-20261004/source`，镜像为 `new-api:playground-markdown-fix-20261004`。此前已补全的附件、搜索、参数、用量和浏览器历史功能保留。
+本文说明操练场的功能与数据边界；部署配置和验证报告由各安装环境自行保存。
 
 ## 入口与发送消息
 
@@ -90,50 +90,3 @@ Markdown回复不再因为整条消息超过20000字符而变成纯文本；较�
 - **清空对话**：确认后清除当前账号在此浏览器的当前消息；需要保留时先导出。
 
 刷新、无痕模式、浏览器存储配额和清理站点数据都会影响本地保存。该隔离防止应用正常账号切换混用历史，不是对本机拥有访问权限的人提供加密隔离。导出文件含对话和附件内容，请按实际敏感程度保存与分享。
-
-## 发布与验证记录
-
-### 当前发布：2026-10-04 19:32 Markdown修复
-
-当前镜像为 `new-api:playground-markdown-fix-20261004`，镜像ID为 `sha256:4da116137c4f363975e8548da174cf64e67375e0db322d238324da37396bb5e3`。前端主资源 `static/js/index.159e4fa041.js` 的SHA-256为 `116d2953bfa3bcc4b16f3f3c4896da3d53a70c0e0d5d15afc757de5a2d225e13`。北京时间19:32:39部署、19:32:42本机与公网版本、issuer、S256 PKCE、安全响应头和主资源一致，受保护API匿名请求返回401，7个服务容器全部健康。
-
-发布前冻结的15个变更文件均为前端实现或测试，后端和SDK与上一版一致；正式文档随后同步。本轮未新增数据库表结构迁移，也未新增数据库或Redis备份，保留此前发布的备份，不能将旧备份当作本次切换时点快照。旧连接退出后留出12秒批写窗口，观察到1次批写开始和1次完成、无批写错误；仅切换New API应用，Nginx原配置已恢复，数据库与Redis服务保持。
-
-以下为本次热修复实际重验，证据均在 `/srv/new-api/playground-markdown-fix-20261004/`：
-
-| 范围 | 最终验证 | 证据 |
-| --- | --- | --- |
-| 前端回归与构建 | 44文件262项通过，包含操练场、Markdown、OAuth及支付前端；TypeScript/lint/format/构建通过 | `web-tests.log`、`web-verification.json` |
-| 最终产物浏览器 | 英文桌面17项、390px简中手机17项，共34项；100KB持续流跨过20K后保留Markdown，代码标签、实际公式、停止后未闭合代码、刷新恢复通过；无页面异常或页面横向溢出 | `browser-verification.json`、`verification/markdown-final-en-desktop.json`、`verification/markdown-final-zhCN-mobile.json` |
-| 数学与独立审查 | 四类显式分隔符、金额、代码隔离、异常及超长公式原文、宏限制通过；推理内未闭合反引号隐藏回答的回归通过；专项已包含在262项内 | `math-review-zh.md`、`math-after.log`、`independent-backend-review.json`、`unclosed-inline-after.log` |
-| 新镜像与OAuth真实HTTP | 可丢弃空库启动、7组真实授权/目录/托管/刷新/撤销流程、匿名保护、页面安全响应头及带数据二次启动通过 | `sdk-http-acceptance.json`、`image-health.json` |
-| 产物与改动范围 | 镜像和二进制已记录，冻结实现15文件仅前端，后端及SDK保持 | `artifact.json`、`source-verification.json` |
-| 正式发布与连接退出 | 本机/公网资源一致，7容器健康，旧连接退出与Nginx恢复完成 | `deployment.json`、`final-health.json`、`deployment-drain.json` |
-
-浏览器使用本地HTTP/SSE响应fixture与真实浏览器IndexedDB，没有真实模型调用；不据此承诺任意上游输出都能修复为有效Markdown。本轮没有新增HTTP路由，原46项能力、460条路由、44项托管操作目录保持。原支付SDK与2026-10-03压缩包未修改；下方历史Go、支付及三库测试不计为本次重跑。
-
-直接上一版源码 `/srv/new-api/playground-complete-20261004/source` 与镜像 `new-api:playground-complete-20261004` 保留。它支持同一IndexedDB历史格式、OAuth和应用支付；回退应用会恢复旧Markdown渲染行为，不等于撤销授权、删除订单或清空浏览器历史。无需为应用回退清理浏览器数据库或恢复旧业务余额。
-
-### 历史发布：2026-10-04 11:29操练场补全
-
-当时镜像为 `new-api:playground-complete-20261004`，镜像ID为 `sha256:f587847c7d1dcb06a59e3e53d38873a1db6c5e50e29f67664c0f165fcb009585`。前端主资源 `static/js/index.cd6cd00288.js` 的SHA-256为 `ac1defea53d30a2a48a92c8a3883f1cb392862eb972fe8690a37bd153cc91e53`。2026-10-04北京时间11:29:10部署，11:29:47本机与公网版本、协议、安全响应头和资源哈希一致，7个服务容器全部健康。操练场匿名请求返回401；启动panic、迁移、钱包与worker异常均为0。
-
-该次发布前保存MySQL数据库备份并验证gzip完整性；退出旧连接并预留12秒批写窗口后只切换New API应用，Nginx原配置已恢复。该次窗口内没有待批写任务，不把零次批写记为实际写入成功。MySQL、Redis、Sub2API及其他数据库服务没有因该次发布重启。
-
-以下证据均在 `/srv/new-api/playground-complete-20261004/`：
-
-| 范围 | 最终验证 | 证据 |
-| --- | --- | --- |
-| 前端集成 | 操练场、OAuth动作/授权及应用支付共34文件194项通过；TypeScript/lint/构建通过 | `web-tests.log`、`web-verification.json` |
-| 浏览器最终产物 | 英文桌面、简中手机、繁中暗色手机各38项，共114项；真实IndexedDB、附件刷新、导入导出、切账号、搜索参数、真实流状态、空模型分组防误发均通过 | `browser-verification.json`（发布前76项）、`verification/playground-browser-final-summary.json`（最终114项） |
-| 后端与独立模块 | 完整Go测试/vet通过；relaykit独立构建与协议转换测试通过 | `go-verification.json`、`backend-checks.json`、`backend-report.md` |
-| 操练场HTTP与计费 | 本地HTTP的session/OAuth × 流式/非流式四组合，图片/PDF、工具调用计数、结构化来源、用量及额度结算通过 | `backend-http-tests.log` |
-| 原OAuth隔离HTTP | 新镜像中7组真实授权、目录、刷新、托管与撤销流程通过 | `sdk-http-acceptance.json`、`image-health.json` |
-| 原支付隔离HTTP | SQLite与SQLite+Redis各4组，单次余额扣款/退款、Basic隔离、幂等及事件保留通过 | `payment-http-acceptance.json`、`payment-redis-http-acceptance.json` |
-| 七语言文案 | 每语言新增92项，旧值无修改/删除；最终构建含全部644项新译文 | `playground-i18n-verification.json` |
-| 发布与运行 | 本机/公网健康、匿名保护、资源一致，启动异常0 | `deployment.json`、`final-health.json`、`playground-live-health.json` |
-| 发布备份与连接退出 | MySQL备份gzip通过，旧连接退出与Nginx恢复完成 | `backup-info.json`、`deployment-drain.json` |
-
-该次发布没有新增HTTP路由，原46项能力、460条路由、44项托管操作目录保持。测试使用本地fixture与可丢弃实例，没有真实付费上游或商户支付；不能把mock返回的视觉、PDF或搜索内容称为生产模型实测。摄像头与截图的浏览器验收使用合成媒体，真实设备授权与支持范围仍遵循本文限制。
-
-当时的上一发布源 `/srv/new-api/app-payments-20261003/source` 与镜像 `new-api:app-payments-20261003` 保留，支持原OAuth及应用支付。进一步回退至此更早版本后，本浏览器新版IndexedDB历史仍保留，但该旧操练场不会读取它；如需保留可访问副本，应先导出JSON，不删除浏览器数据库或恢复旧业务余额。
