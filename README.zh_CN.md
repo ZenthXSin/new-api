@@ -1,5 +1,7 @@
 # New API
 
+![new-api](/web/public/logo.png)
+
 [English](./README.md) · [简体中文](./README.zh_CN.md)
 
 > 基于 [New API](https://github.com/QuantumNous/new-api) 的独立定制分支：保留并改造多模型 API 网关，同时加入浏览器版 Codex 工作台和应用服务。
