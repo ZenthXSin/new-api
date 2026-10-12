@@ -18,11 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
+import { codexPlanSchema } from '@/features/codex-admin/types'
+
 // ============================================================================
 // Subscription Plan Schema & Types
 // ============================================================================
 
 export const subscriptionPlanSchema = z.object({
+  codex: codexPlanSchema.nullish(),
   id: z.number(),
   title: z.string(),
   subtitle: z.string().optional(),

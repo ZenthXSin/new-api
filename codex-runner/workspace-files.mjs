@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { UserWorkspaceLayout, assertWorkspaceId, workspaceError } from './user-layout.mjs';
+import { openFileDownload } from './file-download.mjs';
 export { WORKSPACE_ID, assertWorkspaceId, assertOwnerId, workspacePaths, userPaths, workspaceError } from './user-layout.mjs';
 const helper = fileURLToPath(new URL('./safe-files.py', import.meta.url));
 const cleanEnv = { PATH: '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' };
@@ -89,7 +90,7 @@ export class WorkspaceFiles {
     const { projectPath } = await this.check(id);
     const result = await this.command('python3', ['-I', helper, projectPath], {
       input: JSON.stringify({ operation, ...args }),
-      timeoutMs: operation === 'import' || operation === 'export' ? 60_000 : 10_000,
+      timeoutMs: ['import', 'export', 'upload'].includes(operation) ? 60_000 : 10_000,
       maxBytes: operation === 'export' ? 140 * 1024 * 1024 : 5 * 1024 * 1024,
     });
     let response;
@@ -100,8 +101,17 @@ export class WorkspaceFiles {
 
   list(id, relativePath = '') { return this.fileOperation(id, 'list', { path: relativePath }); }
   read(id, relativePath) { return this.fileOperation(id, 'read', { path: relativePath }); }
+  async download(id, relativePath, options) {
+    const { projectPath } = await this.check(id);
+    const child = spawn('python3', ['-I', helper, projectPath], { env: cleanEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+    return openFileDownload(child, JSON.stringify({ operation: 'download', path: relativePath }), options);
+  }
   write(id, relativePath, content, expectedHash) {
     return this.locked(id, () => this.fileOperation(id, 'write', { path: relativePath, content, ...(expectedHash !== undefined ? { expectedHash } : {}) }));
+  }
+  upload(id, relativePath, bytes) {
+    if (!Buffer.isBuffer(bytes) || bytes.length > 25 * 1024 * 1024) throw workspaceError('The file exceeds the upload limit.', 'file_too_large', 413);
+    return this.locked(id, () => this.fileOperation(id, 'upload', { path: relativePath, data: bytes.toString('base64') }));
   }
   importZip(id, bytes) {
     if (!Buffer.isBuffer(bytes) || bytes.length > 25 * 1024 * 1024) throw workspaceError('ZIP upload exceeds 25 MiB', 'archive_too_large', 413);

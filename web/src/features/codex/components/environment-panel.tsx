@@ -17,30 +17,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
-  ChevronDown,
+  ArrowUpRight,
   CircleAlert,
-  Cpu,
-  HardDrive,
+  Container,
   LoaderCircle,
-  MemoryStick,
-  Power,
   RefreshCw,
-  Server,
-  Square,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Button } from '@/components/ui/button'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTitle,
-  PopoverTrigger,
-} from '@/components/ui/popover'
-import { cn } from '@/lib/utils'
+import { cn } from '@/features/codex/vendor/zcode/utils'
 
 import type { CodexEnvironment } from '../types'
+import { Button } from '../vendor/zcode/button'
 
 export function EnvironmentPanel(props: {
   environment?: CodexEnvironment
@@ -52,16 +41,19 @@ export function EnvironmentPanel(props: {
   onStart: () => void
   onStop: () => void
   onRetry: () => void
-  onSelect: (id: string) => void
+  onSelect: (id: string, conversationId?: string) => void
 }) {
   const { t } = useTranslation()
-  const [expanded, setExpanded] = useState(false)
+  const descriptionId = useId()
   const environment = props.environment
   const status = environment?.status
-  const busy = props.taskRunning || !!environment?.activeWorkspaceId
-  const starting = status === 'starting' || props.pending === 'start'
+  const busy = !!props.taskRunning || !!environment?.activeWorkspaceId
   const unavailable = props.unavailable || !environment
-  const disabled = unavailable || !!props.pending || starting
+  const starting =
+    props.pending === 'start' || (!unavailable && status === 'starting')
+  const stopping = props.pending === 'stop'
+  const processing = props.loading || starting || stopping
+  const disabled = processing || unavailable || busy
   const labels = {
     not_created: t('Environment not created'),
     stopped: t('Environment sleeping'),
@@ -72,13 +64,33 @@ export function EnvironmentPanel(props: {
   let label = environment
     ? labels[environment.status]
     : t('Environment unavailable')
-  if (props.pending === 'stop') label = t('Stopping environment...')
   if (starting) label = labels.starting
+  if (stopping) label = t('Stopping environment...')
   if (unavailable) label = t('Environment unavailable')
   if (props.loading) label = t('Loading environment...')
-  const showRetry = props.unavailable && !props.loading
+  const showRetry = unavailable && !props.loading
   const showStop =
-    status === 'running' || status === 'error' || props.pending === 'stop'
+    !showRetry &&
+    (stopping || (!starting && (status === 'running' || status === 'error')))
+  const showStart =
+    !showRetry && !stopping && (starting || status !== 'running')
+  let startLabel = t('Start environment')
+  if (status === 'not_created') startLabel = t('Create and start environment')
+  if (status === 'error') startLabel = t('Retry start')
+  let description = t(
+    'Starting the environment does not send a model request. Sending a task wakes it automatically.'
+  )
+  if (status === 'not_created') {
+    description = t(
+      'Your environment will be created when you start it or send your first task.'
+    )
+  }
+  if (unavailable) {
+    description = t('Refresh environment status to reconnect and try again.')
+  }
+  if (busy) {
+    description = t('Stop the active task before stopping your environment.')
+  }
   const failure = props.error || environment?.lastError
   const activeId = environment?.activeWorkspaceId
   const tone = cn(
@@ -86,205 +98,262 @@ export function EnvironmentPanel(props: {
     status === 'running' &&
       !unavailable &&
       'text-emerald-700 dark:text-emerald-400',
-    (failure || status === 'error' || (props.unavailable && !props.loading)) &&
-      'text-destructive'
+    (failure || status === 'error' || showRetry) && 'text-destructive'
   )
+
   return (
     <section
       aria-label={t('Personal environment')}
-      className='min-w-0 shrink-0'
+      aria-busy={processing}
+      className='min-w-0 text-sm'
     >
-      <Popover open={expanded} onOpenChange={setExpanded}>
-        <PopoverTrigger
-          aria-label={t('Personal environment details')}
-          title={label}
-          className='hover:bg-muted focus-visible:ring-ring flex h-10 items-center gap-2 rounded-lg px-2 text-xs outline-none focus-visible:ring-2 sm:h-9 sm:px-2.5'
-        >
-          <span className='relative flex size-5 items-center justify-center'>
-            {props.loading || starting || props.pending ? (
-              <LoaderCircle className='size-4 animate-spin' aria-hidden />
+      <header className='flex min-w-0 items-center gap-3'>
+        <span className='border-border/70 flex size-10 shrink-0 items-center justify-center rounded-xl border'>
+          <Container className='size-5' aria-hidden />
+        </span>
+        <div className='min-w-0'>
+          <h3 className='text-base font-semibold'>{t('Docker environment')}</h3>
+          <p className='text-muted-foreground mt-1 text-xs'>
+            {t('Hosted on this server')}
+          </p>
+        </div>
+      </header>
+      <p className='text-muted-foreground mt-4 text-sm leading-6'>
+        {t(
+          'One personal environment shared by all your projects. Each project keeps its own files and conversation.'
+        )}
+      </p>
+
+      <div className='border-border/60 mt-5 flex flex-wrap items-center justify-between gap-4 border-y py-4'>
+        <div className='min-w-0'>
+          <p className='font-medium'>{t('Environment status')}</p>
+          <p
+            role='status'
+            aria-live='polite'
+            aria-atomic='true'
+            className={cn('mt-2 flex items-center gap-2 text-xs', tone)}
+          >
+            {processing ? (
+              <LoaderCircle className='size-3.5 animate-spin' aria-hidden />
             ) : (
-              <Server className='text-muted-foreground size-4' aria-hidden />
-            )}
-            {!props.loading && !starting && !props.pending && (
               <span
-                className={cn(
-                  'bg-background absolute -right-0.5 -bottom-0.5 flex size-2.5 items-center justify-center rounded-full',
-                  tone
-                )}
-              >
-                <span className='size-1.5 rounded-full bg-current' />
-              </span>
+                className='size-1.5 shrink-0 rounded-full bg-current'
+                aria-hidden
+              />
             )}
+            {label}
+          </p>
+        </div>
+        <div className='flex max-w-full flex-wrap items-center gap-2'>
+          {showRetry && (
+            <Button
+              type='button'
+              variant='outline'
+              className='focus-visible:ring-ring h-auto min-h-9 max-w-full gap-2 rounded-full px-4 py-2 text-sm whitespace-normal focus-visible:ring-2'
+              onClick={props.onRetry}
+              disabled={processing}
+              aria-describedby={descriptionId}
+            >
+              <RefreshCw className='size-3.5' aria-hidden />
+              {t('Retry environment')}
+            </Button>
+          )}
+          {showStop && (
+            <Button
+              type='button'
+              variant='outline'
+              className='focus-visible:ring-ring h-auto min-h-9 max-w-full rounded-full px-4 py-2 text-sm whitespace-normal focus-visible:ring-2'
+              onClick={props.onStop}
+              disabled={disabled}
+              aria-describedby={descriptionId}
+            >
+              {stopping && (
+                <LoaderCircle
+                  className='mr-1 size-3.5 animate-spin'
+                  aria-hidden
+                />
+              )}
+              {t('Stop environment')}
+            </Button>
+          )}
+          {showStart && (
+            <Button
+              type='button'
+              className='focus-visible:ring-ring h-auto min-h-9 max-w-full rounded-full px-4 py-2 text-sm whitespace-normal focus-visible:ring-2'
+              onClick={props.onStart}
+              disabled={disabled}
+              aria-describedby={descriptionId}
+            >
+              {starting && (
+                <LoaderCircle
+                  className='mr-1 size-3.5 animate-spin'
+                  aria-hidden
+                />
+              )}
+              {startLabel}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <p
+        id={descriptionId}
+        className='text-muted-foreground mt-3 text-xs leading-5'
+      >
+        {description}
+      </p>
+      {failure && (
+        <p
+          role='alert'
+          className='border-destructive/20 bg-destructive/5 text-destructive mt-4 flex min-w-0 items-start gap-2 rounded-xl border p-3 text-sm leading-6 break-words'
+        >
+          <CircleAlert className='mt-1 size-4 shrink-0' aria-hidden />
+          <span className='min-w-0 [overflow-wrap:anywhere]'>{t(failure)}</span>
+        </p>
+      )}
+
+      {activeId && (
+        <button
+          type='button'
+          aria-label={`${t('Active project:')} ${environment?.activeWorkspaceName || t('Open active project')}`}
+          className='border-border/60 hover:bg-muted focus-visible:ring-ring mt-5 flex w-full min-w-0 items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left outline-none focus-visible:ring-2'
+          onClick={() =>
+            props.onSelect(
+              activeId,
+              environment?.activeConversationId ?? undefined
+            )
+          }
+        >
+          <span className='min-w-0'>
+            <span className='text-muted-foreground block text-xs'>
+              {t('Active project:')}{' '}
+            </span>
+            <span
+              className='mt-1 block truncate font-medium'
+              title={environment?.activeWorkspaceName || undefined}
+            >
+              {environment?.activeWorkspaceName || t('Open active project')}
+            </span>
           </span>
-          <span className={cn('hidden lg:inline', tone)}>{label}</span>
-          <ChevronDown
-            className='text-muted-foreground hidden size-3 sm:block'
+          <ArrowUpRight
+            className='text-muted-foreground size-4 shrink-0'
             aria-hidden
           />
-        </PopoverTrigger>
-        <PopoverContent
-          align='end'
-          sideOffset={8}
-          collisionPadding={12}
-          className='max-h-[min(36rem,80dvh)] w-[min(360px,calc(100vw-24px))] gap-0 overflow-y-auto rounded-2xl p-4 shadow-xl'
-        >
-          <div className='flex items-center justify-between gap-3'>
-            <PopoverTitle className='font-sans text-sm font-semibold'>
-              {t('Personal environment')}
-            </PopoverTitle>
-            <span
-              role='status'
-              className={cn('flex items-center gap-1.5 text-xs', tone)}
-            >
-              <span className='size-1.5 rounded-full bg-current' />
-              {label}
-            </span>
-          </div>
-          <p className='text-muted-foreground mt-2 text-xs leading-5'>
-            {t(
-              'One personal environment shared by all your projects. Each project keeps its own files and conversation.'
-            )}
+        </button>
+      )}
+
+      {environment && (
+        <>
+          <h4 className='mt-6 font-medium'>{t('Resource limits')}</h4>
+          <p className='text-muted-foreground mt-1 text-xs leading-5'>
+            {t('These are the limits applied to this environment.')}
           </p>
-          {environment && (
-            <dl className='bg-muted/50 my-4 grid grid-cols-3 gap-3 rounded-xl p-3 text-xs'>
-              <div>
-                <dt className='text-muted-foreground mb-1.5 flex items-center gap-1'>
-                  <Cpu className='size-3' aria-hidden />
-                  {t('CPU')}
-                </dt>
-                <dd className='text-sm font-medium'>
-                  {environment.limits.cpus}
-                </dd>
-              </div>
-              <div>
-                <dt className='text-muted-foreground mb-1.5 flex items-center gap-1'>
-                  <MemoryStick className='size-3' aria-hidden />
-                  {t('Memory')}
-                </dt>
-                <dd className='text-sm font-medium'>
-                  {(environment.limits.memoryBytes / 1024 ** 3).toLocaleString(
-                    undefined,
-                    { maximumFractionDigits: 1 }
-                  )}{' '}
-                  GiB
-                </dd>
-              </div>
-              <div>
-                <dt className='text-muted-foreground mb-1.5 flex items-center gap-1'>
-                  <HardDrive className='size-3' aria-hidden />
-                  {t('Storage limit')}
-                </dt>
-                <dd className='text-sm font-medium'>
-                  {(environment.limits.diskBytes / 1024 ** 3).toLocaleString(
-                    undefined,
-                    { maximumFractionDigits: 1 }
-                  )}{' '}
-                  GiB
-                </dd>
-              </div>
-            </dl>
-          )}
-          {activeId && (
-            <button
-              type='button'
-              className='hover:bg-muted mb-3 w-full rounded-lg border px-3 py-2 text-left'
-              onClick={() => {
-                props.onSelect(activeId)
-                setExpanded(false)
-              }}
-            >
-              <span className='text-muted-foreground block text-xs'>
-                {t('Active project:')}
-              </span>
-              <span className='mt-1 block truncate text-sm font-medium'>
-                {environment?.activeWorkspaceName || t('Open active project')}
-              </span>
-            </button>
-          )}
-          <div className='text-muted-foreground space-y-2 text-xs leading-5'>
-            <p>{t('Only one task can run at a time across your projects.')}</p>
-            {environment && (
-              <p>
-                {t(
-                  'Sleeps after {{minutes}} minutes without activity. Files and conversations are preserved.',
-                  { minutes: Math.ceil(environment.idleSeconds / 60) }
+          <dl className='divide-border/60 mt-2 divide-y'>
+            <div className='flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-3'>
+              <dt className='text-muted-foreground'>{t('CPU limit')}</dt>
+              <dd className='text-right tabular-nums'>
+                {environment.limits.cpuPercent !== undefined && (
+                  <>{environment.limits.cpuPercent}% · </>
                 )}
-              </p>
-            )}
-            <p>
+                {environment.limits.cpus.toLocaleString(undefined, {
+                  maximumFractionDigits: 2,
+                })}{' '}
+                vCPU
+              </dd>
+            </div>
+            <div className='flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-3'>
+              <dt className='text-muted-foreground'>{t('Memory limit')}</dt>
+              <dd className='text-right tabular-nums'>
+                {(environment.limits.memoryBytes / 1024 ** 2).toLocaleString(
+                  undefined,
+                  { maximumFractionDigits: 0 }
+                )}{' '}
+                MB
+              </dd>
+            </div>
+            <div className='flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-3'>
+              <dt className='text-muted-foreground'>{t('Storage limit')}</dt>
+              <dd className='text-right tabular-nums'>
+                {(environment.limits.diskBytes / 1024 ** 3).toLocaleString(
+                  undefined,
+                  { maximumFractionDigits: 1 }
+                )}{' '}
+                GiB
+              </dd>
+            </div>
+          </dl>
+          {environment.runtime === 'docker' && (
+            <>
+              <h4 className='mt-6 font-medium'>{t('Runtime details')}</h4>
+              <dl className='divide-border/60 mt-2 divide-y'>
+                {environment.network && (
+                  <>
+                    <div className='flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-3'>
+                      <dt className='text-muted-foreground'>{t('Network')}</dt>
+                      <dd>{t('Dedicated Docker bridge')}</dd>
+                    </div>
+                    <div className='flex flex-col gap-1 py-3'>
+                      <dt className='text-muted-foreground'>
+                        {t('Internet access')}
+                      </dt>
+                      <dd className='text-xs leading-5'>
+                        <p>
+                          {t(
+                            'Internet access is allowed by the runtime policy.'
+                          )}
+                        </p>
+                        {!environment.network.policyEditable && (
+                          <p className='text-muted-foreground mt-1'>
+                            {t(
+                              'Network policy is managed by your administrator.'
+                            )}
+                          </p>
+                        )}
+                      </dd>
+                    </div>
+                  </>
+                )}
+                {environment.persistentStorage !== undefined && (
+                  <div className='flex flex-col gap-1 py-3'>
+                    <dt className='text-muted-foreground'>
+                      {t('Persistent storage')}
+                    </dt>
+                    <dd className='text-xs leading-5'>
+                      {environment.persistentStorage
+                        ? t('Files are kept when the environment stops.')
+                        : t('Files are not kept when the environment stops.')}
+                    </dd>
+                  </div>
+                )}
+                {environment.filesystemIsolation === 'user' && (
+                  <div className='flex flex-col gap-1 py-3'>
+                    <dt className='text-muted-foreground'>
+                      {t('Environment scope')}
+                    </dt>
+                    <dd className='text-xs leading-5'>
+                      {t('Projects share your personal environment.')}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            </>
+          )}
+          <div className='border-border/60 border-t pt-4 text-xs leading-5'>
+            <p className='text-muted-foreground'>
               {t(
-                'Starting the environment does not send a model request. Sending a task wakes it automatically.'
+                'Sleeps after {{minutes}} minutes without activity. Files and conversations are preserved.',
+                { minutes: Math.ceil(environment.idleSeconds / 60) }
               )}
             </p>
-          </div>
-          {failure && (
-            <p
-              role='alert'
-              className='text-destructive mt-3 flex items-start gap-2 text-xs leading-5 break-words'
-            >
-              <CircleAlert className='mt-0.5 size-3.5 shrink-0' aria-hidden />
-              <span className='min-w-0'>{t(failure)}</span>
+            <p className='text-muted-foreground mt-1'>
+              {t('Only one task can run at a time across your projects.')}
             </p>
-          )}
-          <div className='mt-4 flex flex-wrap items-center justify-end gap-2 border-t pt-3'>
-            {environment && (
-              <span className='text-muted-foreground mr-auto text-xs'>
-                {t('Projects: {{count}}', { count: environment.projectCount })}
-              </span>
-            )}
-            {showRetry && (
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                onClick={props.onRetry}
-              >
-                <RefreshCw className='size-3.5' />
-                {t('Retry environment')}
-              </Button>
-            )}
-            {!showRetry && showStop && (
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                onClick={props.onStop}
-                disabled={disabled || busy}
-                title={
-                  busy
-                    ? t(
-                        'Stop the active task before stopping your environment.'
-                      )
-                    : undefined
-                }
-              >
-                <Square className='size-3.5' />
-                {t('Stop environment')}
-              </Button>
-            )}
-            {!showRetry && (!showStop || status === 'error') && (
-              <Button
-                type='button'
-                size='sm'
-                onClick={props.onStart}
-                disabled={disabled || busy}
-                title={t(
-                  'Starting the environment does not send a model request.'
-                )}
-              >
-                <Power className='size-3.5' />
-                {t('Start environment')}
-              </Button>
-            )}
-          </div>
-          {busy && (
-            <p className='text-muted-foreground mt-2 text-xs leading-5'>
-              {t('Stop the active task before stopping your environment.')}
+            <p className='text-muted-foreground mt-1'>
+              {t('Projects: {{count}}', { count: environment.projectCount })}
             </p>
-          )}
-        </PopoverContent>
-      </Popover>
+          </div>
+        </>
+      )}
     </section>
   )
 }

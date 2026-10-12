@@ -3766,7 +3766,8 @@ export function ChannelMutateDrawer({
                                       />
                                     </FormControl>
                                     <FormDescription>
-                                      渠道累计消费达到该 token 量（单位 M，即 100 万）后自动禁用；填 0 表示不限制。
+                                      渠道累计消费达到该 token 量（单位 M，即
+                                      100 万）后自动禁用；填 0 表示不限制。
                                     </FormDescription>
                                     <FormMessage />
                                   </FormItem>

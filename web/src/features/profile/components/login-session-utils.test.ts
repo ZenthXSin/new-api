@@ -16,9 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { describe, expect, test } from 'vitest'
-
 import type { TFunction } from 'i18next'
+import { describe, expect, test } from 'vitest'
 
 import { loginMethodLabel, sessionDevice } from './login-session-utils'
 
@@ -27,9 +26,7 @@ const translate = ((key: string) => key) as TFunction
 describe('login session presentation', () => {
   test('labels built-in and provider OAuth login methods', () => {
     expect(loginMethodLabel('password', translate)).toBe('Password')
-    expect(loginMethodLabel('2fa', translate)).toBe(
-      'Two-factor Authentication'
-    )
+    expect(loginMethodLabel('2fa', translate)).toBe('Two-factor Authentication')
     expect(loginMethodLabel('oauth:github', translate)).toBe('OAuth · GitHub')
     expect(loginMethodLabel('oauth:custom-provider', translate)).toBe(
       'OAuth · custom-provider'

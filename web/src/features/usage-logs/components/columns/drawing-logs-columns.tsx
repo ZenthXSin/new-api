@@ -210,9 +210,13 @@ export function useDrawingLogsColumns(
               onClick={() => setDialogOpen(true)}
               title={t('Click to view image')}
             >
-              <span className='text-foreground truncate leading-snug group-hover:underline'>
-                {t('View')}
-              </span>
+              <img
+                src={imageUrl}
+                alt={t('Generated image')}
+                loading='lazy'
+                referrerPolicy='no-referrer'
+                className='h-12 w-16 rounded-md object-cover transition-opacity group-hover:opacity-80 motion-reduce:transition-none'
+              />
             </button>
             <ImageDialog
               imageUrl={imageUrl}

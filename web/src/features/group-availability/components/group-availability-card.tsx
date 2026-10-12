@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { CircleHelp, Clock3, Database, Layers3, Zap } from 'lucide-react'
+import { CircleHelp, Clock3, Database, Gauge, Layers3, Zap } from 'lucide-react'
 import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -37,6 +37,7 @@ import {
 } from '@/components/ui/tooltip'
 import {
   formatLatency,
+  formatThroughput,
   formatUptimePct,
 } from '@/features/performance-metrics/lib/format'
 import { toIntlLocale } from '@/i18n/languages'
@@ -59,6 +60,7 @@ export function GroupAvailabilityCard({
   const { t, i18n } = useTranslation()
   const titleId = useId()
   const cacheRateId = useId()
+  const speedId = useId()
   const name = group.display_name || group.group
 
   return (
@@ -112,7 +114,7 @@ export function GroupAvailabilityCard({
               {formatLatency(group.avg_duration_ms ?? Number.NaN)}
             </dd>
           </div>
-          <div className='bg-muted/40 col-span-2 flex flex-wrap items-center justify-between gap-3 rounded-xl p-3'>
+          <div className='bg-muted/40 flex flex-wrap items-center justify-between gap-3 rounded-xl p-3'>
             <dt>
               <Tooltip>
                 <TooltipTrigger
@@ -138,6 +140,21 @@ export function GroupAvailabilityCard({
               className='text-lg font-semibold tabular-nums'
             >
               {formatUptimePct(group.cache_hit_rate ?? Number.NaN)}
+            </dd>
+          </div>
+          <div className='bg-muted/40 flex min-w-0 flex-col gap-1.5 rounded-xl p-3'>
+            <dt
+              id={speedId}
+              className='text-muted-foreground flex items-center gap-1.5 text-xs'
+            >
+              <Gauge className='size-3.5 shrink-0' aria-hidden='true' />
+              {t('Average output speed')}
+            </dt>
+            <dd
+              aria-labelledby={speedId}
+              className='text-lg font-semibold tabular-nums'
+            >
+              {formatThroughput(group.avg_output_tps ?? Number.NaN)}
             </dd>
           </div>
         </dl>

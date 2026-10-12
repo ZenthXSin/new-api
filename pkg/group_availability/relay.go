@@ -205,15 +205,15 @@ func RecordRelayResultWithContext(c *gin.Context, info *relaycommon.RelayInfo, a
 		}
 	}
 	input, read := cacheUsageSnapshot(c)
-	recordRelayResult(c.Request.Context(), info, apiErr, state, input, read)
+	recordRelayResult(c.Request.Context(), info, apiErr, state, input, read, tokenUsageSnapshot(c))
 }
 
 // Also available for non-scanner callers and API-contract tests.
 func RecordRelayResult(ctx context.Context, info *relaycommon.RelayInfo, apiErr *types.NewAPIError) {
-	recordRelayResult(ctx, info, apiErr, nil, 0, 0)
+	recordRelayResult(ctx, info, apiErr, nil, 0, 0, relayUsage{})
 }
 
-func recordRelayResult(ctx context.Context, info *relaycommon.RelayInfo, apiErr *types.NewAPIError, state *streamObservation, input, read int64) {
+func recordRelayResult(ctx context.Context, info *relaycommon.RelayInfo, apiErr *types.NewAPIError, state *streamObservation, input, read int64, usage relayUsage) {
 	if Default == nil || info == nil {
 		return
 	}
@@ -221,10 +221,27 @@ func recordRelayResult(ctx context.Context, info *relaycommon.RelayInfo, apiErr 
 	if outcome == relayIgnored {
 		return
 	}
+	// Upstream facts take precedence; a missing usage snapshot can still
+	// classify a failed large request using the existing local token estimate.
+	inputTokens := usage.input
+	if !usage.hasInput {
+		inputTokens = int64(info.GetEstimatePromptTokens())
+	}
+	if inputTokens <= MinInputTokens || inputTokens > maxCacheUsageTokens {
+		return
+	}
+	endedAt := usage.endedAt
+	if endedAt.IsZero() {
+		endedAt = time.Now()
+	}
+	generationMs := endedAt.Sub(info.StartTime).Milliseconds()
 	hasTtft := info.IsStream && info.HasSendResponse()
-	Default.Record(Sample{Group: info.UsingGroup, Success: outcome == relaySuccess,
+	if hasTtft {
+		generationMs = endedAt.Sub(info.FirstResponseTime).Milliseconds()
+	}
+	Default.Record(Sample{InputTokens: inputTokens, OutputTokens: usage.output, GenerationMs: generationMs, Group: info.UsingGroup, Success: outcome == relaySuccess,
 		CacheInputTokens: input, CacheReadTokens: read,
-		LatencyMs: time.Since(info.StartTime).Milliseconds(), HasTtft: hasTtft,
+		LatencyMs: endedAt.Sub(info.StartTime).Milliseconds(), HasTtft: hasTtft,
 		TtftMs: info.FirstResponseTime.Sub(info.StartTime).Milliseconds()})
 }
 

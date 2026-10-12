@@ -43,6 +43,7 @@ const OPAQUE_SEARCH_PARAMETERS = new Set([
   'action_id',
   'flow_token',
   'telegram_bind',
+  'github_oauth',
 ])
 
 export function parseRouterSearch(search: string): Record<string, unknown> {

@@ -126,6 +126,7 @@ func TestGroupAvailabilityDatabaseMatrix(t *testing.T) {
 			// Different channels/models and retries contribute to a single actual
 			// group. Business rejection and client cancellation contribute nothing.
 			info := &relaycommon.RelayInfo{OriginModelName: "first-model", UsingGroup: "a", StartTime: time.Now()}
+			info.SetEstimatePromptTokens(20000)
 			groupavailability.RecordRelayResult(context.Background(), info, types.InitOpenAIError("context_length_exceeded", 400))
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
@@ -140,7 +141,7 @@ func TestGroupAvailabilityDatabaseMatrix(t *testing.T) {
 			var wg sync.WaitGroup
 			for i := range 48 {
 				wg.Go(func() {
-					second.Record(groupavailability.Sample{Group: "a", Success: i < 38, LatencyMs: 1000, HasTtft: true, TtftMs: 100})
+					second.Record(groupavailability.Sample{InputTokens: 20000, Group: "a", Success: i < 38, LatencyMs: 1000, HasTtft: true, TtftMs: 100})
 				})
 			}
 			wg.Wait()
@@ -161,7 +162,7 @@ func TestGroupAvailabilityDatabaseMatrix(t *testing.T) {
 
 			// A failed write retains the full snapshot; retrying replaces rather
 			// than adds it, including snapshots already persisted by earlier flushes.
-			second.Record(groupavailability.Sample{Group: "a", Success: true, LatencyMs: 1000})
+			second.Record(groupavailability.Sample{InputTokens: 20000, Group: "a", Success: true, LatencyMs: 1000})
 			require.NoError(t, db.Callback().Create().Before("gorm:create").Register("availability_write_failure", func(tx *gorm.DB) {
 				if tx.Statement.Table == "group_availability_buckets" {
 					tx.AddError(errors.New("controlled write failure"))
@@ -195,10 +196,10 @@ func TestGroupAvailabilityDatabaseMatrix(t *testing.T) {
 			// One sparse bucket cannot outweigh a busy one; the shared grouping
 			// also applies before SQL aggregation, including an empty grant set.
 			rows := []model.GroupAvailabilityBucket{
-				{Group: "weighted", BucketTs: now.Unix() - 60, SourceID: "fixture1", RequestCount: 100, SuccessCount: 100, TotalLatencyMs: 100000},
-				{Group: "weighted", BucketTs: now.Unix() - 120, SourceID: "fixture2", RequestCount: 1, TotalLatencyMs: 2000},
-				{Group: "private", BucketTs: now.Unix() - 60, SourceID: "fixture3", RequestCount: 1000, SuccessCount: 1},
-				{Group: "sparse", BucketTs: now.Unix() - 60, SourceID: "fixture4", RequestCount: 49, SuccessCount: 49},
+				{Group: "weighted", MinInputTokens: 10000, BucketTs: now.Unix() - 60, SourceID: "fixture1", RequestCount: 100, SuccessCount: 100, TotalLatencyMs: 100000},
+				{Group: "weighted", MinInputTokens: 10000, BucketTs: now.Unix() - 120, SourceID: "fixture2", RequestCount: 1, TotalLatencyMs: 2000},
+				{Group: "private", MinInputTokens: 10000, BucketTs: now.Unix() - 60, SourceID: "fixture3", RequestCount: 1000, SuccessCount: 1},
+				{Group: "sparse", MinInputTokens: 10000, BucketTs: now.Unix() - 60, SourceID: "fixture4", RequestCount: 49, SuccessCount: 49},
 			}
 			for i := range rows {
 				rows[i].BucketTs -= rows[i].BucketTs % 60
@@ -232,7 +233,7 @@ func TestGroupAvailabilityDatabaseMatrix(t *testing.T) {
 			// A clock rollback can revisit an already flushed/evicted minute.
 			// Its new snapshot must add a sample, not overwrite the saved total.
 			now = now.Add(-time.Minute)
-			second.Record(groupavailability.Sample{Group: "a", Success: true})
+			second.Record(groupavailability.Sample{InputTokens: 20000, Group: "a", Success: true})
 			require.NoError(t, second.Flush())
 			now = now.Add(time.Minute)
 			rollback, err := collector.Query(context.Background(), "90m", map[string]string{"a": "A"}, true)
@@ -245,12 +246,12 @@ func TestGroupAvailabilityDatabaseMatrix(t *testing.T) {
 
 			// Auto order uses unredacted aggregate totals and the selected window.
 			rankedRows := []model.GroupAvailabilityBucket{
-				{Group: "rank-z-busy", BucketTs: now.Unix() - 60, SourceID: "rank", RequestCount: 200, SuccessCount: 100},
-				{Group: "rank-b-better", BucketTs: now.Unix() - 60, SourceID: "rank", RequestCount: 100, SuccessCount: 99},
-				{Group: "rank-a-lower", BucketTs: now.Unix() - 60, SourceID: "rank", RequestCount: 100, SuccessCount: 90},
-				{Group: "rank-c-tie", BucketTs: now.Unix() - 60, SourceID: "rank", RequestCount: 100, SuccessCount: 99},
-				{Group: "rank-single-ok", BucketTs: now.Unix() - 60, SourceID: "rank", RequestCount: 1, SuccessCount: 1},
-				{Group: "rank-single-fail", BucketTs: now.Unix() - 60, SourceID: "rank", RequestCount: 1},
+				{Group: "rank-z-busy", MinInputTokens: 10000, BucketTs: now.Unix() - 60, SourceID: "rank", RequestCount: 200, SuccessCount: 100},
+				{Group: "rank-b-better", MinInputTokens: 10000, BucketTs: now.Unix() - 60, SourceID: "rank", RequestCount: 100, SuccessCount: 99},
+				{Group: "rank-a-lower", MinInputTokens: 10000, BucketTs: now.Unix() - 60, SourceID: "rank", RequestCount: 100, SuccessCount: 90},
+				{Group: "rank-c-tie", MinInputTokens: 10000, BucketTs: now.Unix() - 60, SourceID: "rank", RequestCount: 100, SuccessCount: 99},
+				{Group: "rank-single-ok", MinInputTokens: 10000, BucketTs: now.Unix() - 60, SourceID: "rank", RequestCount: 1, SuccessCount: 1},
+				{Group: "rank-single-fail", MinInputTokens: 10000, BucketTs: now.Unix() - 60, SourceID: "rank", RequestCount: 1},
 			}
 			require.NoError(t, model.SaveGroupAvailabilityBuckets(rankedRows))
 			rankAllowed := map[string]string{"rank-z-busy": "", "rank-b-better": "", "rank-a-lower": "", "rank-c-tie": "", "rank-empty": "", "rank-single-ok": "", "rank-single-fail": ""}
@@ -320,7 +321,7 @@ func assertGroupAvailabilityAccess(t *testing.T, collector *groupavailability.Co
 	assert.Equal(t, "a", body.Data.Groups[0].Group)
 	assert.Equal(t, "unused", body.Data.Groups[1].Group)
 	assert.Nil(t, body.Data.Groups[0].RequestCount)
-	for _, secret := range []string{"channel_id", "channel_name", "source_id", "model_name", "username", "token", "private"} {
+	for _, secret := range []string{"channel_id", "channel_name", "source_id", "model_name", "username", "token_name", "token_id", "private"} {
 		assert.NotContains(t, response.Body.String(), secret)
 	}
 	unauthenticated := gin.New()
@@ -388,6 +389,7 @@ func TestGroupAvailabilityReleaseStreamObservation(t *testing.T) {
 			c, _ := gin.CreateTestContext(recorder)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 			info := &relaycommon.RelayInfo{UsingGroup: tc.name, IsStream: true, StartTime: time.Now(), ChannelMeta: &relaycommon.ChannelMeta{}}
+			info.SetEstimatePromptTokens(20000)
 			var body strings.Builder
 			for _, event := range tc.events {
 				body.WriteString("data: " + event + "\n\n")
@@ -423,6 +425,7 @@ func TestGroupAvailabilityReleaseStreamObservation(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	info := &relaycommon.RelayInfo{UsingGroup: "initial_group", IsStream: true, StartTime: time.Now(), ChannelMeta: &relaycommon.ChannelMeta{}}
+	info.SetEstimatePromptTokens(20000)
 	groupavailability.BeginStream(c)
 	groupavailability.ObserveStream(c, `{"type":"error","error":{"type":"server_error"}}`)
 	info.UsingGroup = "final_group"
@@ -458,6 +461,7 @@ func TestGroupAvailabilityReleaseStreamObservation(t *testing.T) {
 	jsonContext, _ := gin.CreateTestContext(httptest.NewRecorder())
 	jsonContext.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
 	info = &relaycommon.RelayInfo{UsingGroup: "json_as_stream", IsStream: true, StartTime: time.Now()}
+	info.SetEstimatePromptTokens(20000)
 	groupavailability.RecordRelayResultWithContext(jsonContext, info, nil)
 	require.NoError(t, collector.Flush())
 	result, err = collector.Query(context.Background(), "90m", map[string]string{"json_as_stream": "JSON"}, true)
@@ -486,26 +490,26 @@ func assertGroupAvailabilityCacheUsage(t *testing.T, collector *groupavailabilit
 		frames []string
 		want   *float64
 	}{
-		{"openai", []string{`{"usage":{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":40}}}`}, common.GetPointer(40.0)},
-		{"responses", []string{`{"type":"response.completed","response":{"usage":{"input_tokens":200,"input_tokens_details":{"cached_tokens":50}}}}`}, common.GetPointer(25.0)},
-		{"all_cached", []string{`{"usage":{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":100}}}`}, common.GetPointer(100.0)},
-		{"null_cache", []string{`{"usage":{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":null}}}`}, nil},
-		{"malformed_usage", []string{`{"usage":{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":40},}}`}, nil},
-		{"claude_late_cache", []string{`{"type":"message_start","message":{"usage":{"input_tokens":20}}}`, `{"type":"message_delta","usage":{"cache_read_input_tokens":0,"output_tokens":40}}`}, common.GetPointer(0.0)},
-		{"claude_creation_not_double", []string{`{"usage":{"input_tokens":20,"cache_creation_input_tokens":30,"cache_creation":{"ephemeral_5m_input_tokens":10,"ephemeral_1h_input_tokens":20},"cache_read_input_tokens":50}}`}, common.GetPointer(50.0)},
-		{"explicit_zero", []string{`{"usage":{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":0}}}`}, common.GetPointer(0.0)},
-		{"no_cache_field", []string{`{"usage":{"prompt_tokens":100}}`}, nil},
+		{"openai", []string{`{"usage":{"prompt_tokens":20000,"prompt_tokens_details":{"cached_tokens":8000}}}`}, common.GetPointer(40.0)},
+		{"responses", []string{`{"type":"response.completed","response":{"usage":{"input_tokens":40000,"input_tokens_details":{"cached_tokens":10000}}}}`}, common.GetPointer(25.0)},
+		{"all_cached", []string{`{"usage":{"prompt_tokens":20000,"prompt_tokens_details":{"cached_tokens":20000}}}`}, common.GetPointer(100.0)},
+		{"null_cache", []string{`{"usage":{"prompt_tokens":20000,"prompt_tokens_details":{"cached_tokens":null}}}`}, nil},
+		{"malformed_usage", []string{`{"usage":{"prompt_tokens":20000,"prompt_tokens_details":{"cached_tokens":8000},}}`}, nil},
+		{"claude_late_cache", []string{`{"type":"message_start","message":{"usage":{"input_tokens":20000}}}`, `{"type":"message_delta","usage":{"cache_read_input_tokens":0,"output_tokens":40}}`}, common.GetPointer(0.0)},
+		{"claude_creation_not_double", []string{`{"usage":{"input_tokens":4000,"cache_creation_input_tokens":6000,"cache_creation":{"ephemeral_5m_input_tokens":2000,"ephemeral_1h_input_tokens":4000},"cache_read_input_tokens":10000}}`}, common.GetPointer(50.0)},
+		{"explicit_zero", []string{`{"usage":{"prompt_tokens":20000,"prompt_tokens_details":{"cached_tokens":0}}}`}, common.GetPointer(0.0)},
+		{"no_cache_field", []string{`{"usage":{"prompt_tokens":20000}}`}, nil},
 		{"no_usage", []string{`{"choices":[{"finish_reason":"stop"}]}`}, nil},
-		{"claude", []string{`{"type":"message_start","message":{"usage":{"input_tokens":20,"cache_creation_input_tokens":30,"cache_read_input_tokens":50}}}`, `{"type":"message_delta","usage":{"output_tokens":40}}`}, common.GetPointer(50.0)},
-		{"claude_split", []string{`{"usage":{"input_tokens":20,"cache_creation_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":10,"ephemeral_1h_input_tokens":20},"cache_read_input_tokens":50}}`}, common.GetPointer(50.0)},
-		{"gemini", []string{`{"usageMetadata":{"promptTokenCount":100,"cachedContentTokenCount":40}}`}, common.GetPointer(40.0)},
-		{"gemini_tool_input", []string{`{"usageMetadata":{"promptTokenCount":100,"toolUsePromptTokenCount":100,"cachedContentTokenCount":40}}`}, common.GetPointer(20.0)},
-		{"gemini_tool_invalid", []string{`{"usageMetadata":{"promptTokenCount":100,"toolUsePromptTokenCount":-1,"cachedContentTokenCount":40}}`}, nil},
-		{"cumulative", []string{`{"usageMetadata":{"promptTokenCount":100,"cachedContentTokenCount":20}}`, `{"usageMetadata":{"promptTokenCount":200,"cachedContentTokenCount":100}}`}, common.GetPointer(50.0)},
-		{"fractional", []string{`{"usage":{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":1.5}}}`}, nil},
-		{"negative", []string{`{"usage":{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":-1}}}`}, nil},
-		{"overflow", []string{`{"usage":{"prompt_tokens":9223372036854775808,"prompt_tokens_details":{"cached_tokens":1}}}`}, nil},
-		{"over_input", []string{`{"usage":{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":101}}}`}, nil},
+		{"claude", []string{`{"type":"message_start","message":{"usage":{"input_tokens":4000,"cache_creation_input_tokens":6000,"cache_read_input_tokens":10000}}}`, `{"type":"message_delta","usage":{"output_tokens":40}}`}, common.GetPointer(50.0)},
+		{"claude_split", []string{`{"usage":{"input_tokens":4000,"cache_creation_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":2000,"ephemeral_1h_input_tokens":4000},"cache_read_input_tokens":10000}}`}, common.GetPointer(50.0)},
+		{"gemini", []string{`{"usageMetadata":{"promptTokenCount":20000,"cachedContentTokenCount":8000}}`}, common.GetPointer(40.0)},
+		{"gemini_tool_input", []string{`{"usageMetadata":{"promptTokenCount":20000,"toolUsePromptTokenCount":20000,"cachedContentTokenCount":8000}}`}, common.GetPointer(20.0)},
+		{"gemini_tool_invalid", []string{`{"usageMetadata":{"promptTokenCount":20000,"toolUsePromptTokenCount":-1,"cachedContentTokenCount":8000}}`}, nil},
+		{"cumulative", []string{`{"usageMetadata":{"promptTokenCount":20000,"cachedContentTokenCount":4000}}`, `{"usageMetadata":{"promptTokenCount":40000,"cachedContentTokenCount":20000}}`}, common.GetPointer(50.0)},
+		{"fractional", []string{`{"usage":{"prompt_tokens":20000,"prompt_tokens_details":{"cached_tokens":1.5}}}`}, nil},
+		{"negative", []string{`{"usage":{"prompt_tokens":20000,"prompt_tokens_details":{"cached_tokens":-1}}}`}, nil},
+		{"overflow", []string{`{"usage":{"prompt_tokens":9223372036854775808,"prompt_tokens_details":{"cached_tokens":200}}}`}, nil},
+		{"over_input", []string{`{"usage":{"prompt_tokens":20000,"prompt_tokens_details":{"cached_tokens":20200}}}`}, nil},
 		{"zero_input", []string{`{"usage":{"prompt_tokens":0,"prompt_tokens_details":{"cached_tokens":0}}}`}, nil},
 	} {
 		t.Run("cache_"+tc.name, func(t *testing.T) {
@@ -516,6 +520,7 @@ func assertGroupAvailabilityCacheUsage(t *testing.T, collector *groupavailabilit
 				groupavailability.ObserveCacheUsageString(c, frame)
 			}
 			info := &relaycommon.RelayInfo{UsingGroup: "cache-" + tc.name, StartTime: time.Now()}
+			info.SetEstimatePromptTokens(20000)
 			groupavailability.RecordRelayResultWithContext(c, info, nil)
 			require.NoError(t, collector.Flush())
 			result, err := collector.Query(context.Background(), "90m", map[string]string{info.UsingGroup: "Cache"}, false)
@@ -529,17 +534,19 @@ func assertGroupAvailabilityCacheUsage(t *testing.T, collector *groupavailabilit
 		})
 	}
 	// Weight raw upstream input totals, never average request percentages (90%, 0%).
-	for _, frame := range []string{`{"usage":{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":90}}}`, `{"usage":{"prompt_tokens":900,"prompt_tokens_details":{"cached_tokens":0}}}`} {
+	for _, frame := range []string{`{"usage":{"prompt_tokens":20000,"prompt_tokens_details":{"cached_tokens":18000}}}`, `{"usage":{"prompt_tokens":180000,"prompt_tokens_details":{"cached_tokens":0}}}`} {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 		groupavailability.ObserveCacheUsage(c, []byte(frame))
-		groupavailability.RecordRelayResultWithContext(c, &relaycommon.RelayInfo{UsingGroup: "cache-weighted", StartTime: time.Now()}, nil)
+		info := &relaycommon.RelayInfo{UsingGroup: "cache-weighted", StartTime: time.Now()}
+		info.SetEstimatePromptTokens(20000)
+		groupavailability.RecordRelayResultWithContext(c, info, nil)
 	}
 	// A failed or canceled request's cache facts do not enter successful usage.
 	for _, canceled := range []bool{false, true} {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-		groupavailability.ObserveCacheUsage(c, []byte(`{"usage":{"prompt_tokens":9000,"prompt_tokens_details":{"cached_tokens":9000}}}`))
+		groupavailability.ObserveCacheUsage(c, []byte(`{"usage":{"prompt_tokens":1800000,"prompt_tokens_details":{"cached_tokens":1800000}}}`))
 		apiErr := types.InitOpenAIError("server_error", 500)
 		if canceled {
 			ctx, cancel := context.WithCancel(c.Request.Context())
@@ -547,7 +554,9 @@ func assertGroupAvailabilityCacheUsage(t *testing.T, collector *groupavailabilit
 			c.Request = c.Request.WithContext(ctx)
 			apiErr = nil
 		}
-		groupavailability.RecordRelayResultWithContext(c, &relaycommon.RelayInfo{UsingGroup: "cache-weighted", StartTime: time.Now()}, apiErr)
+		info := &relaycommon.RelayInfo{UsingGroup: "cache-weighted", StartTime: time.Now()}
+		info.SetEstimatePromptTokens(20000)
+		groupavailability.RecordRelayResultWithContext(c, info, apiErr)
 	}
 	require.NoError(t, collector.Flush())
 	require.NoError(t, collector.Flush())
@@ -558,9 +567,11 @@ func assertGroupAvailabilityCacheUsage(t *testing.T, collector *groupavailabilit
 	// A retry with no cache usage cannot inherit the previous attempt's facts.
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	groupavailability.ObserveCacheUsage(c, []byte(`{"usage":{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":100}}}`))
+	groupavailability.ObserveCacheUsage(c, []byte(`{"usage":{"prompt_tokens":20000,"prompt_tokens_details":{"cached_tokens":20000}}}`))
 	groupavailability.ResetCacheUsage(c)
-	groupavailability.RecordRelayResultWithContext(c, &relaycommon.RelayInfo{UsingGroup: "cache-retry", StartTime: time.Now()}, nil)
+	info := &relaycommon.RelayInfo{UsingGroup: "cache-retry", StartTime: time.Now()}
+	info.SetEstimatePromptTokens(20000)
+	groupavailability.RecordRelayResultWithContext(c, info, nil)
 	require.NoError(t, collector.Flush())
 	result, err = collector.Query(context.Background(), "90m", map[string]string{"cache-retry": "Retry"}, false)
 	require.NoError(t, err)
@@ -590,26 +601,26 @@ func TestGroupAvailabilityCacheProviderHooks(t *testing.T) {
 		wantRate               *float64
 		wantPrompt, wantCached int
 	}{
-		{"chat_json", "openai", `{"model":"test","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":2,"total_tokens":102,"prompt_tokens_details":{"cached_tokens":40}}}`, types.RelayFormatOpenAI, false, common.GetPointer(40.0), 100, 40},
-		{"chat_zero", "openai", `{"model":"test","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":2,"total_tokens":102,"prompt_tokens_details":{"cached_tokens":0}}}`, types.RelayFormatOpenAI, false, common.GetPointer(0.0), 100, 0},
-		{"chat_missing", "openai", `{"model":"test","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":2,"total_tokens":102}}`, types.RelayFormatOpenAI, false, nil, 100, 0},
-		{"chat_estimated", "openai", `{"model":"test","choices":[],"usage":{"completion_tokens":2}}`, types.RelayFormatOpenAI, false, nil, 55, 0},
-		{"claude_json", "claude", `{"id":"test","type":"message","role":"assistant","model":"test","content":[],"stop_reason":"end_turn","usage":{"input_tokens":20,"output_tokens":2,"cache_creation_input_tokens":30,"cache_read_input_tokens":50}}`, types.RelayFormatClaude, false, common.GetPointer(50.0), 20, 50},
-		{"gemini_json", "gemini", `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":2,"totalTokenCount":102,"cachedContentTokenCount":40}}`, types.RelayFormatGemini, false, common.GetPointer(40.0), 100, 40},
-		{"gemini_tool_json", "gemini", `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":2,"totalTokenCount":202,"toolUsePromptTokenCount":100,"cachedContentTokenCount":40}}`, types.RelayFormatGemini, false, common.GetPointer(20.0), 200, 40},
-		{"responses_json", "responses", `{"id":"test","object":"response","model":"test","status":"completed","output":[],"usage":{"input_tokens":100,"output_tokens":2,"total_tokens":102,"input_tokens_details":{"cached_tokens":40}}}`, types.RelayFormatOpenAIResponses, false, common.GetPointer(40.0), 100, 40},
-		{"image_json", "image", `{"data":[{"b64_json":"fixture"}],"usage":{"input_tokens":100,"output_tokens":2,"total_tokens":102,"input_tokens_details":{"cached_tokens":40}}}`, types.RelayFormatOpenAI, false, common.GetPointer(40.0), 100, 40},
-		{"image_json_as_sse", "image", `{"data":[{"b64_json":"fixture"}],"usage":{"input_tokens":100,"output_tokens":2,"total_tokens":102,"input_tokens_details":{"cached_tokens":40}}}`, types.RelayFormatOpenAI, true, common.GetPointer(40.0), 100, 40},
-		{"chat_sse", "openai", "data: {\"model\":\"test\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":2,\"total_tokens\":102,\"prompt_tokens_details\":{\"cached_tokens\":40}}}\n\ndata: [DONE]\n\n", types.RelayFormatOpenAI, true, common.GetPointer(40.0), 100, 40},
-		{"claude_sse", "claude", "data: {\"type\":\"message_start\",\"message\":{\"id\":\"test\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"test\",\"content\":[],\"usage\":{\"input_tokens\":20,\"output_tokens\":0,\"cache_creation_input_tokens\":30,\"cache_read_input_tokens\":50}}}\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}\n\ndata: {\"type\":\"message_stop\"}\n\n", types.RelayFormatClaude, true, common.GetPointer(50.0), 20, 50},
-		{"gemini_sse", "gemini", "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":100,\"candidatesTokenCount\":2,\"totalTokenCount\":102,\"cachedContentTokenCount\":40}}\n\n", types.RelayFormatGemini, true, common.GetPointer(40.0), 100, 40},
-		{"responses_sse", "responses", "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"test\",\"model\":\"test\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":100,\"output_tokens\":2,\"total_tokens\":102,\"input_tokens_details\":{\"cached_tokens\":40}}}}\n\n", types.RelayFormatOpenAIResponses, true, common.GetPointer(40.0), 100, 40},
+		{"chat_json", "openai", `{"model":"test","choices":[],"usage":{"prompt_tokens":20000,"completion_tokens":2,"total_tokens":102,"prompt_tokens_details":{"cached_tokens":8000}}}`, types.RelayFormatOpenAI, false, common.GetPointer(40.0), 20000, 8000},
+		{"chat_zero", "openai", `{"model":"test","choices":[],"usage":{"prompt_tokens":20000,"completion_tokens":2,"total_tokens":102,"prompt_tokens_details":{"cached_tokens":0}}}`, types.RelayFormatOpenAI, false, common.GetPointer(0.0), 20000, 0},
+		{"chat_missing", "openai", `{"model":"test","choices":[],"usage":{"prompt_tokens":20000,"completion_tokens":2,"total_tokens":102}}`, types.RelayFormatOpenAI, false, nil, 20000, 0},
+		{"chat_estimated", "openai", `{"model":"test","choices":[],"usage":{"completion_tokens":2}}`, types.RelayFormatOpenAI, false, nil, 11000, 0},
+		{"claude_json", "claude", `{"id":"test","type":"message","role":"assistant","model":"test","content":[],"stop_reason":"end_turn","usage":{"input_tokens":4000,"output_tokens":2,"cache_creation_input_tokens":6000,"cache_read_input_tokens":10000}}`, types.RelayFormatClaude, false, common.GetPointer(50.0), 4000, 10000},
+		{"gemini_json", "gemini", `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":20000,"candidatesTokenCount":2,"totalTokenCount":102,"cachedContentTokenCount":8000}}`, types.RelayFormatGemini, false, common.GetPointer(40.0), 20000, 8000},
+		{"gemini_tool_json", "gemini", `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":20000,"candidatesTokenCount":2,"totalTokenCount":202,"toolUsePromptTokenCount":20000,"cachedContentTokenCount":8000}}`, types.RelayFormatGemini, false, common.GetPointer(20.0), 40000, 8000},
+		{"responses_json", "responses", `{"id":"test","object":"response","model":"test","status":"completed","output":[],"usage":{"input_tokens":20000,"output_tokens":2,"total_tokens":102,"input_tokens_details":{"cached_tokens":8000}}}`, types.RelayFormatOpenAIResponses, false, common.GetPointer(40.0), 20000, 8000},
+		{"image_json", "image", `{"data":[{"b64_json":"fixture"}],"usage":{"input_tokens":20000,"output_tokens":2,"total_tokens":102,"input_tokens_details":{"cached_tokens":8000}}}`, types.RelayFormatOpenAI, false, common.GetPointer(40.0), 20000, 8000},
+		{"image_json_as_sse", "image", `{"data":[{"b64_json":"fixture"}],"usage":{"input_tokens":20000,"output_tokens":2,"total_tokens":102,"input_tokens_details":{"cached_tokens":8000}}}`, types.RelayFormatOpenAI, true, common.GetPointer(40.0), 20000, 8000},
+		{"chat_sse", "openai", "data: {\"model\":\"test\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":20000,\"completion_tokens\":2,\"total_tokens\":102,\"prompt_tokens_details\":{\"cached_tokens\":8000}}}\n\ndata: [DONE]\n\n", types.RelayFormatOpenAI, true, common.GetPointer(40.0), 20000, 8000},
+		{"claude_sse", "claude", "data: {\"type\":\"message_start\",\"message\":{\"id\":\"test\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"test\",\"content\":[],\"usage\":{\"input_tokens\":4000,\"output_tokens\":0,\"cache_creation_input_tokens\":6000,\"cache_read_input_tokens\":10000}}}\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}\n\ndata: {\"type\":\"message_stop\"}\n\n", types.RelayFormatClaude, true, common.GetPointer(50.0), 4000, 10000},
+		{"gemini_sse", "gemini", "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":20000,\"candidatesTokenCount\":2,\"totalTokenCount\":102,\"cachedContentTokenCount\":8000}}\n\n", types.RelayFormatGemini, true, common.GetPointer(40.0), 20000, 8000},
+		{"responses_sse", "responses", "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"test\",\"model\":\"test\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":20000,\"output_tokens\":2,\"total_tokens\":102,\"input_tokens_details\":{\"cached_tokens\":8000}}}}\n\n", types.RelayFormatOpenAIResponses, true, common.GetPointer(40.0), 20000, 8000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 			info := &relaycommon.RelayInfo{UsingGroup: tc.name, IsStream: tc.stream, RelayFormat: tc.format, StartTime: time.Now(), ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "test"}}
-			info.SetEstimatePromptTokens(55)
+			info.SetEstimatePromptTokens(11000)
 			resp := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(tc.body))}
 			resp.Header.Set("Content-Type", "application/json")
 			if strings.HasPrefix(tc.body, "data:") {
@@ -667,7 +678,7 @@ func TestGroupAvailabilityCacheProviderHooks(t *testing.T) {
 	t.Run("bedrock_sdk_stream", func(t *testing.T) {
 		var body bytes.Buffer
 		for _, data := range []string{
-			`{"type":"message_start","message":{"id":"test","type":"message","role":"assistant","model":"test","content":[],"usage":{"input_tokens":20,"output_tokens":0,"cache_creation_input_tokens":30,"cache_read_input_tokens":50}}}`,
+			`{"type":"message_start","message":{"id":"test","type":"message","role":"assistant","model":"test","content":[],"usage":{"input_tokens":4000,"output_tokens":0,"cache_creation_input_tokens":6000,"cache_read_input_tokens":10000}}}`,
 			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}`,
 			`{"type":"message_stop"}`,
 		} {
@@ -698,13 +709,14 @@ func TestGroupAvailabilityCacheProviderHooks(t *testing.T) {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 		info := &relaycommon.RelayInfo{UsingGroup: "bedrock", IsStream: true, RelayFormat: types.RelayFormatClaude, StartTime: time.Now(), ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "test"}}
+		info.SetEstimatePromptTokens(20000)
 		value, apiErr := adaptor.DoResponse(c, nil, info)
 		require.Nil(t, apiErr)
 		usage, ok := value.(*dto.Usage)
 		require.True(t, ok)
 		require.NotNil(t, usage)
-		assert.Equal(t, 20, usage.PromptTokens)
-		assert.Equal(t, 50, usage.PromptTokensDetails.CachedTokens)
+		assert.Equal(t, 4000, usage.PromptTokens)
+		assert.Equal(t, 10000, usage.PromptTokensDetails.CachedTokens)
 		groupavailability.RecordRelayResultWithContext(c, info, nil)
 		require.NoError(t, collector.Flush())
 		result, err := collector.Query(context.Background(), "90m", map[string]string{"bedrock": "Bedrock"}, false)

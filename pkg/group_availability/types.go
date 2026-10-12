@@ -10,6 +10,7 @@ type Metrics struct {
 	AvgTtftMs     *int64   `json:"avg_ttft_ms"`
 	AvgDurationMs *int64   `json:"avg_duration_ms"`
 	CacheHitRate  *float64 `json:"cache_hit_rate"`
+	AvgOutputTPS  *float64 `json:"avg_output_tps"`
 }
 
 type Bucket struct {
@@ -37,6 +38,7 @@ type Result struct {
 	CoverageComplete       bool    `json:"coverage_complete"`
 	RefreshIntervalSeconds int     `json:"refresh_interval_seconds"`
 	DataThrough            *int64  `json:"data_through"`
+	MinInputTokens         int64   `json:"min_input_tokens"`
 	MinSamples             int64   `json:"min_samples"`
 	WarningErrorRate       float64 `json:"warning_error_rate"`
 	CriticalErrorRate      float64 `json:"critical_error_rate"`
@@ -45,6 +47,9 @@ type Result struct {
 
 type Sample struct {
 	Group            string
+	InputTokens      int64
+	OutputTokens     int64
+	GenerationMs     int64
 	Success          bool
 	LatencyMs        int64
 	TtftMs           int64

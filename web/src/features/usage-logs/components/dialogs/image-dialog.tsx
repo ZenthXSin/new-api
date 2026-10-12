@@ -89,6 +89,7 @@ export function ImageDialog({
               onLoad={handleImageLoad}
               onError={handleImageError}
               loading='lazy'
+              referrerPolicy='no-referrer'
             />
 
             {/* Error text overlay (shown on skeleton) */}
@@ -102,11 +103,13 @@ export function ImageDialog({
           </div>
 
           {/* Image URL */}
-          <div className='bg-muted mt-4 rounded-md p-3'>
-            <p className='text-muted-foreground font-mono text-xs break-all'>
-              {imageUrl}
-            </p>
-          </div>
+          {!imageUrl.startsWith('blob:') && (
+            <div className='bg-muted mt-4 rounded-md p-3'>
+              <p className='text-muted-foreground font-mono text-xs break-all'>
+                {imageUrl}
+              </p>
+            </div>
+          )}
         </div>
       </ScrollArea>
     </Dialog>

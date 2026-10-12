@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	MinSamples = 1
-	retention  = 35 * 24 * time.Hour
+	MinSamples     = 1
+	MinInputTokens = model.GroupAvailabilityMinInputTokens
+	retention      = 35 * 24 * time.Hour
 )
 
 type bucketKey struct {
@@ -62,7 +63,7 @@ func Init() error {
 }
 
 func (c *Collector) Record(sample Sample) {
-	if c == nil || sample.Group == "" || sample.Group == "auto" {
+	if c == nil || sample.Group == "" || sample.Group == "auto" || sample.InputTokens <= MinInputTokens || sample.InputTokens > maxCacheUsageTokens {
 		return
 	}
 	c.mu.Lock()
@@ -76,6 +77,7 @@ func (c *Collector) Record(sample Sample) {
 		bucket.SourceID = common.GetUUID()
 	}
 	bucket.Group, bucket.BucketTs = key.group, key.start
+	bucket.MinInputTokens = MinInputTokens
 	bucket.RequestCount++
 	if sample.Success {
 		bucket.SuccessCount++
@@ -89,6 +91,10 @@ func (c *Collector) Record(sample Sample) {
 	if sample.Success && sample.CacheInputTokens > 0 && sample.CacheInputTokens <= maxCacheUsageTokens && sample.CacheReadTokens >= 0 && sample.CacheReadTokens <= sample.CacheInputTokens {
 		bucket.CacheInputTokens += sample.CacheInputTokens
 		bucket.CacheReadTokens += sample.CacheReadTokens
+	}
+	if sample.Success && sample.OutputTokens > 0 && sample.OutputTokens <= maxCacheUsageTokens && sample.GenerationMs > 0 {
+		bucket.OutputTokens += sample.OutputTokens
+		bucket.GenerationMs += sample.GenerationMs
 	}
 	c.buckets[key] = bucket
 }
@@ -161,7 +167,7 @@ func (c *Collector) QuerySorted(ctx context.Context, rangeName string, allowed m
 	start := now - now%bucket - duration + bucket
 	result := Result{Range: rangeName, Source: "passive_requests", BucketSeconds: bucket, GeneratedAt: now,
 		StartTime: start, EndTime: now, CollectionStartedAt: c.startedAt, CoverageComplete: start >= c.startedAt,
-		RefreshIntervalSeconds: 15, MinSamples: MinSamples, WarningErrorRate: 5, CriticalErrorRate: 20, Groups: make([]Group, 0, len(allowed))}
+		RefreshIntervalSeconds: 15, MinInputTokens: MinInputTokens, MinSamples: MinSamples, WarningErrorRate: 5, CriticalErrorRate: 20, Groups: make([]Group, 0, len(allowed))}
 	groups := make([]string, 0, len(allowed))
 	for group := range allowed {
 		if group != "" && group != "auto" {
@@ -226,6 +232,8 @@ func merge(target *model.GroupAvailabilityBucket, value model.GroupAvailabilityB
 	target.LastRequestAt = max(target.LastRequestAt, value.LastRequestAt)
 	target.CacheInputTokens += value.CacheInputTokens
 	target.CacheReadTokens += value.CacheReadTokens
+	target.OutputTokens += value.OutputTokens
+	target.GenerationMs += value.GenerationMs
 }
 
 func describe(value model.GroupAvailabilityBucket, showCounts bool) Metrics {
@@ -233,6 +241,10 @@ func describe(value model.GroupAvailabilityBucket, showCounts bool) Metrics {
 	if value.CacheInputTokens > 0 && value.CacheReadTokens >= 0 && value.CacheReadTokens <= value.CacheInputTokens {
 		rate := math.Round(float64(value.CacheReadTokens)/float64(value.CacheInputTokens)*10000) / 100
 		metrics.CacheHitRate = &rate
+	}
+	if value.OutputTokens > 0 && value.GenerationMs > 0 {
+		speed := math.Round(float64(value.OutputTokens)/float64(value.GenerationMs)*100000) / 100
+		metrics.AvgOutputTPS = &speed
 	}
 	errors := value.RequestCount - value.SuccessCount
 	if showCounts {

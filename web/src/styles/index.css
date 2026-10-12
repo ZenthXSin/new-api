@@ -29,6 +29,8 @@ For commercial licensing, please contact support@quantumnous.com
 
 @import './theme.css';
 @import './theme-presets.css';
+@import '../features/codex/vendor/zcode/theme.css';
+@source '../../node_modules/streamdown/dist/*.js';
 
 /* Shiki dual themes: token colors follow dark theme (pre background stays `bg-background` on the block) */
 @layer components {

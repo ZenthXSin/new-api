@@ -102,7 +102,11 @@ describe('bill type labels', () => {
 
 describe('funds log type labels', () => {
   test('maps all three funds log types to i18n keys', () => {
-    expect(Object.keys(FUNDS_LOG_TYPE_LABELS).sort()).toEqual(['consume', 'refund', 'topup'])
+    expect(Object.keys(FUNDS_LOG_TYPE_LABELS).sort()).toEqual([
+      'consume',
+      'refund',
+      'topup',
+    ])
     expect(FUNDS_LOG_TYPE_LABELS.topup).toBe('Topup')
     expect(FUNDS_LOG_TYPE_LABELS.consume).toBe('Consume')
     expect(FUNDS_LOG_TYPE_LABELS.refund).toBe('Refund')

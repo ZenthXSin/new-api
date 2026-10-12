@@ -18,6 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from '@tanstack/react-router'
+import {
   fireEvent,
   render,
   screen,
@@ -33,7 +39,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { Codex } from '..'
 import { EnvironmentPanel } from '../components/environment-panel'
-import type { CodexEnvironment } from '../types'
+import type { CodexEnvironment, CodexTurnInput } from '../types'
 import { detail, environment, status } from './fixtures'
 
 const panelProps = {
@@ -47,11 +53,38 @@ const panelProps = {
 }
 const response = (data: unknown) =>
   ({ data: { success: true, data } }) as AxiosResponse
-function renderEnvironment(initial: CodexEnvironment | Error) {
+async function renderEnvironment(initial: CodexEnvironment | Error) {
+  const matchMedia = window.matchMedia
+  vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+    ...matchMedia(query),
+    matches: query === '(min-width: 768px)',
+  }))
   let current = initial
   const data = detail()
   const requests = vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url.endsWith('/status')) return response(status)
+    if (url.endsWith('/tasks')) {
+      return response({ tasks: [], total: 0, hasMore: false, nextOffset: null })
+    }
+    if (url.endsWith('/environments')) return response({ environments: [] })
+    if (url.endsWith('/repository')) {
+      return response({
+        repository: {
+          available: false,
+          branch: null,
+          head: null,
+          detached: false,
+          dirty: false,
+          checkoutSupported: false,
+          checkoutReason: 'not_repository',
+          hasSubmodules: false,
+          remotes: [],
+          branches: [],
+          branchesTruncated: false,
+        },
+      })
+    }
+    if (url.endsWith('/conversations')) return response({ conversations: [] })
     if (url.endsWith('/environment')) {
       if (current instanceof Error) throw current
       return response({ environment: current })
@@ -71,15 +104,27 @@ function renderEnvironment(initial: CodexEnvironment | Error) {
     if (url.endsWith('/environment/stop')) {
       current = { ...environment, status: 'stopped' }
     }
+    if (url.endsWith('/turns')) return response(data)
     return response({ environment: current })
   })
   const onSelect = vi.fn()
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
+  const rootRoute = createRootRoute({
+    component: () => (
+      <Codex workspaceId='project-1' onSelect={onSelect} onBack={vi.fn()} />
+    ),
+  })
+  const router = createRouter({
+    routeTree: rootRoute,
+    history: createMemoryHistory({ initialEntries: ['/codex'] }),
+    defaultPendingMinMs: 0,
+  })
+  await router.load()
   render(
     <QueryClientProvider client={client}>
-      <Codex workspaceId='project-1' onSelect={onSelect} onBack={vi.fn()} />
+      <RouterProvider router={router} />
     </QueryClientProvider>
   )
   return {
@@ -97,20 +142,35 @@ afterEach(() => {
   useAuthStore.getState().auth.reset()
 })
 
+async function openEnvironmentSettings() {
+  const triggers = await screen.findAllByRole('button', { name: 'Settings' })
+  await userEvent.click(triggers[0])
+  await userEvent.click(await screen.findByRole('tab', { name: 'Docker' }))
+  return screen.getByRole('region', { name: 'Personal environment' })
+}
+
 describe('Personal environment controls', () => {
-  test('environment details stay out of the workspace until opened and Escape returns focus to the trigger', async () => {
-    render(<EnvironmentPanel {...panelProps} environment={environment} />)
-    const trigger = screen.getByRole('button', {
-      name: 'Personal environment details',
-    })
-    expect(screen.queryByText('Storage limit')).not.toBeInTheDocument()
+  test('environment details open from settings and Escape restores the workspace', async () => {
+    await renderEnvironment(environment)
+    expect(
+      screen.queryByRole('region', { name: 'Personal environment' })
+    ).not.toBeInTheDocument()
+    const trigger = (
+      await screen.findAllByRole('button', { name: 'Settings' })
+    )[0]
     await userEvent.click(trigger)
+    await userEvent.click(await screen.findByRole('tab', { name: 'Docker' }))
     expect(await screen.findByText('Storage limit')).toBeVisible()
     await userEvent.keyboard('{Escape}')
     await waitFor(() =>
-      expect(trigger).toHaveAttribute('aria-expanded', 'false')
+      expect(
+        screen.queryByRole('dialog', { name: 'Settings' })
+      ).not.toBeInTheDocument()
     )
     expect(trigger).toHaveFocus()
+    expect(
+      screen.getByRole('textbox', { name: 'Describe your coding task' })
+    ).toBeVisible()
   })
   test('an idle environment error allows stopping the container to recover without deleting projects', async () => {
     const onStop = vi.fn()
@@ -125,9 +185,6 @@ describe('Personal environment controls', () => {
         onStop={onStop}
       />
     )
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Personal environment details' })
-    )
     expect(screen.getByRole('status')).toHaveTextContent('Environment error')
     expect(screen.getByRole('alert')).toHaveTextContent(
       'A process could not be stopped'
@@ -139,18 +196,13 @@ describe('Personal environment controls', () => {
   })
   test('details explain one shared environment, persistent projects and actual resource limits', async () => {
     render(<EnvironmentPanel {...panelProps} environment={environment} />)
-    const details = screen.getByRole('button', {
-      name: 'Personal environment details',
-    })
-    expect(details).toHaveAttribute('aria-expanded', 'false')
-    await userEvent.click(details)
-    expect(details).toHaveAttribute('aria-expanded', 'true')
     expect(
       screen.getByText(
         'One personal environment shared by all your projects. Each project keeps its own files and conversation.'
       )
     ).toBeVisible()
-    expect(screen.getByText('2 GiB')).toBeVisible()
+    expect(screen.getByText('2,048 MB')).toBeVisible()
+    expect(screen.getByText('5% · 2 vCPU')).toBeVisible()
     expect(screen.getByText('10 GiB')).toBeVisible()
     expect(
       screen.getByText(
@@ -174,9 +226,6 @@ describe('Personal environment controls', () => {
         onStop={onStop}
       />
     )
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Personal environment details' })
-    )
     expect(
       screen.getByRole('button', { name: 'Stop environment' })
     ).toBeDisabled()
@@ -184,16 +233,13 @@ describe('Personal environment controls', () => {
       screen.getByText('Stop the active task before stopping your environment.')
     ).toBeVisible()
     await userEvent.click(screen.getByRole('button', { name: /API service/ }))
-    expect(onSelect).toHaveBeenCalledWith('project-2')
+    expect(onSelect).toHaveBeenCalledWith('project-2', undefined)
     expect(onStop).not.toHaveBeenCalled()
   })
   test('loading and starting prevent duplicate environment actions and errors offer retry', async () => {
     const onRetry = vi.fn()
     const view = render(
       <EnvironmentPanel {...panelProps} loading unavailable onRetry={onRetry} />
-    )
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Personal environment details' })
     )
     expect(screen.getByRole('status')).toHaveTextContent(
       'Loading environment...'
@@ -225,31 +271,32 @@ describe('Personal environment controls', () => {
     )
     expect(onRetry).toHaveBeenCalledOnce()
   })
-  test('manual start and stop call only environment endpoints and keep project history', async () => {
-    const app = renderEnvironment(environment)
+  test('creating and stopping an environment call only environment endpoints and keep project history', async () => {
+    const app = await renderEnvironment({
+      ...environment,
+      status: 'not_created',
+    })
+    const environmentRegion = await openEnvironmentSettings()
     await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Personal environment details' })
-      ).toHaveAttribute('title', 'Environment sleeping')
+      expect(within(environmentRegion).getByRole('status')).toHaveTextContent(
+        'Environment not created'
+      )
     )
     await userEvent.click(
-      screen.getByRole('button', { name: 'Personal environment details' })
-    )
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Start environment' })
+      screen.getByRole('button', { name: 'Create and start environment' })
     )
     await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Personal environment details' })
-      ).toHaveAttribute('title', 'Environment running')
+      expect(within(environmentRegion).getByRole('status')).toHaveTextContent(
+        'Environment running'
+      )
     )
     await userEvent.click(
       screen.getByRole('button', { name: 'Stop environment' })
     )
     await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Personal environment details' })
-      ).toHaveAttribute('title', 'Environment sleeping')
+      expect(within(environmentRegion).getByRole('status')).toHaveTextContent(
+        'Environment sleeping'
+      )
     )
     expect(app.post.mock.calls.map(([url]) => url)).toEqual([
       '/api/codex/environment/start',
@@ -262,11 +309,11 @@ describe('Personal environment controls', () => {
     ).toBe(true)
     await userEvent.keyboard('{Escape}')
     expect(
-      screen.getByRole('heading', { name: 'Website project' })
+      screen.getByRole('textbox', { name: 'Describe your coding task' })
     ).toBeVisible()
   })
-  test('another active project blocks sending and mutations while preserving the draft and file browsing', async () => {
-    const app = renderEnvironment({
+  test('another active project allows a parallel task and new projects while keeping file mutations blocked', async () => {
+    const app = await renderEnvironment({
       ...environment,
       status: 'running',
       activeWorkspaceId: 'project-2',
@@ -274,32 +321,31 @@ describe('Personal environment controls', () => {
     })
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: 'Personal environment details' })
-      ).toHaveAttribute('title', 'Environment running')
+        screen.getByRole('textbox', { name: 'Describe your coding task' })
+      ).toBeVisible()
     )
     const textbox = screen.getByRole('textbox', {
       name: 'Describe your coding task',
     })
     fireEvent.change(textbox, { target: { value: 'Keep this task for later' } })
-    fireEvent.keyDown(textbox, { key: 'Enter' })
-    expect(screen.getByRole('button', { name: 'Start task' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'New project' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Start task' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'New project' })).toBeEnabled()
     expect(textbox).toHaveValue('Keep this task for later')
     expect(
-      screen.getByText(
-        'Another project is using your environment. Finish or stop its task before starting a new one.'
+      screen.queryByText(
+        'Another conversation is running. You can queue this message or interrupt the active task.'
       )
-    ).toBeVisible()
+    ).not.toBeInTheDocument()
     await userEvent.click(
       screen.getByRole('button', { name: 'Project actions' })
     )
     expect(
-      screen.getByRole('button', { name: 'Delete project' })
-    ).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Import ZIP' })).toBeDisabled()
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Close project actions' })
-    )
+      screen.getByRole('menuitem', { name: 'Delete project' })
+    ).toHaveAttribute('aria-disabled', 'true')
+    expect(
+      screen.getByRole('menuitem', { name: 'Import ZIP' })
+    ).toHaveAttribute('aria-disabled', 'true')
+    await userEvent.keyboard('{Escape}')
     await userEvent.click(
       screen.getByRole('button', { name: 'Review changes' })
     )
@@ -320,57 +366,67 @@ describe('Personal environment controls', () => {
     await userEvent.click(
       screen.getByRole('button', { name: 'Close project inspector' })
     )
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Open active project' })
+    expect(
+      screen.queryByRole('button', { name: 'Open active project' })
+    ).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Start task' }))
+    await waitFor(() =>
+      expect(app.post).toHaveBeenCalledWith(
+        '/api/codex/workspaces/project-1/turns',
+        expect.objectContaining({
+          prompt: 'Keep this task for later',
+        }),
+        expect.anything()
+      )
     )
-    expect(app.onSelect).toHaveBeenCalledWith('project-2')
-    expect(app.post).not.toHaveBeenCalled()
+    const submitted = app.post.mock.calls.find(([url]) =>
+      url.endsWith('/turns')
+    )?.[1] as CodexTurnInput
+    expect(submitted.busyAction).toBeUndefined()
   })
   test('an unavailable environment blocks a task until retry succeeds without clearing the draft', async () => {
-    const app = renderEnvironment(new Error('Connection lost'))
+    const app = await renderEnvironment(new Error('Connection lost'))
     const textbox = await screen.findByRole('textbox', {
       name: 'Describe your coding task',
     })
     fireEvent.change(textbox, { target: { value: 'Preserved draft' } })
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Personal environment details' })
-    )
+    expect(screen.getByRole('button', { name: 'Start task' })).toBeDisabled()
+    const environmentRegion = await openEnvironmentSettings()
     await screen.findByRole(
       'button',
       { name: 'Retry environment' },
       { timeout: 3000 }
     )
-    expect(screen.getByRole('button', { name: 'Start task' })).toBeDisabled()
     app.recover()
     await userEvent.click(
       screen.getByRole('button', { name: 'Retry environment' })
     )
     await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Personal environment details' })
-      ).toHaveAttribute('title', 'Environment sleeping')
+      expect(within(environmentRegion).getByRole('status')).toHaveTextContent(
+        'Environment sleeping'
+      )
     )
     await userEvent.keyboard('{Escape}')
     expect(screen.getByRole('button', { name: 'Start task' })).toBeEnabled()
     expect(textbox).toHaveValue('Preserved draft')
   })
   test('project deletion explains that the personal environment and other projects remain', async () => {
-    renderEnvironment(environment)
+    await renderEnvironment(environment)
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: 'Personal environment details' })
-      ).toHaveAttribute('title', 'Environment sleeping')
+        screen.getByRole('textbox', { name: 'Describe your coding task' })
+      ).toBeVisible()
     )
     await userEvent.click(
       screen.getByRole('button', { name: 'Project actions' })
     )
     await userEvent.click(
-      screen.getByRole('button', { name: 'Delete project' })
+      screen.getByRole('menuitem', { name: 'Delete project' })
     )
     const dialog = await screen.findByRole('dialog')
     expect(
       within(dialog).getByText(
-        'This permanently deletes this project, its files, and its conversation. Your personal environment and other projects are kept. Export anything you want to keep first.'
+        'This permanently deletes this project, its files, and all its conversations. Your personal environment and other projects are kept. Export anything you want to keep first.'
       )
     ).toBeVisible()
   })

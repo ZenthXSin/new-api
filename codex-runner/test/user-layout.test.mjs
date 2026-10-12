@@ -35,7 +35,7 @@ test('legacy projects and native home directories migrate independently without 
     assert.equal(await fs.readFile(path.join(next.workspaceHomePath, '.workbench', 'baseline.git', 'HEAD'), 'utf8'), 'ref: refs/heads/main');
     assert.equal(JSON.parse(await fs.readFile(path.join(next.codexHomePath, 'sessions', 'history.jsonl'), 'utf8')).cwd, '/workspace');
     await assert.rejects(fs.lstat(legacyWorkspacePaths(f.dataDir, workspace.id).root), { code: 'ENOENT' });
-    await assert.rejects(fs.lstat(path.join(next.userHomePath, '.codex')), { code: 'ENOENT' });
+    assert.deepEqual(await fs.readdir(next.containerCodexHomePath), []);
   }
   assert.deepEqual((await files.initialize(f.workspaces)).migrated, []);
 });
@@ -85,4 +85,42 @@ test('native SQLite path migration is idempotent and leaves history text untouch
   for (let i = 0; i < 2; i++) { const result = await runCommand('python3', ['-I', script, id]); assert.equal(result.code, 0, result.stderr); assert.equal(JSON.parse(result.stdout).migratedPaths, i ? 0 : 2); }
   const result = await runCommand('python3', ['-I', '-c', 'import sqlite3,json,sys\nprint(json.dumps(sqlite3.connect(sys.argv[1]).execute("SELECT * FROM threads").fetchone()))', database]);
   assert.deepEqual(JSON.parse(result.stdout), ['native-thread', `${home}/sessions/rollout.jsonl`, `/workspace/projects/${id}/project`, 'keep /workspace literal']);
+});
+
+test('strict service umask permits container traversal while keeping host parents and private Codex data restricted', async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-umask-test-')); temporary.push(dataDir);
+  const files = new WorkspaceFiles({ dataDir }), id = randomUUID();
+  const previous = process.umask(0o077);
+  let paths;
+  try { paths = await files.create(id, 910081); }
+  finally { process.umask(previous); }
+  for (const location of [paths.projectsPath, paths.root, paths.homePath, paths.workspaceHomesPath]) {
+    const stat = await fs.stat(location);
+    assert.equal(stat.mode & 0o777, 0o755, `Container must traverse ${location}`);
+    if (process.getuid?.() === 0) assert.equal(stat.uid, 0);
+  }
+  for (const location of [dataDir, path.join(dataDir, 'users'), paths.userRoot, paths.projectPath, paths.workspaceHomePath, paths.codexHomePath]) assert.equal((await fs.stat(location)).mode & 0o777, 0o700, `Private mode changed for ${location}`);
+});
+
+test('existing inaccessible managed directories are repaired without changing data modes or accepting unsafe parents', async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-permission-repair-')); temporary.push(dataDir);
+  const files = new WorkspaceFiles({ dataDir }), id = randomUUID(), paths = await files.create(id, 910082);
+  const managed = [paths.projectsPath, paths.root, paths.homePath, paths.workspaceHomesPath];
+  for (const location of managed) await fs.chmod(location, 0o700);
+  const sentinel = path.join(paths.projectPath, 'private.txt');
+  await fs.writeFile(sentinel, 'unchanged', { mode: 0o600 });
+  await files.check(id);
+  for (const location of managed) assert.equal((await fs.stat(location)).mode & 0o777, 0o755);
+  assert.equal(await fs.readFile(sentinel, 'utf8'), 'unchanged');
+  assert.equal((await fs.stat(sentinel)).mode & 0o777, 0o600);
+  assert.equal((await fs.stat(paths.codexHomePath)).mode & 0o777, 0o700);
+  if (process.getuid?.() === 0) {
+    await fs.chmod(paths.root, 0o777);
+    await assert.rejects(files.check(id), { code: 'unsafe_path' });
+    assert.equal((await fs.stat(paths.root)).mode & 0o777, 0o777);
+    await fs.chmod(paths.root, 0o755);
+  }
+  const original = paths.root + '.saved';
+  await fs.rename(paths.root, original); await fs.symlink(original, paths.root);
+  await assert.rejects(files.check(id), { code: 'unsafe_path' });
 });

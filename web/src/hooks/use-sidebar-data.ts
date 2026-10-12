@@ -42,6 +42,7 @@ import {
 import { useTranslation } from 'react-i18next'
 
 import type { SidebarData } from '@/components/layout/types'
+import { useCodexAccess } from '@/hooks/use-codex-access'
 import { ROLE } from '@/lib/roles'
 
 /**
@@ -52,6 +53,7 @@ import { ROLE } from '@/lib/roles'
  */
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
+  const codexAccess = useCodexAccess()
 
   return {
     navGroups: [
@@ -59,6 +61,9 @@ export function useSidebarData(): SidebarData {
         id: 'chat',
         title: t('Chat'),
         items: [
+          ...(codexAccess.allowed
+            ? [{ title: t('Codex'), url: '/codex', icon: CodeXml }]
+            : []),
           {
             title: t('Playground'),
             url: '/playground',
@@ -140,12 +145,6 @@ export function useSidebarData(): SidebarData {
         title: t('Admin'),
         items: [
           {
-            title: t('Codex'),
-            url: '/codex',
-            icon: CodeXml,
-            requiredRole: ROLE.ADMIN,
-          },
-          {
             title: t('Channels'),
             url: '/channels',
             icon: Radio,
@@ -154,6 +153,12 @@ export function useSidebarData(): SidebarData {
             title: t('Models'),
             url: '/models/metadata',
             icon: Box,
+          },
+          {
+            title: t('Codex management'),
+            url: '/codex-admin',
+            icon: CodeXml,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('Users'),

@@ -30,7 +30,12 @@ export const environment: CodexEnvironment = {
   activeWorkspaceName: null,
   projectCount: 1,
   idleSeconds: 600,
-  limits: { cpus: 2, memoryBytes: 2 * 1024 ** 3, diskBytes: 10 * 1024 ** 3 },
+  limits: {
+    cpus: 2,
+    cpuPercent: 5,
+    memoryBytes: 2 * 1024 ** 3,
+    diskBytes: 10 * 1024 ** 3,
+  },
 }
 
 export const status: CodexStatus = {

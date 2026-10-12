@@ -82,6 +82,26 @@ func (p *RetryParam) ResetRetryNextTry() {
 //	Retry=3: GroupB, priority1 (startRetryIndex=2, priorityRetry=1)
 //	         分组B, 优先级1
 func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, error) {
+	if raw, ok := param.Ctx.Get(CodexRelayAllowedChannelsKey); ok {
+		allowed, valid := raw.(map[int]bool)
+		if !valid || len(allowed) == 0 {
+			return nil, param.TokenGroup, errors.New("Codex model has no compatible channels")
+		}
+		abilities, err := model.GetAllEnableAbilityWithChannels()
+		if err != nil {
+			return nil, param.TokenGroup, err
+		}
+		excluded := make(map[int]struct{}, len(param.Excluded))
+		for id := range param.Excluded {
+			excluded[id] = struct{}{}
+		}
+		for _, ability := range abilities {
+			if !allowed[ability.ChannelId] {
+				excluded[ability.ChannelId] = struct{}{}
+			}
+		}
+		param.Excluded = excluded
+	}
 	var channel *model.Channel
 	var err error
 	selectGroup := param.TokenGroup

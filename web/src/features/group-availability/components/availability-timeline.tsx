@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/tooltip'
 import {
   formatLatency,
+  formatThroughput,
   formatUptimePct,
 } from '@/features/performance-metrics/lib/format'
 import { toIntlLocale } from '@/i18n/languages'
@@ -125,6 +126,10 @@ export function AvailabilityTimeline({
                   <p>
                     {t('Average request duration')}:{' '}
                     {formatLatency(bucket.avg_duration_ms ?? Number.NaN)}
+                  </p>
+                  <p>
+                    {t('Average output speed')}:{' '}
+                    {formatThroughput(bucket.avg_output_tps ?? Number.NaN)}
                   </p>
                 </div>
               </TooltipContent>

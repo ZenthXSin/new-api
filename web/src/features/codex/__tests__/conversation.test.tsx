@@ -64,7 +64,7 @@ const props = { running: false, approvals: [], onApprove: vi.fn() }
 describe('Codex task conversation', () => {
   test('completed tool steps collapse into a summary while the final Markdown answer remains visible', async () => {
     render(<CodexConversation {...props} thread={thread} />)
-    expect(screen.getByText('Task completed')).toBeVisible()
+    expect(screen.queryByText('Task completed')).not.toBeInTheDocument()
     expect(screen.getByText('Fixed')).toHaveProperty('tagName', 'STRONG')
     const steps = screen.getByRole('button', { name: /Execution steps/ })
     expect(steps).toHaveAttribute('aria-expanded', 'false')
@@ -143,7 +143,7 @@ describe('Codex task conversation', () => {
     )
     expect(screen.queryByText('Task completed')).not.toBeInTheDocument()
   })
-  test('a running implementation plan displays completed and current steps separately', () => {
+  test('a running implementation plan remains collapsed until requested', async () => {
     render(
       <CodexConversation
         {...props}
@@ -166,10 +166,120 @@ describe('Codex task conversation', () => {
       />
     )
     expect(screen.getByText('Implementation plan')).toBeVisible()
+    expect(screen.queryByText('Read source')).not.toBeVisible()
+    await userEvent.click(screen.getByText('Implementation plan'))
     expect(screen.getByText('Read source')).toBeVisible()
     expect(screen.getByText('Implement changes')).toBeVisible()
     expect(screen.getByLabelText('Completed')).toBeInTheDocument()
     expect(screen.getByLabelText('Running')).toBeInTheDocument()
     expect(screen.getByLabelText('Pending')).toBeInTheDocument()
+  })
+  test('keyboard users can expand command output and close it without leaving the conversation', async () => {
+    const user = userEvent.setup()
+    render(<CodexConversation {...props} thread={thread} />)
+    const steps = screen.getByRole('button', { name: /Execution steps/ })
+    steps.focus()
+    await user.keyboard('{Enter}')
+    const command = screen.getByRole('button', { name: /Command npm test/ })
+    expect(command).toHaveAttribute('aria-expanded', 'false')
+    command.focus()
+    await user.keyboard(' ')
+    expect(command).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('All tests passed')).toBeVisible()
+    await user.keyboard(' ')
+    expect(screen.queryByText('All tests passed')).not.toBeInTheDocument()
+    expect(command).toHaveFocus()
+  })
+})
+
+describe('Codex message actions', () => {
+  test('intermediate assistant output is collapsed and only the final response has response actions', async () => {
+    const expanded = structuredClone(thread)
+    expanded.turns[0].items.splice(1, 0, {
+      id: 'intermediate',
+      type: 'agentMessage',
+      phase: 'commentary',
+      text: 'I will inspect the implementation.',
+    })
+    render(
+      <CodexConversation
+        {...props}
+        thread={expanded}
+        onDelete={vi.fn()}
+        onRetry={vi.fn()}
+      />
+    )
+    expect(
+      screen.queryByText('I will inspect the implementation.')
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getAllByRole('button', { name: 'Copy response' })
+    ).toHaveLength(1)
+    await userEvent.click(
+      screen.getByRole('button', { name: /Execution steps/ })
+    )
+    expect(screen.getByText('I will inspect the implementation.')).toBeVisible()
+    expect(
+      screen.getAllByRole('button', { name: 'Copy response' })
+    ).toHaveLength(1)
+  })
+  test('user and assistant actions retry the original prompt and delete only the selected role', async () => {
+    const onDelete = vi.fn().mockResolvedValue(undefined),
+      onRetry = vi.fn().mockResolvedValue(undefined)
+    render(
+      <CodexConversation
+        {...props}
+        thread={thread}
+        onDelete={onDelete}
+        onRetry={onRetry}
+      />
+    )
+    await userEvent.click(
+      screen.getAllByRole('button', { name: 'Retry message' })[1]
+    )
+    expect(onRetry).toHaveBeenCalledWith('turn-a', 'Fix the page')
+    await userEvent.click(
+      screen.getAllByRole('button', { name: 'Delete message' })[0]
+    )
+    expect(onDelete).toHaveBeenCalledWith('turn-a', 'user')
+    await userEvent.click(
+      screen.getAllByRole('button', { name: 'Delete message' })[1]
+    )
+    expect(onDelete).toHaveBeenCalledWith('turn-a', 'assistant')
+  })
+  test('editing a user message allows cancel and resends the edited text', async () => {
+    const user = userEvent.setup(),
+      onRetry = vi.fn().mockResolvedValue(undefined)
+    render(<CodexConversation {...props} thread={thread} onRetry={onRetry} />)
+    await user.click(screen.getByRole('button', { name: 'Edit message' }))
+    const editor = screen.getByRole('textbox', { name: 'Edit message' })
+    expect(editor).toHaveValue('Fix the page')
+    expect(editor).toHaveFocus()
+    await user.clear(editor)
+    expect(
+      screen.getByRole('button', { name: 'Save and retry' })
+    ).toBeDisabled()
+    await user.type(editor, 'Fix the mobile page')
+    await user.click(screen.getByRole('button', { name: 'Save and retry' }))
+    expect(onRetry).toHaveBeenCalledWith('turn-a', 'Fix the mobile page')
+  })
+  test('deleted messages remain absent and busy tasks disable mutations', () => {
+    const deleted = structuredClone(thread)
+    deleted.turns[0].deletedRoles = ['assistant']
+    render(
+      <CodexConversation
+        {...props}
+        thread={deleted}
+        actionsDisabled
+        onDelete={vi.fn()}
+        onRetry={vi.fn()}
+      />
+    )
+    expect(screen.queryByText('Fixed')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Delete message' })
+    ).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Retry message' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Edit message' })).toBeDisabled()
   })
 })

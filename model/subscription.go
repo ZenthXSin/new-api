@@ -145,7 +145,8 @@ func InvalidateSubscriptionPlanCache(planId int) {
 
 // Subscription plan
 type SubscriptionPlan struct {
-	Id int `json:"id"`
+	Codex *CodexPlanConfig `json:"codex,omitempty" gorm:"column:codex_config;type:text;serializer:json"`
+	Id    int              `json:"id"`
 
 	Title    string `json:"title" gorm:"type:varchar(128);not null"`
 	Subtitle string `json:"subtitle" gorm:"type:varchar(255);default:''"`

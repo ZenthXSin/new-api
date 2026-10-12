@@ -1,0 +1,614 @@
+/* ZCode UI, Apache-2.0. Adapted from packages/ui/src/styles.css at 29628c9acdb81b703bbd4080c207a0e7ce5e276e. Changes: scope themes to Codex and map host tokens; omit desktop/global resets. See THIRD_PARTY.md. */
+@theme inline {
+  --color-icon-blue: var(--zcode-terminal-bright-blue);
+  --color-markdown-inline-code: var(--zcode-tag);
+  --color-background-alt: var(--zcode-background-alt);
+  --color-background-win-alt: var(--zcode-background-win-alt);
+  --color-border-hover: var(--zcode-border-hover);
+  --color-brand: var(--zcode-brand);
+  --color-card-border: var(--zcode-card-border);
+  --color-card-selected: var(--zcode-card-selected);
+  --color-command-node: var(--zcode-command-node);
+  --color-command-node-foreground: var(--zcode-command-node-foreground);
+  --color-command-node-hover: var(--zcode-command-node-hover);
+  --color-context-breakdown-1: var(--zcode-context-breakdown-1);
+  --color-context-breakdown-2: var(--zcode-context-breakdown-2);
+  --color-context-breakdown-3: var(--zcode-context-breakdown-3);
+  --color-context-breakdown-4: var(--zcode-context-breakdown-4);
+  --color-context-breakdown-5: var(--zcode-context-breakdown-5);
+  --color-context-breakdown-6: var(--zcode-context-breakdown-6);
+  --color-context-breakdown-7: var(--zcode-context-breakdown-7);
+  --color-diff-added: var(--zcode-diff-added);
+  --color-diff-added-foreground: var(--zcode-diff-added-foreground);
+  --color-diff-removed: var(--zcode-diff-removed);
+  --color-diff-removed-foreground: var(--zcode-diff-removed-foreground);
+  --color-feedback-privacy-hint: var(--zcode-feedback-privacy-hint);
+  --color-file-node: var(--zcode-file-node);
+  --color-file-node-foreground: var(--zcode-file-node-foreground);
+  --color-file-node-hover: var(--zcode-file-node-hover);
+  --color-find-highlight: var(--zcode-find-highlight);
+  --color-find-highlight-active: var(--zcode-find-highlight-active);
+  --color-foreground-inverse: var(--zcode-foreground-inverse);
+  --color-foreground-subtle: var(--zcode-foreground-subtle);
+  --color-foreground-subtlest: var(--zcode-foreground-subtlest);
+  --color-git-added: var(--zcode-git-added);
+  --color-git-deleted: var(--zcode-git-deleted);
+  --color-git-descendant: var(--zcode-git-descendant);
+  --color-git-ignored: var(--zcode-git-ignored);
+  --color-git-modified: var(--zcode-git-modified);
+  --color-git-none: var(--zcode-git-none);
+  --color-git-renamed: var(--zcode-git-renamed);
+  --color-git-untracked: var(--zcode-git-untracked);
+  --color-header: var(--zcode-header);
+  --color-hover: var(--zcode-hover);
+  --color-idle-task: var(--zcode-idle-task);
+  --color-idle-task-surface: var(--zcode-idle-task-surface);
+  --color-input-border: var(--zcode-input-border);
+  --color-input-border-focused: var(--zcode-input-border-focused);
+  --color-input-border-hover: var(--zcode-input-border-hover);
+  --color-input-focused: var(--zcode-input-focused);
+  --color-interaction-ask-fill: var(--zcode-interaction-ask-fill);
+  --color-interaction-ask-foreground: var(--zcode-interaction-ask-foreground);
+  --color-interaction-ask-surface: var(--zcode-interaction-ask-surface);
+  --color-interaction-confirmation-foreground: var(
+    --zcode-interaction-confirmation-foreground
+  );
+  --color-interaction-confirmation-surface: var(
+    --zcode-interaction-confirmation-surface
+  );
+  --color-menu: var(--zcode-menu);
+  --color-menu-hover: var(--zcode-menu-hover);
+  --color-panel: var(--zcode-panel);
+  --color-plugin-node: var(--zcode-plugin-node);
+  --color-plugin-node-foreground: var(--zcode-plugin-node-foreground);
+  --color-plugin-node-hover: var(--zcode-plugin-node-hover);
+  --color-plugin-paid-plan-badge: var(--zcode-plugin-paid-plan-badge);
+  --color-plugin-paid-plan-badge-foreground: var(
+    --zcode-plugin-paid-plan-badge-foreground
+  );
+  --color-popover-border: var(--zcode-popover-border);
+  --color-popover-header: var(--zcode-popover-header);
+  --color-selected: var(--zcode-selected);
+  --color-session-node: var(--zcode-session-node);
+  --color-session-node-foreground: var(--zcode-session-node-foreground);
+  --color-session-node-hover: var(--zcode-session-node-hover);
+  --color-skill-node: var(--zcode-skill-node);
+  --color-skill-node-foreground: var(--zcode-skill-node-foreground);
+  --color-skill-node-hover: var(--zcode-skill-node-hover);
+  --color-subagent-node: var(--zcode-subagent-node);
+  --color-subagent-node-foreground: var(--zcode-subagent-node-foreground);
+  --color-subagent-node-hover: var(--zcode-subagent-node-hover);
+  --color-surface: var(--zcode-surface);
+  --color-surface-hover: var(--zcode-surface-hover);
+  --color-tab: var(--zcode-tab);
+  --color-tab-active: var(--zcode-tab-active);
+  --color-tab-border: var(--zcode-tab-border);
+  --color-tag: var(--zcode-tag);
+  --color-terminal-bg: var(--zcode-terminal-bg);
+  --color-terminal-black: var(--zcode-terminal-black);
+  --color-terminal-blue: var(--zcode-terminal-blue);
+  --color-terminal-bright-black: var(--zcode-terminal-bright-black);
+  --color-terminal-bright-blue: var(--zcode-terminal-bright-blue);
+  --color-terminal-bright-cyan: var(--zcode-terminal-bright-cyan);
+  --color-terminal-bright-green: var(--zcode-terminal-bright-green);
+  --color-terminal-bright-magenta: var(--zcode-terminal-bright-magenta);
+  --color-terminal-bright-red: var(--zcode-terminal-bright-red);
+  --color-terminal-bright-white: var(--zcode-terminal-bright-white);
+  --color-terminal-bright-yellow: var(--zcode-terminal-bright-yellow);
+  --color-terminal-cursor: var(--zcode-terminal-cursor);
+  --color-terminal-cursor-accent: var(--zcode-terminal-cursor-accent);
+  --color-terminal-cyan: var(--zcode-terminal-cyan);
+  --color-terminal-fg: var(--zcode-terminal-fg);
+  --color-terminal-green: var(--zcode-terminal-green);
+  --color-terminal-magenta: var(--zcode-terminal-magenta);
+  --color-terminal-red: var(--zcode-terminal-red);
+  --color-terminal-selection: var(--zcode-terminal-selection);
+  --color-terminal-selection-inactive: var(--zcode-terminal-selection-inactive);
+  --color-terminal-white: var(--zcode-terminal-white);
+  --color-terminal-yellow: var(--zcode-terminal-yellow);
+  --color-toast: var(--zcode-toast);
+  --color-tooltip: var(--zcode-tooltip);
+  --color-tooltip-foreground: var(--zcode-tooltip-foreground);
+  --color-tooltip-tag: var(--zcode-tooltip-tag);
+  --color-tooltip-tag-foreground: var(--zcode-tooltip-tag-foreground);
+  --color-trajectory-assistant: var(--zcode-trajectory-assistant);
+  --color-trajectory-reasoning: var(--zcode-trajectory-reasoning);
+  --color-trajectory-tool-call: var(--zcode-trajectory-tool-call);
+  --color-trajectory-tool-result: var(--zcode-trajectory-tool-result);
+  --color-trajectory-user: var(--zcode-trajectory-user);
+  --color-usage-chart-1: var(--zcode-usage-chart-1);
+  --color-usage-chart-2: var(--zcode-usage-chart-2);
+  --color-usage-chart-3: var(--zcode-usage-chart-3);
+  --color-usage-chart-4: var(--zcode-usage-chart-4);
+  --color-usage-chart-5: var(--zcode-usage-chart-5);
+  --color-usage-chart-6: var(--zcode-usage-chart-6);
+  --color-usage-heatmap-0: var(--zcode-usage-heatmap-0);
+  --color-usage-heatmap-1: var(--zcode-usage-heatmap-1);
+  --color-usage-heatmap-2: var(--zcode-usage-heatmap-2);
+  --color-usage-heatmap-3: var(--zcode-usage-heatmap-3);
+  --color-usage-heatmap-4: var(--zcode-usage-heatmap-4);
+  --color-workflow-rule: var(--zcode-workflow-rule);
+  --color-workflow-trace: var(--zcode-workflow-trace);
+  --color-workflow-trace-strong: var(--zcode-workflow-trace-strong);
+  --text-ui-xl: calc(var(--ui-font-size) + 4px);
+  --text-ui-lg: calc(var(--ui-font-size) + 2px);
+  --text-ui-base: var(--ui-font-size);
+  --text-ui-caption: calc(var(--ui-font-size) - 1px);
+  --text-ui-sm: calc(var(--ui-font-size) - 2px);
+  --text-ui-xs: calc(var(--ui-font-size) - 4px);
+  --text-mobile-input-safe: 16px;
+}
+
+.codex-zcode {
+  --animated-gradient-text-strong: rgba(13, 13, 13, 1);
+  --animated-gradient-text-soft: rgba(13, 13, 13, 0.22);
+  --background: #f8f8f8;
+  --zcode-background-win-alt: #ececee;
+  --zcode-background-alt: color-mix(
+    in oklab,
+    var(--background) 70%,
+    transparent
+  );
+  --zcode-brand: #000000;
+  --zcode-trajectory-user: #2563eb;
+  --zcode-trajectory-assistant: #0f766e;
+  --zcode-trajectory-reasoning: #7c3aed;
+  --zcode-trajectory-tool-call: #d97706;
+  --zcode-trajectory-tool-result: #0284c7;
+  --zcode-workflow-rule: rgba(13, 13, 13, 0.055);
+  --zcode-workflow-trace: rgba(13, 13, 13, 0.3);
+  --zcode-workflow-trace-strong: rgba(13, 13, 13, 0.55);
+  --accent: #ebf4ff;
+  --zcode-find-highlight: #fff4eb;
+  --zcode-find-highlight-active: #ffb26b;
+  --border: rgba(13, 13, 13, 0.1);
+  --zcode-border-hover: rgba(13, 13, 13, 0.15);
+  --zcode-hover: rgba(13, 13, 13, 0.05);
+  --zcode-selected: rgba(13, 13, 13, 0.05);
+  --zcode-header: #ffffff;
+  --zcode-panel: #ffffff;
+  --sidebar: #f0f0f0;
+  --zcode-surface: rgba(13, 13, 13, 0.03);
+  --zcode-surface-hover: rgba(13, 13, 13, 0.05);
+  --card: #ffffff;
+  --zcode-card-selected: var(--input);
+  --zcode-card-border: var(--border);
+  --popover: #ffffff;
+  --popover-foreground: var(--foreground);
+  --zcode-popover-header: #f8f8f8;
+  --zcode-popover-border: var(--border);
+  --input: #ffffff;
+  --zcode-input-focused: var(--input);
+  --zcode-input-border: var(--border);
+  --zcode-input-border-hover: var(--zcode-border-hover);
+  --zcode-input-border-focused: var(--zcode-border-hover);
+  --zcode-terminal-bg: var(--background);
+  --zcode-terminal-fg: var(--foreground);
+  --zcode-terminal-cursor: #0d0d0d;
+  --zcode-terminal-cursor-accent: var(--background);
+  --zcode-terminal-selection: rgba(11, 127, 255, 0.22);
+  --zcode-terminal-selection-inactive: rgba(13, 13, 13, 0.1);
+  --zcode-terminal-black: #5c5c5c;
+  --zcode-terminal-red: #e03131;
+  --zcode-terminal-green: #1e8a3e;
+  --zcode-terminal-yellow: #e07b00;
+  --zcode-terminal-blue: #0b7fff;
+  --zcode-terminal-magenta: #9e77ed;
+  --zcode-terminal-cyan: #0aa7a7;
+  --zcode-terminal-white: #adadad;
+  --zcode-terminal-bright-black: #888888;
+  --zcode-terminal-bright-red: #e03131;
+  --zcode-terminal-bright-green: #1e8a3e;
+  --zcode-terminal-bright-yellow: #e07b00;
+  --zcode-terminal-bright-blue: #0066dd;
+  --zcode-terminal-bright-magenta: #9e77ed;
+  --zcode-terminal-bright-cyan: #0aa7a7;
+  --zcode-terminal-bright-white: #0d0d0d;
+  --zcode-usage-chart-1: #0b7fff;
+  --zcode-usage-chart-2: #1e8a3e;
+  --zcode-usage-chart-3: #9e77ed;
+  --zcode-usage-chart-4: #e03131;
+  --zcode-usage-chart-5: #e07b00;
+  --zcode-usage-chart-6: #0aa7a7;
+  --zcode-context-breakdown-1: #0b7fff;
+  --zcode-context-breakdown-2: #338fff;
+  --zcode-context-breakdown-3: #5ca7ff;
+  --zcode-context-breakdown-4: #85bbff;
+  --zcode-context-breakdown-5: #acd0ff;
+  --zcode-context-breakdown-6: #c8ddff;
+  --zcode-context-breakdown-7: #e0ecff;
+  --zcode-usage-heatmap-0: color-mix(
+    in oklab,
+    #0b7fff 0%,
+    var(--zcode-surface)
+  );
+  --zcode-usage-heatmap-1: color-mix(
+    in oklab,
+    #0b7fff 18%,
+    var(--zcode-surface)
+  );
+  --zcode-usage-heatmap-2: color-mix(
+    in oklab,
+    #0b7fff 36%,
+    var(--zcode-surface)
+  );
+  --zcode-usage-heatmap-3: color-mix(
+    in oklab,
+    #0b7fff 58%,
+    var(--zcode-surface)
+  );
+  --zcode-usage-heatmap-4: color-mix(
+    in oklab,
+    #0066dd 82%,
+    var(--zcode-surface)
+  );
+  --zcode-tab: #f0f0f0;
+  --zcode-tab-active: #ffffff;
+  --zcode-tab-border: var(--border);
+  --zcode-menu: #ffffff;
+  --zcode-menu-hover: #f0f0f0;
+  --primary: #000000;
+  --primary-foreground: #ffffff;
+  --secondary: #e6e6e6;
+  --zcode-interaction-ask-surface: #ebf4ff;
+  --zcode-interaction-ask-foreground: #0066dd;
+  --zcode-interaction-ask-fill: rgba(70, 191, 114, 0.2);
+  --zcode-interaction-confirmation-surface: #eaf7ee;
+  --zcode-interaction-confirmation-foreground: #166b32;
+  --foreground: var(--color-neutral-800);
+  --zcode-foreground-subtle: color-mix(
+    in oklab,
+    var(--color-neutral-800) 60%,
+    transparent
+  );
+  --zcode-foreground-subtlest: color-mix(
+    in oklab,
+    var(--color-neutral-800) 40%,
+    transparent
+  );
+  --zcode-foreground-inverse: #ffffff;
+  --success: #1e8a3e;
+  --success-foreground: #ffffff;
+  --zcode-idle-task: #9e77ed;
+  --zcode-idle-task-surface: #f5f3ff;
+  --destructive: #e03131;
+  --destructive-foreground: #ffffff;
+  --warning: #e07b00;
+  --zcode-feedback-privacy-hint: var(--color-yellow-600);
+  --warning-foreground: #ffffff;
+  --zcode-diff-added: #1e8a3e;
+  --zcode-diff-added-foreground: #ffffff;
+  --zcode-diff-removed: #e03131;
+  --zcode-diff-removed-foreground: #ffffff;
+  --zcode-git-none: var(--foreground);
+  --zcode-git-modified: #e07b00;
+  --zcode-git-added: #1e8a3e;
+  --zcode-git-deleted: #e03131;
+  --zcode-git-renamed: #0b7fff;
+  --zcode-git-untracked: #1e8a3e;
+  --zcode-git-ignored: var(--zcode-foreground-subtlest);
+  --zcode-git-descendant: #e07b00;
+  --zcode-toast: #ffffff;
+  --zcode-tooltip: #f0f0f0;
+  --zcode-tooltip-foreground: #0d0d0d;
+  --zcode-tooltip-tag: #e6e6e6;
+  --zcode-tooltip-tag-foreground: #5c5c5c;
+  --zcode-tag: #e6e6e6;
+  --zcode-file-node: rgba(26, 112, 184, 0.1);
+  --zcode-file-node-hover: rgba(26, 112, 184, 0.16);
+  --zcode-file-node-foreground: #1a70b8;
+  --zcode-skill-node: rgba(116, 83, 176, 0.1);
+  --zcode-skill-node-hover: rgba(116, 83, 176, 0.16);
+  --zcode-skill-node-foreground: #7453b0;
+  --zcode-command-node: rgba(86, 98, 112, 0.1);
+  --zcode-command-node-hover: rgba(86, 98, 112, 0.16);
+  --zcode-command-node-foreground: #566270;
+  --zcode-subagent-node: rgba(111, 122, 47, 0.1);
+  --zcode-subagent-node-hover: rgba(111, 122, 47, 0.16);
+  --zcode-subagent-node-foreground: #6f7a2f;
+  --zcode-session-node: rgba(20, 128, 122, 0.1);
+  --zcode-session-node-hover: rgba(20, 128, 122, 0.16);
+  --zcode-session-node-foreground: #14807a;
+  --zcode-plugin-node: rgba(184, 122, 26, 0.1);
+  --zcode-plugin-node-hover: rgba(184, 122, 26, 0.16);
+  --zcode-plugin-node-foreground: #b87a1a;
+  --zcode-plugin-paid-plan-badge: #ffe3c8;
+  --zcode-plugin-paid-plan-badge-foreground: #4b280f;
+  --muted: var(--zcode-surface);
+  --muted-foreground: var(--zcode-foreground-subtle);
+  --secondary-foreground: var(--foreground);
+  --accent-foreground: var(--foreground);
+  --card-foreground: var(--foreground);
+  --sidebar-foreground: var(--foreground);
+  --ring: var(--zcode-terminal-bright-blue);
+}
+.dark .codex-zcode {
+  --animated-gradient-text-strong: rgba(255, 255, 255, 1);
+  --animated-gradient-text-soft: rgba(255, 255, 255, 0.22);
+  --background: #161616;
+  --zcode-background-win-alt: #2b2b2b;
+  --zcode-background-alt: color-mix(
+    in oklab,
+    var(--zcode-background-win-alt) 60%,
+    transparent
+  );
+  --zcode-brand: #ffffff;
+  --zcode-trajectory-user: #60a5fa;
+  --zcode-trajectory-assistant: #2dd4bf;
+  --zcode-trajectory-reasoning: #a78bfa;
+  --zcode-trajectory-tool-call: #f59e0b;
+  --zcode-trajectory-tool-result: #38bdf8;
+  --zcode-workflow-rule: rgba(255, 255, 255, 0.065);
+  --zcode-workflow-trace: rgba(255, 255, 255, 0.35);
+  --zcode-workflow-trace-strong: rgba(255, 255, 255, 0.6);
+  --accent: #001d3d;
+  --zcode-find-highlight: #542500;
+  --zcode-find-highlight-active: #ff8a30;
+  --border: rgba(255, 255, 255, 0.1);
+  --zcode-border-hover: rgba(255, 255, 255, 0.15);
+  --zcode-hover: rgba(255, 255, 255, 0.05);
+  --zcode-selected: rgba(255, 255, 255, 0.1);
+  --zcode-header: #202020;
+  --zcode-panel: #202020;
+  --sidebar: #161616;
+  --zcode-surface: rgba(255, 255, 255, 0.05);
+  --zcode-surface-hover: rgba(255, 255, 255, 0.1);
+  --card: #2b2b2b;
+  --zcode-card-selected: var(--input);
+  --zcode-card-border: var(--border);
+  --popover: #2b2b2b;
+  --popover-foreground: var(--foreground);
+  --zcode-popover-header: #202020;
+  --zcode-popover-border: var(--border);
+  --input: #2b2b2b;
+  --zcode-input-focused: var(--input);
+  --zcode-input-border: var(--border);
+  --zcode-input-border-hover: var(--zcode-border-hover);
+  --zcode-input-border-focused: var(--zcode-border-hover);
+  --zcode-terminal-bg: var(--background);
+  --zcode-terminal-fg: var(--foreground);
+  --zcode-terminal-cursor: #f8f8f8;
+  --zcode-terminal-cursor-accent: #161616;
+  --zcode-terminal-selection: rgba(64, 153, 255, 0.28);
+  --zcode-terminal-selection-inactive: rgba(255, 255, 255, 0.1);
+  --zcode-terminal-black: #363636;
+  --zcode-terminal-red: #ff5c5c;
+  --zcode-terminal-green: #46bf72;
+  --zcode-terminal-yellow: #ff8a30;
+  --zcode-terminal-blue: #4099ff;
+  --zcode-terminal-magenta: #7b5ce5;
+  --zcode-terminal-cyan: #42c8c8;
+  --zcode-terminal-white: #adadad;
+  --zcode-terminal-bright-black: #747474;
+  --zcode-terminal-bright-red: #ff9999;
+  --zcode-terminal-bright-green: #87d9a4;
+  --zcode-terminal-bright-yellow: #ffb26b;
+  --zcode-terminal-bright-blue: #80beff;
+  --zcode-terminal-bright-magenta: #a888f2;
+  --zcode-terminal-bright-cyan: #8ee5e5;
+  --zcode-terminal-bright-white: #f8f8f8;
+  --zcode-usage-chart-1: #4099ff;
+  --zcode-usage-chart-2: #46bf72;
+  --zcode-usage-chart-3: #7b5ce5;
+  --zcode-usage-chart-4: #ff5c5c;
+  --zcode-usage-chart-5: #ff8a30;
+  --zcode-usage-chart-6: #42c8c8;
+  --zcode-context-breakdown-1: #4099ff;
+  --zcode-context-breakdown-2: #66adff;
+  --zcode-context-breakdown-3: #80beff;
+  --zcode-context-breakdown-4: #9dceff;
+  --zcode-context-breakdown-5: #b9ddff;
+  --zcode-context-breakdown-6: #d0e8ff;
+  --zcode-context-breakdown-7: #e4f1ff;
+  --zcode-usage-heatmap-0: color-mix(
+    in oklab,
+    #4099ff 0%,
+    var(--zcode-surface)
+  );
+  --zcode-usage-heatmap-1: color-mix(
+    in oklab,
+    #4099ff 24%,
+    var(--zcode-surface)
+  );
+  --zcode-usage-heatmap-2: color-mix(
+    in oklab,
+    #4099ff 42%,
+    var(--zcode-surface)
+  );
+  --zcode-usage-heatmap-3: color-mix(
+    in oklab,
+    #4099ff 62%,
+    var(--zcode-surface)
+  );
+  --zcode-usage-heatmap-4: color-mix(
+    in oklab,
+    #80beff 78%,
+    var(--zcode-surface)
+  );
+  --zcode-tab: #202020;
+  --zcode-tab-active: #161616;
+  --zcode-tab-border: var(--border);
+  --zcode-menu: #2b2b2b;
+  --zcode-menu-hover: #363636;
+  --primary: #ffffff;
+  --primary-foreground: #000000;
+  --secondary: #363636;
+  --zcode-interaction-ask-surface: #001d3d;
+  --zcode-interaction-ask-foreground: #80beff;
+  --zcode-interaction-ask-fill: rgba(70, 191, 114, 0.24);
+  --zcode-interaction-confirmation-surface: rgba(70, 191, 114, 0.16);
+  --zcode-interaction-confirmation-foreground: #87d9a4;
+  --foreground: var(--color-neutral-300);
+  --zcode-foreground-subtle: color-mix(
+    in oklab,
+    var(--color-neutral-300) 60%,
+    transparent
+  );
+  --zcode-foreground-subtlest: color-mix(
+    in oklab,
+    var(--color-neutral-300) 30%,
+    transparent
+  );
+  --zcode-foreground-inverse: #000000;
+  --success: #46bf72;
+  --success-foreground: #000000;
+  --zcode-idle-task: #7b5ce5;
+  --zcode-idle-task-surface: #160d38;
+  --destructive: #ff5c5c;
+  /* Zai Dark 曾把 destructive 前景设为黑色，与红色危险按钮的固定白字设计冲突。 */
+  --destructive-foreground: #ffffff;
+  --warning: #ff8a30;
+  --zcode-feedback-privacy-hint: var(--color-yellow-300);
+  --warning-foreground: #000000;
+  --zcode-diff-added: #46bf72;
+  --zcode-diff-added-foreground: #000000;
+  --zcode-diff-removed: #ff5c5c;
+  --zcode-diff-removed-foreground: #000000;
+  --zcode-git-none: var(--foreground);
+  --zcode-git-modified: #ff8a30;
+  --zcode-git-added: #46bf72;
+  --zcode-git-deleted: #ff5c5c;
+  --zcode-git-renamed: #4099ff;
+  --zcode-git-untracked: #46bf72;
+  --zcode-git-ignored: var(--zcode-foreground-subtlest);
+  --zcode-git-descendant: #ff8a30;
+  --zcode-toast: #2b2b2b;
+  --zcode-tooltip: #2b2b2b;
+  --zcode-tooltip-foreground: #f8f8f8;
+  --zcode-tooltip-tag: #363636;
+  --zcode-tooltip-tag-foreground: #adadad;
+  --zcode-tag: #363636;
+  --zcode-file-node: rgba(112, 174, 224, 0.16);
+  --zcode-file-node-hover: rgba(112, 174, 224, 0.22);
+  --zcode-file-node-foreground: #8fc5ef;
+  --zcode-skill-node: rgba(166, 137, 218, 0.16);
+  --zcode-skill-node-hover: rgba(166, 137, 218, 0.22);
+  --zcode-skill-node-foreground: #bda5e6;
+  --zcode-command-node: rgba(154, 166, 180, 0.14);
+  --zcode-command-node-hover: rgba(154, 166, 180, 0.2);
+  --zcode-command-node-foreground: #b5c0cc;
+  --zcode-subagent-node: rgba(183, 189, 117, 0.16);
+  --zcode-subagent-node-hover: rgba(183, 189, 117, 0.22);
+  --zcode-subagent-node-foreground: #c8cd90;
+  --zcode-session-node: rgba(104, 196, 188, 0.16);
+  --zcode-session-node-hover: rgba(104, 196, 188, 0.22);
+  --zcode-session-node-foreground: #93d8d2;
+  --zcode-plugin-node: rgba(224, 174, 112, 0.16);
+  --zcode-plugin-node-hover: rgba(224, 174, 112, 0.22);
+  --zcode-plugin-node-foreground: #efc58f;
+  --zcode-plugin-paid-plan-badge: #5a341b;
+  --zcode-plugin-paid-plan-badge-foreground: #ffd8b8;
+  --muted: var(--zcode-surface);
+  --muted-foreground: var(--zcode-foreground-subtle);
+  --secondary-foreground: var(--foreground);
+  --accent-foreground: var(--foreground);
+  --card-foreground: var(--foreground);
+  --sidebar-foreground: var(--foreground);
+  --ring: var(--zcode-terminal-bright-blue);
+}
+
+.codex-zcode {
+  --ui-font-size: 14px;
+  --radius: 0.5rem;
+  font-family:
+    'Public Sans Variable', 'Public Sans', 'PingFang SC', 'Microsoft YaHei',
+    sans-serif;
+  font-size: var(--ui-font-size);
+  background: var(--background);
+  color: var(--foreground);
+}
+.codex-zcode :is(h1, h2, h3, h4) {
+  font-family: inherit;
+}
+.codex-zcode button:active {
+  transform: none;
+}
+/* Workbench controls use one neutral focus treatment, including portaled dialogs. */
+.codex-zcode,
+.dark .codex-zcode {
+  --ring: color-mix(in srgb, var(--foreground) 42%, transparent);
+  --codex-focus-border: color-mix(in srgb, var(--foreground) 38%, transparent);
+}
+.codex-zcode :focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.codex-zcode :is(button, a, summary, [role='tab']):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+.codex-zcode :is(input, textarea, select, .codex-select-trigger):focus {
+  outline: none;
+  box-shadow: none;
+  border-color: var(--codex-focus-border);
+}
+.codex-zcode .codex-select-trigger:focus-visible {
+  outline: none;
+  border-color: var(--codex-focus-border);
+  box-shadow: inset 0 0 0 1px var(--codex-focus-border);
+}
+.codex-zcode .codex-search-field,
+.codex-zcode .codex-model-search [data-slot='input-group'] {
+  border: 1px solid var(--border);
+  background: var(--zcode-surface);
+  box-shadow: none;
+}
+.codex-zcode .codex-search-field:focus-within,
+.codex-zcode .codex-model-search [data-slot='input-group']:focus-within {
+  border-color: var(--codex-focus-border);
+  box-shadow: none;
+}
+.codex-zcode .codex-search-field input,
+.codex-zcode .codex-model-search input,
+.codex-zcode textarea[data-codex-composer] {
+  outline: none;
+  box-shadow: none;
+  border: none;
+}
+.codex-zcode .codex-select-option:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.codex-zcode [cmdk-item][data-selected='true'] {
+  background: var(--zcode-hover);
+}
+.codex-zcode ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.codex-zcode ::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 6px;
+}
+.codex-zcode-home {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  justify-content: center;
+  padding: 48px 20px;
+}
+@media (max-width: 767px) {
+  .codex-zcode-home {
+    justify-content: flex-start;
+    padding: 64px 8px 24px;
+  }
+}
+
+/* Message controls appear on approach, click selection, or keyboard focus. */
+.codex-zcode .codex-message-actions {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+.codex-zcode [data-message-role]:hover .codex-message-actions,
+.codex-zcode [data-message-role]:focus-within .codex-message-actions,
+.codex-zcode [data-actions-visible='true'] .codex-message-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .codex-zcode .codex-message-actions {
+    transition: none;
+  }
+}

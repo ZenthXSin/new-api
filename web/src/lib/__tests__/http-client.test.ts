@@ -16,9 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { afterEach, expect, test } from 'vitest'
-
 import type { AxiosAdapter, InternalAxiosRequestConfig } from 'axios'
+import { afterEach, expect, test } from 'vitest'
 
 import { useAuthStore } from '../../stores/auth-store'
 import { api } from '../http-client'

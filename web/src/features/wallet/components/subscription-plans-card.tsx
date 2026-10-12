@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQueryClient } from '@tanstack/react-query'
 import { Crown, RefreshCw, Sparkles, Check } from 'lucide-react'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -99,6 +100,7 @@ export function SubscriptionPlansCard({
   onPurchaseSuccess,
 }: SubscriptionPlansCardProps) {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
 
   const [plans, setPlans] = useState<PlanRecord[]>([])
   const [activeSubscriptions, setActiveSubscriptions] = useState<
@@ -542,6 +544,19 @@ export function SubscriptionPlansCard({
                 totalAmount > 0
                   ? `${t('Total Quota')}: ${formatQuota(totalAmount)}`
                   : `${t('Total Quota')}: ${t('Unlimited')}`,
+                plan.codex?.enabled ? t('Online Codex') : null,
+                plan.codex?.enabled && plan.codex.allowDocker
+                  ? t('Docker virtual cloud')
+                  : null,
+                plan.codex?.enabled && plan.codex.allowSSH
+                  ? t('SSH execution')
+                  : null,
+                plan.codex?.enabled && plan.codex.memoryMB > 0
+                  ? `${t('Memory limit (MB)')}: ${plan.codex.memoryMB}`
+                  : null,
+                plan.codex?.enabled && plan.codex.maxProjects > 0
+                  ? `${t('Maximum projects')}: ${plan.codex.maxProjects}`
+                  : null,
                 limit > 0 ? `${t('Purchase Limit')}: ${limit}` : null,
                 plan.upgrade_group
                   ? `${t('Upgrade Group')}: ${plan.upgrade_group}`
@@ -648,7 +663,13 @@ export function SubscriptionPlansCard({
         enableOnlineTopUp={enableOnlineTopUp}
         epayMethods={epayMethods}
         userQuota={userQuota}
-        onPurchaseSuccess={onPurchaseSuccess}
+        onPurchaseSuccess={async () => {
+          await Promise.all([
+            fetchSelfSubscription(),
+            queryClient.invalidateQueries({ queryKey: ['codex-access'] }),
+          ])
+          await onPurchaseSuccess?.()
+        }}
         purchaseLimit={
           selectedPlan?.plan?.max_purchase_per_user
             ? Number(selectedPlan.plan.max_purchase_per_user)

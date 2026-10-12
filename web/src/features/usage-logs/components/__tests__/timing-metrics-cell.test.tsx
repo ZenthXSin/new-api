@@ -16,9 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { describe, expect, test } from 'vitest'
-
 import type React from 'react'
+import { describe, expect, test } from 'vitest'
 
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')

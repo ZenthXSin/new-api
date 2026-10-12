@@ -277,6 +277,7 @@ func migrateDB() error {
 		&Ability{},
 		&Log{},
 		&Midjourney{},
+		&ImageGeneration{},
 		&TopUp{},
 		&PaymentTransaction{},
 		&PaymentApplication{}, &PaymentWebhookEvent{}, &PaymentWalletGuard{}, &PaymentWalletOperation{}, &PaymentWalletCacheWitness{}, &PaymentWalletMutation{},
@@ -301,6 +302,8 @@ func migrateDB() error {
 		&OAuthAccessToken{},
 		&OAuthRefreshToken{},
 		&OAuthRelayBinding{},
+		&CodexGitHubConnection{},
+		&CodexUserConfig{},
 		&OAuthAction{},
 		&PerfMetric{},
 		&GroupAvailabilityBucket{},
@@ -366,6 +369,7 @@ func migrateDBFast() error {
 		{&Ability{}, "Ability"},
 		{&Log{}, "Log"},
 		{&Midjourney{}, "Midjourney"},
+		{&ImageGeneration{}, "ImageGeneration"},
 		{&TopUp{}, "TopUp"},
 		{&PaymentTransaction{}, "PaymentTransaction"},
 		{&PaymentApplication{}, "PaymentApplication"}, {&PaymentWebhookEvent{}, "PaymentWebhookEvent"}, {&PaymentWalletGuard{}, "PaymentWalletGuard"}, {&PaymentWalletOperation{}, "PaymentWalletOperation"}, {&PaymentWalletCacheWitness{}, "PaymentWalletCacheWitness"}, {&PaymentWalletMutation{}, "PaymentWalletMutation"},
@@ -390,6 +394,8 @@ func migrateDBFast() error {
 		{&OAuthAccessToken{}, "OAuthAccessToken"},
 		{&OAuthRefreshToken{}, "OAuthRefreshToken"},
 		{&OAuthRelayBinding{}, "OAuthRelayBinding"},
+		{&CodexGitHubConnection{}, "CodexGitHubConnection"},
+		{&CodexUserConfig{}, "CodexUserConfig"},
 		{&OAuthAction{}, "OAuthAction"},
 		{&PerfMetric{}, "PerfMetric"},
 		{&GroupAvailabilityBucket{}, "GroupAvailabilityBucket"},
@@ -576,6 +582,7 @@ func ensureSubscriptionPlanTableSQLite() error {
 		createSQL := `CREATE TABLE ` + "`" + tableName + "`" + ` (
 ` + "`id`" + ` integer,
 ` + "`title`" + ` varchar(128) NOT NULL,
+` + "`codex_config`" + ` text,
 ` + "`subtitle`" + ` varchar(255) DEFAULT '',
 ` + "`price_amount`" + ` decimal(10,6) NOT NULL,
 ` + "`currency`" + ` varchar(8) NOT NULL DEFAULT 'USD',
@@ -612,6 +619,7 @@ PRIMARY KEY (` + "`id`" + `)
 		existing[c.Name] = struct{}{}
 	}
 	required := []sqliteColumnDef{
+		{Name: "codex_config", DDL: "`codex_config` text"},
 		{Name: "title", DDL: "`title` varchar(128) NOT NULL"},
 		{Name: "subtitle", DDL: "`subtitle` varchar(255) DEFAULT ''"},
 		{Name: "price_amount", DDL: "`price_amount` decimal(10,6) NOT NULL"},

@@ -23,8 +23,13 @@ def git(arguments, cwd=ROOT, baseline=True, limit=2 * 1024 * 1024, timeout=90, e
         env.update({"GIT_DIR": str(BASELINE), "GIT_WORK_TREE": str(ROOT)})
     if extra_env:
         env.update(extra_env)
+    flags = list(FLAGS)
+    if env.get("GH_TOKEN"):
+        # The helper is fixed runner-supplied code reading its environment. The
+        # token itself is never put in git arguments or stored in .git/config.
+        flags.extend(["-c", "credential.https://github.com.helper=" + os.environ["GIT_CONFIG_VALUE_1"]])
     with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
-        command = subprocess.Popen(["git", *FLAGS, *arguments], cwd=cwd, env=env, stdout=output, stderr=errors)
+        command = subprocess.Popen(["git", *flags, *arguments], cwd=cwd, env=env, stdout=output, stderr=errors)
         try:
             code = command.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -83,7 +88,8 @@ def run(request):
         with tempfile.TemporaryDirectory(prefix="codex-clone-", dir=PROJECT_HOME) as directory:
             destination = pathlib.Path(directory) / "project"
             branch = ["--branch", request["branch"]] if request.get("branch") else []
-            git(["-c", f"http.curloptResolve={host}:443:{address}", "clone", "--depth=1", "--no-recurse-submodules", "--template=", *branch, "--", request["url"], str(destination)], cwd="/tmp", baseline=False, timeout=100)
+            credential_env = {"GH_TOKEN": os.environ["GH_TOKEN"]} if host == "github.com" and os.environ.get("GH_TOKEN") else None
+            git(["-c", f"http.curloptResolve={host}:443:{address}", "clone", "--depth=1", "--no-recurse-submodules", "--template=", *branch, "--", request["url"], str(destination)], cwd="/tmp", baseline=False, timeout=100, extra_env=credential_env)
             # New workspaces have no pre-existing files. Never merge a failed/partial clone.
             for item in destination.iterdir():
                 shutil.move(str(item), str(ROOT / item.name))

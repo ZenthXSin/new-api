@@ -16,24 +16,32 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute, redirect, useBlocker } from '@tanstack/react-router'
+import { createFileRoute, useBlocker } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import z from 'zod'
 
-import { Main } from '@/components/layout'
 import { Codex } from '@/features/codex'
-import { ROLE } from '@/lib/roles'
-import { useAuthStore } from '@/stores/auth-store'
+import { CodexAccessBoundary } from '@/features/codex/components/codex-access-boundary'
+import { requireCodexAccess } from '@/hooks/use-codex-access'
 
 export const Route = createFileRoute('/_authenticated/codex/')({
-  beforeLoad: () => {
-    if ((useAuthStore.getState().auth.user?.role ?? 0) < ROLE.ADMIN) {
-      throw redirect({ to: '/403' })
-    }
-  },
+  beforeLoad: ({ context }) => requireCodexAccess(context.queryClient),
   validateSearch: z.object({
+    conversation: z.string().uuid().optional().catch(undefined),
     workspace: z.string().max(100).optional().catch(undefined),
+    file: z.string().max(4096).optional().catch(undefined),
+    line: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(10000000)
+      .optional()
+      .catch(undefined),
+    github_oauth: z.string().max(1).optional().catch(undefined),
+    code: z.string().max(512).optional().catch(undefined),
+    state: z.string().max(128).optional().catch(undefined),
+    error: z.string().max(128).optional().catch(undefined),
   }),
   component: CodexPage,
 })
@@ -48,18 +56,25 @@ function CodexPage() {
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
   return (
-    <Main className='p-0'>
-      <Codex
-        onDirty={setDirty}
-        workspaceId={search.workspace}
-        onSelect={(workspace) => void navigate({ search: { workspace } })}
-        onBack={() =>
-          void navigate({
-            to: '/dashboard/$section',
-            params: { section: 'overview' },
-          })
-        }
-      />
-    </Main>
+    <CodexAccessBoundary>
+      <div className='flex min-h-0 flex-1 flex-col overflow-hidden p-0'>
+        <Codex
+          onDirty={setDirty}
+          filePath={search.file}
+          fileLine={search.line}
+          workspaceId={search.workspace}
+          conversationId={search.conversation}
+          onSelect={(workspace, conversation) =>
+            void navigate({ search: { workspace, conversation } })
+          }
+          onBack={() =>
+            void navigate({
+              to: '/dashboard/$section',
+              params: { section: 'overview' },
+            })
+          }
+        />
+      </div>
+    </CodexAccessBoundary>
   )
 }

@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { constants } from 'node:fs';
 import path from 'node:path';
 
 export const WORKSPACE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -7,7 +8,7 @@ export function assertWorkspaceId(id) { if (typeof id !== 'string' || !WORKSPACE
 export function assertOwnerId(id) { if (!Number.isSafeInteger(id) || id <= 0) throw workspaceError('Invalid environment owner', 'invalid_owner'); return id; }
 export function userPaths(dataDir, ownerId) {
   const root = path.join(path.resolve(dataDir), 'users', String(assertOwnerId(ownerId)));
-  return { root, projectsPath: path.join(root, 'projects'), homePath: path.join(root, 'home'), userHomePath: path.join(root, 'home', 'user'), workspaceHomesPath: path.join(root, 'home', 'workspaces') };
+  return { root, projectsPath: path.join(root, 'projects'), homePath: path.join(root, 'home'), userHomePath: path.join(root, 'home', 'user'), containerCodexHomePath: path.join(root, 'home', 'user', '.codex'), workspaceHomesPath: path.join(root, 'home', 'workspaces') };
 }
 export function workspacePaths(dataDir, id, ownerId) {
   assertWorkspaceId(id);
@@ -16,11 +17,22 @@ export function workspacePaths(dataDir, id, ownerId) {
   return { ...user, userRoot: user.root, root, projectPath: path.join(root, 'project'), workspaceHomePath: path.join(user.workspaceHomesPath, id), codexHomePath: path.join(user.workspaceHomesPath, id, '.codex'), cwd: `/workspace/projects/${id}/project`, codexHome: `/home/codex/workspaces/${id}/.codex` };
 }
 export function legacyWorkspacePaths(dataDir, id) { const root = path.join(path.resolve(dataDir), 'workspaces', assertWorkspaceId(id)); return { root, projectPath: path.join(root, 'project'), homePath: path.join(root, 'home') }; }
-async function directory(location, { create = false, writable = false, mode = 0o755 } = {}) {
+async function directory(location, { create = false, writable = false, mode = 0o755, containerAccessible = false } = {}) {
   if (create) await fs.mkdir(location, { mode }).catch((error) => { if (error.code !== 'EEXIST') throw error; });
   const stat = await fs.lstat(location).catch(() => { throw workspaceError('Workspace not found', 'workspace_not_found', 404); });
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw workspaceError('Unsafe workspace directory', 'unsafe_path');
   if (process.getuid?.() === 0 && !writable && (stat.uid !== 0 || stat.mode & 0o022)) throw workspaceError('Managed directory must be owned by root and not writable by projects', 'unsafe_path');
+  // systemd's UMask=0077 also applies to mkdir({ mode: 0755 }). Only the
+  // root-controlled directories exposed inside the container need traversal
+  // by uid 1000; private host parents and project-owned data keep their modes.
+  if (containerAccessible && (stat.mode & 0o777) !== 0o755) {
+    const handle = await fs.open(location, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try {
+      const current = await handle.stat();
+      if (current.dev !== stat.dev || current.ino !== stat.ino) throw workspaceError('Managed directory changed during validation', 'unsafe_path');
+      await handle.chmod(0o755);
+    } finally { await handle.close(); }
+  }
   return stat;
 }
 const exists = async (location) => fs.lstat(location).then(() => true, (error) => { if (error.code === 'ENOENT') return false; throw error; });
@@ -45,8 +57,10 @@ export class UserWorkspaceLayout {
     return this.userLock(assertOwnerId(ownerId), async () => {
       await directory(this.dataDir);
       const user = userPaths(this.dataDir, ownerId);
-      for (const location of [path.join(this.dataDir, 'users'), user.root, user.projectsPath, user.homePath, user.workspaceHomesPath]) await directory(location, { create: true, mode: location === user.root || location === path.join(this.dataDir, 'users') ? 0o700 : 0o755 });
+      for (const location of [path.join(this.dataDir, 'users'), user.root]) await directory(location, { create: true, mode: 0o700 });
+      for (const location of [user.projectsPath, user.homePath, user.workspaceHomesPath]) await directory(location, { create: true, containerAccessible: true });
       await ownedDirectory(user.userHomePath);
+      await ownedDirectory(user.containerCodexHomePath, 0o700);
       return user;
     });
   }
@@ -54,6 +68,7 @@ export class UserWorkspaceLayout {
     this.register(id, ownerId); await this.ensureUser(ownerId);
     const paths = this.paths(id);
     await fs.mkdir(paths.root, { mode: 0o755 });
+    await directory(paths.root, { containerAccessible: true });
     await ownedDirectory(paths.projectPath);
     await ownedDirectory(paths.workspaceHomePath);
     await ownedDirectory(paths.codexHomePath, 0o700);
@@ -61,7 +76,8 @@ export class UserWorkspaceLayout {
   }
   async check(id) {
     const paths = this.paths(id);
-    for (const folder of [this.dataDir, path.join(this.dataDir, 'users'), paths.userRoot, paths.projectsPath, paths.root, paths.homePath, paths.workspaceHomesPath]) await directory(folder);
+    for (const folder of [this.dataDir, path.join(this.dataDir, 'users'), paths.userRoot]) await directory(folder);
+    for (const folder of [paths.projectsPath, paths.root, paths.homePath, paths.workspaceHomesPath]) await directory(folder, { containerAccessible: true });
     await directory(paths.projectPath, { writable: true });
     await directory(paths.workspaceHomePath, { writable: true });
     return paths;

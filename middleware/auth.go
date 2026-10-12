@@ -368,6 +368,9 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 
 func TokenAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
+		if tryCodexRelayAuth(c) {
+			return
+		}
 		if tryOAuthRelayAuth(c) {
 			return
 		}

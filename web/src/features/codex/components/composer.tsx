@@ -18,32 +18,67 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   ArrowUp,
-  ChevronDown,
+  CornerUpLeft,
   LoaderCircle,
+  Paperclip,
+  Plus,
   Square,
-  Sparkles,
-  Terminal,
+  ShieldCheck,
+  X,
 } from 'lucide-react'
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { cn } from '@/features/codex/vendor/zcode/utils'
 
+// Input surface and submit controls adapted from ZCode ConversationComposer.tsx.
+// See ../vendor/zcode/conversation/CONVERSATION-PROVENANCE.md.
 import { codexError } from '../api'
-import type { CodexMode, CodexStatus, CodexTurnInput } from '../types'
+import type {
+  CodexCatalog,
+  CodexMode,
+  CodexQueuedTurn,
+  CodexStatus,
+  CodexTurnInput,
+} from '../types'
+import { Button } from '../vendor/zcode/button'
+import { CodexModelSelector } from './model-selector'
+import { QueuedTurns } from './queued-turns'
+import { CodexReasoningControl } from './reasoning-control'
+import { CodexSelect } from './select'
 
 type ComposerProps = {
   status?: CodexStatus
+  catalog?: CodexCatalog
+  group?: string
+  catalogLoading?: boolean
+  catalogError?: boolean
+  onCatalogRetry?: () => void
   model: string
+  hideModelSelector?: boolean
+  contextControls?: ReactNode
   effort: string
   mode: CodexMode
-  onModel: (model: string) => void
+  onModel: (model: string, group?: string) => void
   onEffort: (effort: string) => void
   onMode: (mode: CodexMode) => void
   onSubmit: (input: CodexTurnInput) => Promise<void>
   onStop?: () => void | Promise<void>
   running?: boolean
+  busy?: boolean
   disabled?: boolean
   compact?: boolean
   workspaceTitle?: string
@@ -51,6 +86,14 @@ type ComposerProps = {
   draftKey?: string
   finishing?: boolean
   onActiveProject?: () => void
+  queuedTurns?: CodexQueuedTurn[]
+  onCancelQueued?: (requestId: string) => Promise<void>
+  onResumeQueued?: (requestId: string) => Promise<void>
+  onUploadFiles?: () => void
+  onAttachFiles?: (files: File[]) => void
+  uploading?: boolean
+  uploadedFiles?: string[]
+  onRemoveUploadedFile?: (path: string) => void
 }
 export function CodexComposer(props: ComposerProps) {
   const { t } = useTranslation()
@@ -59,10 +102,12 @@ export function CodexComposer(props: ComposerProps) {
   const [error, setError] = useState('')
   const [sending, setSending] = useState(false)
   const [stopping, setStopping] = useState(false)
+  const [draggingFiles, setDraggingFiles] = useState(false)
+  const dragDepth = useRef(0)
   const stopLocked = useRef(false)
   const textarea = useRef<HTMLTextAreaElement>(null)
+  const composing = useRef(false)
   const restoreFocus = useRef(false)
-  const hintId = useId()
   const errorId = useId()
   const locked = useRef(false)
   const retry = useRef<{ signature: string; id: string } | null>(null)
@@ -70,12 +115,13 @@ export function CodexComposer(props: ComposerProps) {
   const efforts = model?.efforts?.length
     ? model.efforts
     : (props.status?.efforts ?? ['low', 'medium', 'high'])
+  const effortDisabled = sending || props.running || props.disabled
+  const busy = props.busy || props.running
+  const attachmentsDisabled =
+    busy || sending || props.disabled || props.uploading
+  const hasDraft = !!draft.trim()
   const enabled =
-    !props.disabled &&
-    !sending &&
-    !props.running &&
-    !!draft.trim() &&
-    !!props.model
+    !props.disabled && !sending && !props.uploading && hasDraft && !!props.model
   useLayoutEffect(() => {
     const storageKey = props.draftKey
       ? `codex-draft:${props.draftKey}`
@@ -116,9 +162,8 @@ export function CodexComposer(props: ComposerProps) {
     const node = textarea.current
     if (!node) return
     const resize = () => {
-      const minimum = props.compact ? 64 : 96
       node.style.height = 'auto'
-      node.style.height = `${Math.min(224, Math.max(minimum, node.scrollHeight))}px`
+      node.style.height = `${Math.min(224, Math.max(48, node.scrollHeight))}px`
     }
     resize()
     window.addEventListener('resize', resize)
@@ -146,7 +191,7 @@ export function CodexComposer(props: ComposerProps) {
       setStopping(false)
     }
   }
-  async function submit() {
+  async function submit(busyAction: 'queue' | 'interrupt' = 'queue') {
     if (!enabled || locked.current) return
     locked.current = true
     restoreFocus.current = document.activeElement === textarea.current
@@ -157,6 +202,8 @@ export function CodexComposer(props: ComposerProps) {
       props.model,
       props.effort,
       props.mode,
+      props.group,
+      ...(props.uploadedFiles?.length ? [props.uploadedFiles] : []),
     ])
     if (retry.current?.signature !== signature) {
       retry.current = { signature, id: crypto.randomUUID() }
@@ -169,8 +216,10 @@ export function CodexComposer(props: ComposerProps) {
         prompt: draft.trim(),
         requestId: retry.current.id,
         model: props.model,
+        group: props.group,
         effort: props.effort,
         mode: props.mode,
+        ...(busy ? { busyAction } : {}),
       })
       if (draftScope.current === submittedScope) {
         setDraft((current) => (current === draft ? '' : current))
@@ -201,162 +250,353 @@ export function CodexComposer(props: ComposerProps) {
   let progressLabel = t('Sending task…')
   if (props.finishing) progressLabel = t('Finishing task…')
   if (stopping) progressLabel = t('Stopping task…')
-  let hint =
-    props.mode === 'ask'
-      ? t('Ask questions about your code in read-only mode.')
-      : t('Codex can edit files and run commands in this project.')
-  if (props.running) {
-    hint = t('You can draft your next message while Codex works.')
-  }
+  const descriptionId = error ? errorId : undefined
+  const inputField = (
+    <textarea
+      ref={textarea}
+      data-codex-composer
+      aria-label={t('Describe your coding task')}
+      aria-describedby={descriptionId}
+      aria-invalid={!!error}
+      placeholder={t('Collaborate with Codex')}
+      value={draft}
+      onChange={(event) => {
+        setDraft(event.target.value)
+        preserveDraft(event.target.value)
+        setError('')
+      }}
+      disabled={sending}
+      rows={1}
+      maxLength={100_000}
+      className={cn(
+        'chatgpt-composer-input placeholder:text-muted-foreground block max-h-56 w-full resize-none overflow-y-auto border-0 bg-transparent px-2.5 pt-2.5 pb-3 text-base leading-6 outline-none disabled:opacity-70',
+        props.compact && 'px-2 py-1.5'
+      )}
+      onCompositionStart={() => {
+        composing.current = true
+      }}
+      onCompositionEnd={() => {
+        composing.current = false
+      }}
+      onPaste={(event) => {
+        if (!props.onAttachFiles || !event.clipboardData.files.length) {
+          return
+        }
+        event.preventDefault()
+        if (!attachmentsDisabled) {
+          props.onAttachFiles([...event.clipboardData.files])
+        }
+      }}
+      onKeyDown={(event) => {
+        if (
+          event.key === 'Enter' &&
+          !event.shiftKey &&
+          !composing.current &&
+          !event.nativeEvent.isComposing &&
+          event.nativeEvent.keyCode !== 229
+        ) {
+          event.preventDefault()
+          void submit()
+        }
+      }}
+    />
+  )
+  const uploadControl = props.onUploadFiles && (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={<Button type='button' variant='ghost' size='icon-md' />}
+        className={cn(
+          'focus-visible:ring-ring size-11 rounded-full focus-visible:ring-2 sm:size-9',
+          props.compact && 'size-9 max-sm:size-10'
+        )}
+        aria-label={t('Add files and more')}
+        title={t('Add files and more')}
+        disabled={attachmentsDisabled}
+      >
+        {props.uploading ? (
+          <LoaderCircle className='size-5 animate-spin' aria-hidden />
+        ) : (
+          <Plus className='size-6' strokeWidth={1.75} aria-hidden />
+        )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        side='top'
+        sideOffset={10}
+        align='start'
+        className='codex-zcode codex-chatgpt chatgpt-popover w-64 rounded-2xl p-1.5 shadow-lg'
+      >
+        <DropdownMenuItem
+          onClick={props.onUploadFiles}
+          disabled={attachmentsDisabled}
+          className='min-h-11 gap-3 rounded-xl px-3 py-2.5'
+        >
+          <Paperclip className='size-5' aria-hidden />
+          {t('Add photos & files')}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+  const permissionControl = (
+    <CodexSelect
+      compact
+      side='top'
+      label={t('Approval mode')}
+      value={props.mode}
+      disabled={sending || props.running || props.disabled}
+      icon={<ShieldCheck aria-hidden className='size-3.5' />}
+      className={cn(
+        'codex-permission-select h-9 rounded-full text-xs',
+        props.mode === 'full-access' && 'codex-full-access'
+      )}
+      options={[
+        {
+          value: 'code',
+          label: t('Request approval'),
+          description: t(
+            'Edit files and run commands, pausing when approval is needed'
+          ),
+        },
+        {
+          value: 'auto',
+          label: t('Auto approve'),
+          description: t(
+            'Automatically approve commands and file changes in your environment'
+          ),
+        },
+        {
+          value: 'full-access',
+          label: t('Full access'),
+          description: t(
+            'Use the whole execution environment without approval prompts'
+          ),
+        },
+        {
+          value: 'ask',
+          label: t('Read-only'),
+          description: t('Explore your project without changing files'),
+        },
+      ]}
+      onChange={(value) => props.onMode(value as CodexMode)}
+    />
+  )
+  const reasoningControl = (
+    <CodexReasoningControl
+      efforts={efforts}
+      value={props.effort}
+      defaultValue={props.status?.defaultEffort}
+      disabled={sending || props.running}
+      sliderDisabled={effortDisabled}
+      onChange={props.onEffort}
+      modelName={model?.name || props.model}
+      modelControl={
+        !props.hideModelSelector && (
+          <CodexModelSelector
+            catalog={props.catalog}
+            status={props.status}
+            model={props.model}
+            group={props.group}
+            disabled={sending || props.running}
+            loading={props.catalogLoading}
+            error={props.catalogError}
+            onRetry={props.onCatalogRetry}
+            onSelect={props.onModel}
+            className='codex-reasoning-model mx-auto justify-center'
+            side='top'
+            align='end'
+          />
+        )
+      }
+    />
+  )
+  const sendControls = (
+    <>
+      {busy && hasDraft && (
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon-md'
+          className='codex-task-steer focus-visible:ring-ring size-11 rounded-full focus-visible:ring-2 sm:size-9'
+          aria-label={t('Interrupt and send')}
+          title={t('Interrupt and send')}
+          disabled={!enabled || stopping || props.finishing}
+          onClick={() => void submit('interrupt')}
+        >
+          <CornerUpLeft className='size-5' aria-hidden />
+        </Button>
+      )}
+      {props.running && (
+        <Button
+          type='button'
+          size='icon-md'
+          className='codex-task-stop bg-foreground text-background hover:bg-foreground/80 focus-visible:ring-ring size-11 cursor-pointer rounded-full focus-visible:ring-2 focus-visible:ring-offset-2 sm:size-9'
+          aria-label={t('Stop task')}
+          title={t('Stop task')}
+          disabled={stopping || props.finishing || !props.onStop}
+          onClick={() => void stop()}
+        >
+          {stopping ? (
+            <LoaderCircle className='size-4 animate-spin' aria-hidden />
+          ) : (
+            <Square className='size-3.5 fill-current' aria-hidden />
+          )}
+        </Button>
+      )}
+      {(!props.running || hasDraft) && (
+        <Button
+          type='submit'
+          size='icon-md'
+          className={cn(
+            'codex-task-send bg-foreground text-background hover:bg-foreground/80 focus-visible:ring-ring size-11 rounded-full focus-visible:ring-2 sm:size-9',
+            busy && 'codex-task-queue',
+            props.compact && 'codex-task-followup-send',
+            props.compact && busy && 'codex-task-followup-queue'
+          )}
+          disabled={!enabled}
+          aria-label={busy ? t('Queue message') : t('Start task')}
+          title={busy ? t('Queue message') : t('Send message')}
+        >
+          {sending ? (
+            <LoaderCircle className='size-4 animate-spin' aria-hidden />
+          ) : (
+            <ArrowUp className='size-4' aria-hidden />
+          )}
+        </Button>
+      )}
+    </>
+  )
   return (
     <div
       className={cn(
-        'mx-auto w-full max-w-3xl',
-        props.compact ? 'px-3 pt-2 pb-3 sm:px-6 sm:pb-5' : 'px-1 sm:px-0'
+        'chatgpt-composer-wrap chat-composer-region z-20 mx-auto w-full max-w-3xl shrink-0 @container/composer',
+        props.compact ? 'px-3 pt-2 pb-3 sm:px-4 sm:pb-4' : 'px-3 sm:px-4'
       )}
     >
+      <QueuedTurns
+        key={props.draftKey}
+        turns={props.queuedTurns ?? []}
+        onCancel={props.onCancelQueued}
+        onResume={props.onResumeQueued}
+      />
+      {props.contextControls && (
+        <div className='codex-task-context-row mb-2 flex min-w-0 flex-wrap items-center gap-1 px-1'>
+          {props.contextControls}
+        </div>
+      )}
       <form
         onSubmit={(event) => {
           event.preventDefault()
           void submit()
         }}
         aria-busy={sending || stopping}
-        className='bg-background focus-within:border-foreground/30 focus-within:ring-foreground/5 border-border rounded-2xl border p-2.5 shadow-sm transition-[border-color,box-shadow] focus-within:ring-4 sm:p-3'
-      >
-        <textarea
-          ref={textarea}
-          data-codex-composer
-          aria-label={t('Describe your coding task')}
-          aria-describedby={error ? errorId : hintId}
-          aria-invalid={!!error}
-          placeholder={
-            props.compact
-              ? t('Ask a follow-up or describe the next change')
-              : t('What should we build next?')
+        className={cn(
+          'codex-task-composer chatgpt-composer chat-composer-input-surface border-border bg-background focus-within:border-border-hover relative w-full rounded-3xl border p-3 shadow-[0_2px_8px_#00000005] transition-colors',
+          props.compact && 'codex-task-followup p-2'
+        )}
+        onDragEnter={(event) => {
+          if (
+            !props.onAttachFiles ||
+            !event.dataTransfer.types.includes('Files')
+          ) {
+            return
           }
-          value={draft}
-          onChange={(event) => {
-            setDraft(event.target.value)
-            preserveDraft(event.target.value)
-            setError('')
-          }}
-          disabled={sending}
-          rows={props.compact ? 2 : 3}
-          maxLength={100_000}
-          className='placeholder:text-muted-foreground/80 block max-h-56 w-full resize-none overflow-y-auto border-0 bg-transparent px-2.5 py-2 text-base leading-6 outline-none disabled:opacity-70 sm:text-[15px]'
-          onKeyDown={(event) => {
-            if (
-              event.key === 'Enter' &&
-              !event.shiftKey &&
-              !event.nativeEvent.isComposing
-            ) {
-              event.preventDefault()
-              void submit()
-            }
-          }}
-        />
-        <div className='mt-1 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2'>
-          <div className='flex min-w-0 [scrollbar-width:none] items-center gap-0.5 overflow-x-auto overscroll-x-contain [&::-webkit-scrollbar]:hidden'>
-            <label className='hover:bg-muted focus-within:bg-muted relative flex h-11 w-28 shrink-0 items-center rounded-xl sm:w-auto sm:max-w-44'>
-              <select
-                aria-label={t('Codex model')}
-                value={props.model}
-                onChange={(event) => props.onModel(event.target.value)}
-                disabled={sending || props.running || props.disabled}
-                className='h-full w-full appearance-none truncate rounded-xl bg-transparent pr-5 pl-2 text-[13px] outline-none disabled:opacity-60'
-              >
-                {!props.model && (
-                  <option value=''>{t('Select a model')}</option>
-                )}
-                {props.status?.models.map((entry) => (
-                  <option value={entry.id} key={entry.id}>
-                    {entry.name || entry.id}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                aria-hidden
-                className='pointer-events-none absolute right-1.5 size-3'
-              />
-            </label>
-            <label className='hover:bg-muted focus-within:bg-muted relative flex h-11 shrink-0 items-center rounded-xl'>
-              <Sparkles aria-hidden className='ml-1.5 size-3.5' />
-              <select
-                aria-label={t('Reasoning effort')}
-                value={props.effort}
-                onChange={(event) => props.onEffort(event.target.value)}
-                disabled={sending || props.running || props.disabled}
-                className='h-full appearance-none rounded-xl bg-transparent pr-6 pl-1.5 text-[13px] outline-none disabled:opacity-60'
-              >
-                {efforts.map((effort) => (
-                  <option key={effort} value={effort}>
-                    {t(effort)}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                aria-hidden
-                className='pointer-events-none absolute right-1.5 size-3'
-              />
-            </label>
-            <label className='hover:bg-muted focus-within:bg-muted relative flex h-11 shrink-0 items-center rounded-xl'>
-              <Terminal aria-hidden className='ml-1.5 size-3.5' />
-              <select
-                aria-label={t('Codex mode')}
-                value={props.mode}
-                onChange={(event) =>
-                  props.onMode(event.target.value as CodexMode)
-                }
-                disabled={sending || props.running || props.disabled}
-                className='h-full appearance-none rounded-xl bg-transparent pr-6 pl-1.5 text-[13px] outline-none disabled:opacity-60'
-              >
-                <option value='code'>{t('Code')}</option>
-                <option value='ask'>{t('Ask')}</option>
-              </select>
-              <ChevronDown
-                aria-hidden
-                className='pointer-events-none absolute right-1.5 size-3'
-              />
-            </label>
+          event.preventDefault()
+          dragDepth.current += 1
+          if (!attachmentsDisabled) setDraggingFiles(true)
+        }}
+        onDragOver={(event) => {
+          if (
+            !props.onAttachFiles ||
+            !event.dataTransfer.types.includes('Files')
+          ) {
+            return
+          }
+          event.preventDefault()
+          event.dataTransfer.dropEffect = attachmentsDisabled ? 'none' : 'copy'
+        }}
+        onDragLeave={(event) => {
+          if (
+            !props.onAttachFiles ||
+            !event.dataTransfer.types.includes('Files')
+          ) {
+            return
+          }
+          dragDepth.current = Math.max(0, dragDepth.current - 1)
+          if (!dragDepth.current) setDraggingFiles(false)
+        }}
+        onDrop={(event) => {
+          if (
+            !props.onAttachFiles ||
+            !event.dataTransfer.types.includes('Files')
+          ) {
+            return
+          }
+          event.preventDefault()
+          dragDepth.current = 0
+          setDraggingFiles(false)
+          const files = [...event.dataTransfer.files]
+          if (!attachmentsDisabled && files.length) props.onAttachFiles(files)
+        }}
+      >
+        {draggingFiles && !attachmentsDisabled && (
+          <div
+            role='status'
+            className='bg-background/95 border-foreground/30 pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-3xl border-2 border-dashed text-sm font-medium'
+          >
+            <Plus className='size-5' aria-hidden />
+            {t('Drop files here')}
           </div>
-          <div className='flex h-11 items-center justify-end'>
-            {props.running ? (
-              <Button
-                type='button'
-                size='icon'
-                className='bg-foreground text-background hover:bg-foreground/85 size-11 rounded-full shadow-sm'
-                aria-label={t('Stop task')}
-                title={t('Stop task')}
-                disabled={stopping || props.finishing || !props.onStop}
-                onClick={() => void stop()}
+        )}
+        {!!props.uploadedFiles?.length && (
+          <ul
+            aria-label={t('Uploaded files')}
+            className='flex max-h-36 flex-wrap gap-2 overflow-x-hidden overflow-y-auto overscroll-contain px-1 pt-1 pb-2'
+          >
+            {props.uploadedFiles.map((path) => (
+              <li
+                key={path}
+                className='border-border/70 bg-background flex max-w-full min-w-0 items-center gap-2 rounded-2xl border py-1 pr-1 pl-3 text-sm'
               >
-                {stopping ? (
-                  <LoaderCircle className='size-4 animate-spin' />
-                ) : (
-                  <Square className='size-3.5 fill-current' />
-                )}
-              </Button>
-            ) : (
-              <Button
-                type='submit'
-                size='icon'
-                className='bg-foreground text-background hover:bg-foreground/85 size-11 rounded-full shadow-sm'
-                disabled={!enabled}
-                aria-label={t('Start task')}
-                title={t('Start task')}
-              >
-                {sending ? (
-                  <LoaderCircle className='size-4 animate-spin' />
-                ) : (
-                  <ArrowUp className='size-5' />
-                )}
-              </Button>
-            )}
+                <Paperclip
+                  className='text-muted-foreground size-4 shrink-0'
+                  aria-hidden
+                />
+                <span className='max-w-52 truncate' title={path}>
+                  {path}
+                </span>
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='icon-sm'
+                  className='focus-visible:ring-ring size-9 rounded-full focus-visible:ring-2 sm:size-7'
+                  aria-label={t('Remove attachment {{name}}', {
+                    name: path,
+                    interpolation: { escapeValue: false },
+                  })}
+                  disabled={
+                    sending || props.uploading || !props.onRemoveUploadedFile
+                  }
+                  onClick={() => props.onRemoveUploadedFile?.(path)}
+                >
+                  <X className='size-3' aria-hidden />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className='codex-task-input-row min-w-0'>{inputField}</div>
+        <div className='codex-task-composer-toolbar chatgpt-composer-toolbar flex min-h-11 flex-wrap items-end gap-2'>
+          <div className='codex-task-composer-controls flex min-w-0 flex-1 flex-wrap items-center gap-0.5 sm:gap-1'>
+            {uploadControl}
+            {permissionControl}
+          </div>
+          <div className='codex-task-composer-actions ml-auto flex min-h-11 shrink-0 items-center justify-end gap-2 self-end'>
+            {reasoningControl}
+            {sendControls}
           </div>
         </div>
       </form>
       {(sending || stopping || props.finishing) && (
-        <p role='status' className='text-muted-foreground mt-2 px-2 text-xs'>
+        <p role='status' className='sr-only'>
           {progressLabel}
         </p>
       )}
@@ -381,7 +621,7 @@ export function CodexComposer(props: ComposerProps) {
         <p
           id={errorId}
           role='alert'
-          className='text-destructive mt-2 px-2 text-xs'
+          className='codex-composer-error text-destructive text-xs'
         >
           {t(error)}{' '}
           {t(
@@ -389,15 +629,6 @@ export function CodexComposer(props: ComposerProps) {
           )}
         </p>
       )}
-      <div
-        id={hintId}
-        className='text-muted-foreground mt-2 flex items-start justify-between gap-3 px-1 text-[11px] leading-4 sm:px-2'
-      >
-        <p>{hint}</p>
-        <p className='hidden shrink-0 sm:block'>
-          {t('Enter to send · Shift + Enter for a new line')}
-        </p>
-      </div>
     </div>
   )
 }

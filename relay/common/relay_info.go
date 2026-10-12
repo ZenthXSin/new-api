@@ -564,6 +564,11 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		info.RequestURLPath = strings.TrimPrefix(info.RequestURLPath, "/pg")
 		info.RequestURLPath = "/v1" + info.RequestURLPath
 	}
+	// Trusted session-bound Codex credentials use the same direct-user quota
+	// accounting as the dashboard playground; normal model billing is retained.
+	if c.GetBool("codex_workbench_relay") {
+		info.IsPlayground = true
+	}
 
 	userSetting, ok := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)
 	if ok {

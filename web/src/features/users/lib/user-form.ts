@@ -40,7 +40,10 @@ export const userFormSchema = z.object({
   role: z.number().optional(),
   quota_dollars: z.number().min(0).optional(),
   group: z.string().optional(),
-  groups: z.array(z.string()).min(1, 'At least one group is required').optional(),
+  groups: z
+    .array(z.string())
+    .min(1, 'At least one group is required')
+    .optional(),
   remark: z.string().optional(),
   admin_permissions: z
     .record(z.string(), z.record(z.string(), z.boolean()))
@@ -122,9 +125,7 @@ export function transformUserToFormDefaults(user: User): UserFormValues {
     password: '',
     role: user.role,
     quota_dollars: quotaUnitsToDollars(user.quota),
-    groups: user.groups?.length
-      ? user.groups
-      : [user.group || DEFAULT_GROUP],
+    groups: user.groups?.length ? user.groups : [user.group || DEFAULT_GROUP],
     group: user.group || DEFAULT_GROUP,
     remark: user.remark || '',
     admin_permissions: user.admin_permissions ?? {},

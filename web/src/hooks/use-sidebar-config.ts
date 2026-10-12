@@ -64,6 +64,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     user: true,
     setting: true,
     subscription: true,
+    codex_admin: true,
     finance: true,
   },
 }
@@ -117,6 +118,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/models/deployments': { section: 'admin', module: 'models' },
   '/users': { section: 'admin', module: 'user' },
   '/redemption-codes': { section: 'admin', module: 'redemption' },
+  '/codex-admin': { section: 'admin', module: 'codex_admin' },
   '/subscriptions': { section: 'admin', module: 'subscription' },
   '/finance': { section: 'admin', module: 'finance' },
   '/system-settings': { section: 'admin', module: 'setting' },

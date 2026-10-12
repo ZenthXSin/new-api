@@ -38,6 +38,7 @@ import { Route as SetupIndexRouteImport } from './routes/setup/index'
 import { Route as authUserResetRouteImport } from './routes/(auth)/user/reset'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedChatChatIdRouteImport } from './routes/_authenticated/chat/$chatId'
+import { Route as AuthenticatedCodexAdminIndexRouteImport } from './routes/_authenticated/codex-admin/index'
 import { Route as AuthenticatedCodexIndexRouteImport } from './routes/_authenticated/codex/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedDashboardSectionRouteImport } from './routes/_authenticated/dashboard/$section'
@@ -224,6 +225,12 @@ const AuthenticatedChatChatIdRoute = AuthenticatedChatChatIdRouteImport.update({
   path: '/chat/$chatId',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedCodexAdminIndexRoute =
+  AuthenticatedCodexAdminIndexRouteImport.update({
+    id: '/codex-admin/',
+    path: '/codex-admin/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedCodexIndexRoute = AuthenticatedCodexIndexRouteImport.update({
   id: '/codex/',
   path: '/codex/',
@@ -493,6 +500,7 @@ export interface FileRoutesByFullPath {
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/payments/checkout/$orderId': typeof PaymentsCheckoutOrderIdRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
+  '/codex-admin/': typeof AuthenticatedCodexAdminIndexRoute
   '/codex/': typeof AuthenticatedCodexIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/distribution/': typeof AuthenticatedDistributionIndexRoute
@@ -561,6 +569,7 @@ export interface FileRoutesByTo {
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/payments/checkout/$orderId': typeof PaymentsCheckoutOrderIdRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
+  '/codex-admin': typeof AuthenticatedCodexAdminIndexRoute
   '/codex': typeof AuthenticatedCodexIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/distribution': typeof AuthenticatedDistributionIndexRoute
@@ -633,6 +642,7 @@ export interface FileRoutesById {
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/payments/checkout/$orderId': typeof PaymentsCheckoutOrderIdRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
+  '/_authenticated/codex-admin/': typeof AuthenticatedCodexAdminIndexRoute
   '/_authenticated/codex/': typeof AuthenticatedCodexIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/distribution/': typeof AuthenticatedDistributionIndexRoute
@@ -704,6 +714,7 @@ export interface FileRouteTypes {
     | '/usage-logs/$section'
     | '/payments/checkout/$orderId'
     | '/channels/'
+    | '/codex-admin/'
     | '/codex/'
     | '/dashboard/'
     | '/distribution/'
@@ -772,6 +783,7 @@ export interface FileRouteTypes {
     | '/usage-logs/$section'
     | '/payments/checkout/$orderId'
     | '/channels'
+    | '/codex-admin'
     | '/codex'
     | '/dashboard'
     | '/distribution'
@@ -843,6 +855,7 @@ export interface FileRouteTypes {
     | '/_authenticated/usage-logs/$section'
     | '/payments/checkout/$orderId'
     | '/_authenticated/channels/'
+    | '/_authenticated/codex-admin/'
     | '/_authenticated/codex/'
     | '/_authenticated/dashboard/'
     | '/_authenticated/distribution/'
@@ -1105,6 +1118,13 @@ declare module '@tanstack/react-router' {
       path: '/chat/$chatId'
       fullPath: '/chat/$chatId'
       preLoaderRoute: typeof AuthenticatedChatChatIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/codex-admin/': {
+      id: '/_authenticated/codex-admin/'
+      path: '/codex-admin'
+      fullPath: '/codex-admin/'
+      preLoaderRoute: typeof AuthenticatedCodexAdminIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/codex/': {
@@ -1485,6 +1505,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedPaymentsOrdersRoute: typeof AuthenticatedPaymentsOrdersRoute
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
+  AuthenticatedCodexAdminIndexRoute: typeof AuthenticatedCodexAdminIndexRoute
   AuthenticatedCodexIndexRoute: typeof AuthenticatedCodexIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedDistributionIndexRoute: typeof AuthenticatedDistributionIndexRoute
@@ -1514,6 +1535,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedPaymentsOrdersRoute: AuthenticatedPaymentsOrdersRoute,
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
+  AuthenticatedCodexAdminIndexRoute: AuthenticatedCodexAdminIndexRoute,
   AuthenticatedCodexIndexRoute: AuthenticatedCodexIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedDistributionIndexRoute: AuthenticatedDistributionIndexRoute,

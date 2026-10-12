@@ -80,6 +80,39 @@ test('preserves ordinary numeric, boolean, and JSON filter behavior', () => {
   expect(parseRouterSearch(stringifyRouterSearch(parsed))).toEqual(parsed)
 })
 
+test('preserves the Codex GitHub callback marker through route validation and URL normalization', async () => {
+  const root = createRootRoute()
+  const codex = createRoute({
+    getParentRoute: () => root,
+    path: '/codex',
+    validateSearch: z.object({
+      github_oauth: z.string().max(1).optional().catch(undefined),
+      code: z.string(),
+      state: z.string(),
+    }),
+  })
+  const query = new URLSearchParams({
+    github_oauth: '1',
+    code: 'fixture-code',
+    state: 'fixture-state',
+  })
+  const router = createRouter({
+    routeTree: root.addChildren([codex]),
+    history: createMemoryHistory({ initialEntries: [`/codex?${query}`] }),
+    parseSearch: parseRouterSearch,
+    stringifySearch: stringifyRouterSearch,
+  })
+  await router.load()
+  expect(router.state.matches.at(-1)?.search).toMatchObject({
+    github_oauth: '1',
+    code: 'fixture-code',
+    state: 'fixture-state',
+  })
+  expect(
+    new URLSearchParams(router.state.location.searchStr).get('github_oauth')
+  ).toBe('1')
+})
+
 test('keeps repeated resource values and rejects duplicate opaque single-value parameters', () => {
   const query =
     '?client_id=c&redirect_uri=https%3A%2F%2Fapp.example%2Fcallback&state=one&resource=urn%3Anew-api%3Adashboard&resource=urn%3Anew-api%3Arelay'

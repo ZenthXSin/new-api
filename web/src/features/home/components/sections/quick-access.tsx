@@ -20,8 +20,8 @@ import { Link } from '@tanstack/react-router'
 import { ArrowRight, HardDriveDownload, Megaphone } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { getPreviewText } from '@/features/dashboard/lib'
 import { useAnnouncements } from '@/features/dashboard/hooks/use-status-data'
+import { getPreviewText } from '@/features/dashboard/lib'
 import { getAnnouncementColorClass } from '@/lib/colors'
 import { formatDateTimeObject } from '@/lib/time'
 import { cn } from '@/lib/utils'
@@ -44,10 +44,10 @@ export function QuickAccess() {
           {/* Download Center portal */}
           <Link
             to='/downloads'
-            className='group border-border/40 hover:bg-muted/20 flex flex-col justify-between gap-5 rounded-xl border bg-background p-7 transition-colors duration-300 md:p-8'
+            className='group border-border/40 hover:bg-muted/20 bg-background flex flex-col justify-between gap-5 rounded-xl border p-7 transition-colors duration-300 md:p-8'
           >
             <div className='flex items-start justify-between'>
-              <span className='border-border/50 bg-muted/30 text-blue-500 dark:text-blue-400 flex size-12 items-center justify-center rounded-xl border'>
+              <span className='border-border/50 bg-muted/30 flex size-12 items-center justify-center rounded-xl border text-blue-500 dark:text-blue-400'>
                 <HardDriveDownload className='size-5' strokeWidth={1.5} />
               </span>
               <ArrowRight className='text-muted-foreground/40 group-hover:text-foreground size-4 transition-all duration-200 group-hover:translate-x-0.5' />
@@ -57,13 +57,15 @@ export function QuickAccess() {
                 {t('Download Center')}
               </h3>
               <p className='text-muted-foreground text-sm leading-relaxed'>
-                {t('Get the latest installers, release notes and announcements')}
+                {t(
+                  'Get the latest installers, release notes and announcements'
+                )}
               </p>
             </div>
           </Link>
 
           {/* Announcements board */}
-          <div className='border-border/40 flex flex-col rounded-xl border bg-background p-7 md:p-8'>
+          <div className='border-border/40 bg-background flex flex-col rounded-xl border p-7 md:p-8'>
             <div className='mb-4 flex items-center gap-3'>
               <span className='border-border/50 bg-muted/30 text-muted-foreground flex size-12 shrink-0 items-center justify-center rounded-xl border'>
                 <Megaphone className='size-5' strokeWidth={1.5} />

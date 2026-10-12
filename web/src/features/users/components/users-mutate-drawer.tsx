@@ -31,9 +31,9 @@ import {
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
+import { MultiSelect } from '@/components/multi-select'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { MultiSelect } from '@/components/multi-select'
 import {
   Form,
   FormControl,
@@ -290,7 +290,8 @@ export function UsersMutateDrawer({
                             { value: '10', label: t('Admin') },
                           ]}
                           onValueChange={(value) =>
-                            value !== null && field.onChange(Number.parseInt(value))
+                            value !== null &&
+                            field.onChange(Number.parseInt(value))
                           }
                           value={String(field.value)}
                         >
@@ -380,7 +381,9 @@ export function UsersMutateDrawer({
                           />
                         </FormControl>
                         <FormDescription>
-                          {t('The first selected group is used as the primary group.')}
+                          {t(
+                            'The first selected group is used as the primary group.'
+                          )}
                         </FormDescription>
                         <FormMessage />
                       </FormItem>

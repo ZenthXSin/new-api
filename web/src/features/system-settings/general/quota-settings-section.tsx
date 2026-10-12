@@ -256,7 +256,8 @@ export function QuotaSettingsSection({
                     />
                   </FormControl>
                   <FormDescription>
-                    被邀请人单次充值成功后，邀请人按其充值所得额度的该倍率获得分红，直接进入邀请人主余额。填 0 关闭；例如 0.1 表示 10%。设置正倍率需先确认支付合规。
+                    被邀请人单次充值成功后，邀请人按其充值所得额度的该倍率获得分红，直接进入邀请人主余额。填
+                    0 关闭；例如 0.1 表示 10%。设置正倍率需先确认支付合规。
                   </FormDescription>
                   <FormMessage />
                 </FormItem>

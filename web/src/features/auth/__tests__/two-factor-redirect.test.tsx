@@ -25,7 +25,13 @@ import {
   Outlet,
   RouterProvider,
 } from '@tanstack/react-router'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
@@ -59,6 +65,7 @@ const originalAdapter = api.defaults.adapter
 const requests: Array<{ url: string; data: unknown }> = []
 let queryClient: QueryClient
 let rejectNextOTP = false
+const pendingTimers = new Set<ReturnType<typeof setTimeout>>()
 
 async function renderAuthentication(initialEntry: string) {
   const rootRoute = createRootRoute({ component: Outlet })
@@ -126,6 +133,14 @@ async function submitOTP() {
 }
 
 beforeEach(() => {
+  // input-otp schedules selection updates without cancelling them on unmount.
+  // Keep real timers for user interactions and release owned timers at teardown.
+  const schedule = globalThis.setTimeout
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation((...args) => {
+    const timer = schedule(...args)
+    pendingTimers.add(timer)
+    return timer
+  })
   vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
   localStorage.clear()
   sessionStorage.clear()
@@ -166,11 +181,15 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  cleanup()
   api.defaults.adapter = originalAdapter
   queryClient.clear()
   useAuthStore.getState().auth.reset()
   localStorage.clear()
   sessionStorage.clear()
+  pendingTimers.forEach((timer) => clearTimeout(timer))
+  pendingTimers.clear()
+  vi.restoreAllMocks()
 })
 
 describe('two-factor login return destination', () => {

@@ -22,6 +22,33 @@ import { applyCodexEvent, applyCodexEvents } from '../lib/events'
 import { detail, workspace } from './fixtures'
 
 describe('Codex event restoration', () => {
+  test('polling restores queued messages and removes cancelled entries without a new conversation event', () => {
+    const queuedTurns = [
+      {
+        requestId: 'queued-1',
+        prompt: 'Then add tests',
+        model: 'codex-test',
+        group: '',
+        effort: 'high',
+        mode: 'code' as const,
+        conversationId: 'conversation-1',
+        createdAt: 1,
+        status: 'queued' as const,
+      },
+    ]
+    const page = {
+      events: [],
+      nextCursor: 0,
+      workspace,
+      pendingApprovals: [],
+      queuedTurns,
+    }
+    const restored = applyCodexEvents(detail(), page)
+    expect(restored.queuedTurns).toEqual(queuedTurns)
+    expect(
+      applyCodexEvents(restored, { ...page, queuedTurns: [] }).queuedTurns
+    ).toEqual([])
+  })
   test('replayed event sequences do not duplicate streamed words', () => {
     const event = {
       seq: 1,

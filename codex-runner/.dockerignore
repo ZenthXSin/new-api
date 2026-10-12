@@ -3,6 +3,7 @@
 !runtime-vendor/
 !runtime-vendor/codex
 !runtime-vendor/codex-code-mode-host
+!runtime-vendor/gh
 !workspace-git.py
 !workspace-process.py
 !migrate-codex-home.py

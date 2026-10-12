@@ -17,7 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  fireEvent,
+  render,
+  screen,
+  within,
+  waitFor,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { AxiosResponse } from 'axios'
 import { useState } from 'react'
@@ -266,7 +272,15 @@ describe('Codex file review usability', () => {
 describe('Codex project creation', () => {
   test('blank projects do not submit a hidden repository and invalid names receive field feedback', async () => {
     const create = vi.fn().mockResolvedValue(undefined)
-    render(<CreateWorkspaceDialog open onClose={vi.fn()} onCreate={create} />)
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <CreateWorkspaceDialog open onClose={vi.fn()} onCreate={create} />
+      </QueryClientProvider>
+    )
     expect(screen.getByRole('radio', { name: /Blank project/ })).toBeChecked()
     expect(
       screen.queryByRole('textbox', { name: 'Repository URL' })
@@ -286,12 +300,28 @@ describe('Codex project creation', () => {
       screen.getByRole('button', { name: 'Create project' })
     )
     await waitFor(() =>
-      expect(create).toHaveBeenCalledWith('Website', undefined)
+      expect(create).toHaveBeenCalledWith({ name: 'Website' })
     )
   })
   test('repository mode validates HTTPS URLs and retains the entered values after a failed import', async () => {
     const create = vi.fn().mockRejectedValue(new Error('Could not import'))
-    render(<CreateWorkspaceDialog open onClose={vi.fn()} onCreate={create} />)
+    vi.spyOn(api, 'get').mockResolvedValue(
+      response({
+        configured: false,
+        connected: false,
+        scopes: [],
+        capabilities: [],
+      })
+    )
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <CreateWorkspaceDialog open onClose={vi.fn()} onCreate={create} />
+      </QueryClientProvider>
+    )
     await userEvent.click(
       screen.getByRole('radio', { name: /Import repository/ })
     )
@@ -321,10 +351,10 @@ describe('Codex project creation', () => {
       screen.getByRole('button', { name: 'Create project' })
     )
     await waitFor(() =>
-      expect(create).toHaveBeenCalledWith(
-        'Website',
-        'https://github.com/owner/project'
-      )
+      expect(create).toHaveBeenCalledWith({
+        name: 'Website',
+        repositoryUrl: 'https://github.com/owner/project',
+      })
     )
     expect(await screen.findByRole('alert')).toBeVisible()
     expect(screen.getByRole('textbox', { name: 'Project name' })).toHaveValue(
@@ -383,7 +413,11 @@ describe('Codex change and command review', () => {
     })
     render(<ReviewHarness tab='diff' />)
     expect(await screen.findByText('first.ts')).toBeVisible()
-    await userEvent.click(screen.getByRole('button', { name: 'Open file' }))
+    await userEvent.click(
+      within(
+        screen.getByRole('article', { name: 'Changes in first.ts' })
+      ).getByRole('button', { name: 'Open file' })
+    )
     expect(
       await screen.findByRole('textbox', { name: 'File contents' })
     ).toHaveTextContent('actual first file')

@@ -127,7 +127,11 @@ test('pickFastestNode returns null when every probe fails', async () => {
     'https://node-b.example.com': null,
   })
 
-  const fastest = await pickFastestNode([fastItem, slowItem], probe, CURRENT_ORIGIN)
+  const fastest = await pickFastestNode(
+    [fastItem, slowItem],
+    probe,
+    CURRENT_ORIGIN
+  )
 
   expect(fastest).toBe(null)
 })
@@ -164,7 +168,10 @@ test('writeProbeMemory then readProbeMemory round-trips url and timestamp', () =
 test('readProbeMemory returns null for unparsable or invalid stored JSON', () => {
   localStorage.setItem(FASTEST_NODE_STORAGE_KEY, 'not-json{')
   expect(readProbeMemory()).toBe(null)
-  localStorage.setItem(FASTEST_NODE_STORAGE_KEY, JSON.stringify({ url: 42, at: 1 }))
+  localStorage.setItem(
+    FASTEST_NODE_STORAGE_KEY,
+    JSON.stringify({ url: 42, at: 1 })
+  )
   expect(readProbeMemory()).toBe(null)
   localStorage.setItem(
     FASTEST_NODE_STORAGE_KEY,
@@ -342,7 +349,9 @@ test('fetchServerNodeProbe returns null when no entry is usable', async () => {
   installFetch(async () => {
     const body = {
       success: true,
-      data: [{ url: 'https://node-a.example.com', latency_ms: 50, error: 'down' }],
+      data: [
+        { url: 'https://node-a.example.com', latency_ms: 50, error: 'down' },
+      ],
     }
     return new Response(JSON.stringify(body), { status: 200 })
   })

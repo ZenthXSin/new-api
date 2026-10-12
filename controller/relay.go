@@ -129,6 +129,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
 	}
+	imageObserver := service.ObserveImageGeneration(c, relayInfo)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			imageObserver.Finish(types.NewError(fmt.Errorf("image relay interrupted"), types.ErrorCodeBadResponse))
+			panic(recovered)
+		}
+		imageObserver.Finish(newAPIError)
+	}()
 	defer func() {
 		recovered := recover()
 		resultErr := newAPIError
@@ -208,6 +216,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
 
+	imageObserver.MarkGenerating()
 	initialChannel, textPolling, initialChannelErr := getTextPollingInitialChannel(c, relayFormat)
 	if initialChannelErr != nil {
 		newAPIError = initialChannelErr

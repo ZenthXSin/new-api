@@ -319,3 +319,8 @@ this software, either in source code form or as a compiled binary, for any
 purpose, commercial or non-commercial, and by any means.
 
 For more information, please refer to https://unlicense.org/
+
+
+### Inter font
+
+Codex interface includes Inter Variable by Rasmus Andersson, licensed under the SIL Open Font License 1.1. Font and license: `web/src/assets/fonts/inter/`. Source: https://github.com/rsms/inter.

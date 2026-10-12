@@ -21,7 +21,11 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { DataTablePage, TruncatedCell, useDataTable } from '@/components/data-table'
+import {
+  DataTablePage,
+  TruncatedCell,
+  useDataTable,
+} from '@/components/data-table'
 import { DatePicker } from '@/components/date-picker'
 import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { Input } from '@/components/ui/input'
@@ -95,8 +99,7 @@ export function FundsLogTab() {
       getFinanceFundsLog({
         page: pagination.pageIndex + 1,
         size: pagination.pageSize,
-        type:
-          type === ALL_TYPES ? undefined : (type as FundsLogType),
+        type: type === ALL_TYPES ? undefined : (type as FundsLogType),
         username: debouncedUsername.trim() || undefined,
         start,
         end,

@@ -19,12 +19,20 @@ process.env.TZ = 'UTC'
 
 test('joinMessageRegion joins non-empty parts and returns an empty string when all are empty', () => {
   expect(
-    joinMessageRegion({ country: 'US', region: 'California', city: 'San Francisco' })
+    joinMessageRegion({
+      country: 'US',
+      region: 'California',
+      city: 'San Francisco',
+    })
   ).toBe('US / California / San Francisco')
   expect(joinMessageRegion({ country: 'US', region: '', city: '' })).toBe('US')
-  expect(joinMessageRegion({ country: '', region: '', city: 'Tokyo' })).toBe('Tokyo')
+  expect(joinMessageRegion({ country: '', region: '', city: 'Tokyo' })).toBe(
+    'Tokyo'
+  )
   expect(joinMessageRegion({ country: '', region: '', city: '' })).toBe('')
-  expect(joinMessageRegion({ country: '  ', region: 'CA', city: '' })).toBe('CA')
+  expect(joinMessageRegion({ country: '  ', region: 'CA', city: '' })).toBe(
+    'CA'
+  )
 })
 
 test('formatMessageTime renders a seconds timestamp as local wall-clock time', () => {

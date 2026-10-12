@@ -57,12 +57,47 @@ test('traversal, .git, symlinks and non-regular files never expose host contents
   assert.equal((await files.list(id)).entries.length, 0);
 });
 
-test('binary and oversized files return explicit errors without rewriting content', async () => {
+test('binary files expose read-only metadata without rewriting content', async () => {
   const { files, id, projectPath } = await fixture();
   await fs.writeFile(path.join(projectPath, 'binary'), Buffer.from([0xff, 0x00]));
-  await assert.rejects(files.read(id, 'binary'), { statusCode: 415 });
+  assert.deepEqual(await files.read(id, 'binary'), { path: 'binary', content: '', hash: null, size: 2, binary: true });
   await assert.rejects(files.write(id, 'too-big', 'x'.repeat(1024 * 1024 + 1), null), { statusCode: 413 });
   assert.equal((await files.list(id)).entries.length, 1);
+});
+
+test('large artifacts remain downloadable beyond the text and project export limits', async () => {
+  const { files, id, projectPath } = await fixture();
+  const location = path.join(projectPath, 'Phira.ipa');
+  const handle = await fs.open(location, 'w');
+  const size = 129 * 1024 * 1024 + 7;
+  await handle.truncate(size);
+  await handle.write(Buffer.from([0x50, 0x4b, 0, 0xff]), 0, 4, 0);
+  await handle.close();
+  const preview = await files.read(id, 'Phira.ipa');
+  assert.equal(preview.size, size);
+  assert.equal(preview.truncated, true);
+  assert.equal(preview.hash, null);
+  const download = await files.download(id, 'Phira.ipa');
+  assert.equal(download.size, size);
+  let count = 0, first;
+  for await (const chunk of download.stream) { first ||= chunk.subarray(0, 4); count += chunk.length; }
+  assert.equal(count, size);
+  assert.deepEqual(first, Buffer.from([0x50, 0x4b, 0, 0xff]));
+});
+
+test('artifact downloads reject traversal, symlinks, special files and files beyond the download limit', async () => {
+  const { files, id, projectPath, root } = await fixture();
+  await fs.writeFile(path.join(root, 'secret'), 'private');
+  await fs.symlink(path.join(root, 'secret'), path.join(projectPath, 'link'));
+  await fs.symlink(root, path.join(projectPath, 'outside'));
+  await fs.mkdir(path.join(projectPath, 'folder'));
+  await runCommand('mkfifo', [path.join(projectPath, 'pipe')]);
+  for (const unsafe of ['../secret', '/etc/passwd', '.git/config', 'link', 'outside/secret', 'folder', 'pipe', 'missing']) {
+    await assert.rejects(files.download(id, unsafe));
+  }
+  const handle = await fs.open(path.join(projectPath, 'oversized'), 'w');
+  await handle.truncate(1024 * 1024 * 1024 + 1); await handle.close();
+  await assert.rejects(files.download(id, 'oversized'), { code: 'file_too_large', statusCode: 413 });
 });
 
 test('ZIP import preserves Unicode, blocks collisions, and never partially imports invalid archives', async () => {
@@ -112,4 +147,42 @@ test('invalid UUID and replaced workspace roots are rejected', async () => {
   await fs.rmdir(projectPath);
   await fs.symlink('/etc', projectPath);
   await assert.rejects(files.list(id), { code: 'unsafe_path' });
+});
+
+test('ordinary uploads preserve binary bytes and Unicode paths without overwriting files', async () => {
+  const { files, id, projectPath } = await fixture();
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xc0, 0x80]);
+  assert.deepEqual(await files.upload(id, '素材/截图.png', bytes), { path: '素材/截图.png', size: bytes.length });
+  assert.deepEqual(await fs.readFile(path.join(projectPath, '素材/截图.png')), bytes);
+  await assert.rejects(files.upload(id, '素材/截图.png', Buffer.from('replacement')), { code: 'file_conflict', statusCode: 409 });
+  assert.deepEqual(await fs.readFile(path.join(projectPath, '素材/截图.png')), bytes);
+  assert.deepEqual(await files.upload(id, 'empty.txt', Buffer.alloc(0)), { path: 'empty.txt', size: 0 });
+  assert.equal((await fs.stat(path.join(projectPath, 'empty.txt'))).size, 0);
+});
+
+test('ordinary uploads reject traversal symlinks directories and oversized payloads', async () => {
+  const { files, id, projectPath, root } = await fixture();
+  const secret = path.join(root, 'secret');
+  await fs.writeFile(secret, 'private');
+  await fs.symlink(secret, path.join(projectPath, 'link'));
+  await fs.symlink(root, path.join(projectPath, 'outside'));
+  await fs.mkdir(path.join(projectPath, 'existing-directory'));
+  for (const unsafe of ['../secret', '/etc/passwd', '.git/config', 'outside/secret', 'link', 'existing-directory', 'a\\b', '']) {
+    await assert.rejects(files.upload(id, unsafe, Buffer.from('overwrite')));
+  }
+  await assert.rejects(async () => files.upload(id, 'too-large.bin', Buffer.alloc(25 * 1024 * 1024 + 1)), {statusCode: 413});
+  assert.equal(await fs.readFile(secret, 'utf8'), 'private');
+  await assert.rejects(fs.stat(path.join(projectPath, 'too-large.bin')), {code: 'ENOENT'});
+});
+
+test('independent upload helpers cannot replace the winning file at the same path', async () => {
+  const { files, id, projectPath } = await fixture();
+  const results = await Promise.allSettled([
+    files.fileOperation(id, 'upload', {path: 'same.bin', data: Buffer.from('first').toString('base64')}),
+    files.fileOperation(id, 'upload', {path: 'same.bin', data: Buffer.from('second').toString('base64')}),
+  ]);
+  assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+  assert.equal(results.find((result) => result.status === 'rejected').reason.code, 'file_conflict');
+  const accepted = results[0].status === 'fulfilled' ? 'first' : 'second';
+  assert.equal(await fs.readFile(path.join(projectPath, 'same.bin'), 'utf8'), accepted);
 });

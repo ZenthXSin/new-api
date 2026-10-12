@@ -49,9 +49,10 @@ export async function probeNodeLatency(url: string): Promise<PingStatus> {
  * endpoint failed or reported no successful node at all. Nodes whose entry
  * carries an error or an unusable latency are skipped.
  */
-export async function fetchServerNodeProbe(): Promise<
-  Record<string, number> | null
-> {
+export async function fetchServerNodeProbe(): Promise<Record<
+  string,
+  number
+> | null> {
   try {
     const res = await fetch('/api/api-nodes/probe', { cache: 'no-store' })
     if (!res.ok) return null
@@ -63,7 +64,11 @@ export async function fetchServerNodeProbe(): Promise<
     const latencies: Record<string, number> = {}
     for (const entry of data) {
       if (typeof entry !== 'object' || entry === null) continue
-      const { url, latency_ms: latencyMs, error } = entry as {
+      const {
+        url,
+        latency_ms: latencyMs,
+        error,
+      } = entry as {
         url?: unknown
         latency_ms?: unknown
         error?: unknown
@@ -90,8 +95,9 @@ export async function fetchServerNodeProbe(): Promise<
 export async function pickFastestNode(
   items: ApiInfoItem[],
   probe: (url: string) => Promise<PingStatus> = probeNodeLatency,
-  currentOrigin: string =
-    typeof window === 'undefined' ? '' : window.location.origin,
+  currentOrigin: string = typeof window === 'undefined'
+    ? ''
+    : window.location.origin,
   serverProbe?: () => Promise<Record<string, number> | null>
 ): Promise<ApiInfoItem | null> {
   if (items.length === 0) return null
@@ -171,10 +177,7 @@ export function readProbeMemory(): { url: string; at: number } | null {
     const parsed: unknown = JSON.parse(raw)
     if (typeof parsed !== 'object' || parsed === null) return null
     const candidate = parsed as { url?: unknown; at?: unknown }
-    if (
-      typeof candidate.url !== 'string' ||
-      typeof candidate.at !== 'number'
-    ) {
+    if (typeof candidate.url !== 'string' || typeof candidate.at !== 'number') {
       return null
     }
     return { url: candidate.url, at: candidate.at }

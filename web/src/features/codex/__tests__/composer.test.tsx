@@ -110,12 +110,61 @@ describe('Codex task composer', () => {
     expect(screen.getByRole('button', { name: 'Start task' })).toBeDisabled()
     expect(submit).not.toHaveBeenCalled()
   })
+  test('an unavailable saved model blocks submission but allows choosing a valid model and group', async () => {
+    const onModel = vi.fn()
+    const submit = vi.fn()
+    render(
+      <CodexComposer
+        {...props}
+        model='removed-model'
+        group='removed-group'
+        disabled
+        blockedReason='Choose an available model and group before starting a task.'
+        catalog={{
+          defaultGroup: 'default',
+          defaultModel: 'codex-test',
+          groups: [
+            {
+              id: 'default',
+              name: 'Default group',
+              description: '',
+              ratio: 1,
+              models: [
+                { id: 'codex-test', name: 'Codex Test', supported: true },
+              ],
+            },
+          ],
+        }}
+        onModel={onModel}
+        onSubmit={submit}
+      />
+    )
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'Keep this draft' },
+    })
+    expect(screen.getByRole('button', { name: 'Start task' })).toBeDisabled()
+    await userEvent.click(
+      screen.getByRole('combobox', { name: 'Reasoning effort' })
+    )
+    const selector = screen.getByRole('combobox', { name: 'Codex model' })
+    expect(selector).toBeEnabled()
+    await userEvent.click(selector)
+    await userEvent.click(screen.getByRole('option', { name: 'Codex Test' }))
+    expect(onModel).toHaveBeenCalledWith('codex-test', 'default')
+    expect(screen.getByRole('textbox')).toHaveValue('Keep this draft')
+    expect(submit).not.toHaveBeenCalled()
+  })
   test('active tasks expose stop and lock execution mode', async () => {
     const stop = vi.fn()
     render(
       <CodexComposer {...props} running onStop={stop} onSubmit={vi.fn()} />
     )
-    expect(screen.getByRole('combobox', { name: 'Codex mode' })).toBeDisabled()
+    expect(
+      screen.getByRole('combobox', { name: 'Approval mode' })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole('combobox', { name: 'Reasoning effort' })
+    ).toBeDisabled()
     await userEvent.click(screen.getByRole('button', { name: 'Stop task' }))
     expect(stop).toHaveBeenCalledOnce()
   })
@@ -136,6 +185,7 @@ describe('Codex task composer', () => {
     expect(stop).toHaveBeenCalledTimes(1)
     expect(button).toBeDisabled()
     expect(screen.getByRole('status')).toHaveTextContent('Stopping task…')
+    expect(screen.getByRole('status')).toHaveClass('sr-only')
     finish()
     await waitFor(() => expect(button).toBeEnabled())
   })
@@ -155,7 +205,7 @@ describe('Codex task composer', () => {
       value: 24,
     })
     fireEvent.change(textbox, { target: { value: '' } })
-    expect(textbox.style.height).toBe('96px')
+    expect(textbox.style.height).toBe('48px')
   })
   test('failed stop preserves the current draft and presents its error', async () => {
     render(
@@ -321,5 +371,19 @@ describe('Codex task composer', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Start task' }))
     await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue(''))
     expect(submit).toHaveBeenCalledOnce()
+  })
+  test('compact composer keeps permission and reasoning pills accessible in order', async () => {
+    render(<CodexComposer {...props} compact onSubmit={vi.fn()} />)
+    const controls = screen.getAllByRole('combobox')
+    expect(
+      controls.map((control) => control.getAttribute('aria-label'))
+    ).toEqual(['Approval mode', 'Reasoning effort'])
+    expect(
+      screen.getByRole('combobox', { name: 'Reasoning effort' })
+    ).toBeEnabled()
+    expect(
+      (screen.getByRole('textbox') as HTMLTextAreaElement).style.height
+    ).toBe('48px')
+    expect(screen.getByRole('button', { name: 'Start task' })).toBeDisabled()
   })
 })

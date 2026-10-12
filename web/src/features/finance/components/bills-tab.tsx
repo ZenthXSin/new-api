@@ -23,7 +23,11 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import { DataTablePage, TruncatedCell, useDataTable } from '@/components/data-table'
+import {
+  DataTablePage,
+  TruncatedCell,
+  useDataTable,
+} from '@/components/data-table'
 import { DatePicker } from '@/components/date-picker'
 import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
@@ -44,7 +48,11 @@ import {
   type FinanceBillItem,
   type FinanceBillType,
 } from '../api'
-import { billTypeLabel, formatSignedMoney, formatTimestamp } from '../lib/format'
+import {
+  billTypeLabel,
+  formatSignedMoney,
+  formatTimestamp,
+} from '../lib/format'
 
 const ALL_TYPES = 'all'
 
@@ -128,9 +136,7 @@ export function BillsTab() {
         cell: ({ row }) => (
           <StatusBadge
             label={t(billTypeLabel(row.original.type))}
-            variant={
-              BILL_TYPE_BADGE_VARIANTS[row.original.type] ?? 'neutral'
-            }
+            variant={BILL_TYPE_BADGE_VARIANTS[row.original.type] ?? 'neutral'}
             copyable={false}
           />
         ),
@@ -157,7 +163,9 @@ export function BillsTab() {
       {
         accessorKey: 'note',
         header: t('Note'),
-        cell: ({ row }) => <TruncatedCell>{row.original.note || '-'}</TruncatedCell>,
+        cell: ({ row }) => (
+          <TruncatedCell>{row.original.note || '-'}</TruncatedCell>
+        ),
       },
       {
         accessorKey: 'source',

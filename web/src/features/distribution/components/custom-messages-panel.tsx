@@ -55,9 +55,7 @@ export function CustomMessagesPanel({ appId }: { appId: number }) {
   const bounds = getMessagePageBounds(total, page, MESSAGE_PAGE_SIZE)
   let body: ReactElement
   if (messagesQuery.isLoading) {
-    body = (
-      <p className='py-8 text-center text-sm'>{t('Loading')}</p>
-    )
+    body = <p className='py-8 text-center text-sm'>{t('Loading')}</p>
   } else if (messagesQuery.isError) {
     body = (
       <p className='text-destructive py-8 text-center text-sm'>
@@ -100,12 +98,14 @@ export function CustomMessagesPanel({ appId }: { appId: number }) {
                   <td className='px-3 py-1.5 whitespace-nowrap tabular-nums'>
                     {formatMessageTime(item.created_at)}
                   </td>
-                  <td className='px-3 py-1.5 font-mono'>{item.source_ip || '-'}</td>
+                  <td className='px-3 py-1.5 font-mono'>
+                    {item.source_ip || '-'}
+                  </td>
                   <td className='px-3 py-1.5'>
                     {joinMessageRegion(item) || '-'}
                   </td>
                   <td className='px-3 py-1.5'>{item.name || '-'}</td>
-                  <td className='px-3 py-1.5 whitespace-pre-wrap break-words'>
+                  <td className='px-3 py-1.5 break-words whitespace-pre-wrap'>
                     {item.content}
                   </td>
                 </tr>

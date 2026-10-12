@@ -58,8 +58,9 @@ func TestGroupAvailabilityInvalidRequestsPreserveMetricDenominators(t *testing.T
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 		start := time.Now().Add(-time.Second)
 		info := &relaycommon.RelayInfo{UsingGroup: "mixed", IsStream: true, StartTime: start, FirstResponseTime: start.Add(time.Duration(sample.ttft) * time.Millisecond)}
+		info.SetEstimatePromptTokens(20000)
 		groupavailability.BeginStream(c)
-		groupavailability.ObserveStream(c, `{"choices":[{"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":25}}}`)
+		groupavailability.ObserveStream(c, `{"choices":[{"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":20000,"prompt_tokens_details":{"cached_tokens":5000}}}`)
 		groupavailability.RecordRelayResultWithContext(c, info, sample.err)
 	}
 	require.NoError(t, collector.Flush())
@@ -70,8 +71,8 @@ func TestGroupAvailabilityInvalidRequestsPreserveMetricDenominators(t *testing.T
 	assert.EqualValues(t, 1, before[0].SuccessCount)
 	assert.EqualValues(t, 2, before[0].TtftCount)
 	assert.EqualValues(t, 400, before[0].TtftSumMs)
-	assert.EqualValues(t, 100, before[0].CacheInputTokens)
-	assert.EqualValues(t, 25, before[0].CacheReadTokens)
+	assert.EqualValues(t, 20000, before[0].CacheInputTokens)
+	assert.EqualValues(t, 5000, before[0].CacheReadTokens)
 
 	// Rejected requests arrive later and carry conspicuous timing/cache facts.
 	// They must not update any metric or make the last observation look newer.
@@ -93,8 +94,9 @@ func TestGroupAvailabilityInvalidRequestsPreserveMetricDenominators(t *testing.T
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 				start := time.Now().Add(-time.Minute)
 				info := &relaycommon.RelayInfo{UsingGroup: group, IsStream: true, StartTime: start, FirstResponseTime: start.Add(45 * time.Second)}
+				info.SetEstimatePromptTokens(20000)
 				groupavailability.BeginStream(c)
-				groupavailability.ObserveStream(c, `{"usage":{"prompt_tokens":9000,"prompt_tokens_details":{"cached_tokens":9000}}}`)
+				groupavailability.ObserveStream(c, `{"usage":{"prompt_tokens":1800000,"prompt_tokens_details":{"cached_tokens":1800000}}}`)
 				if rejected.event != "" {
 					groupavailability.ObserveStream(c, rejected.event)
 				}
@@ -148,6 +150,7 @@ func TestGroupAvailabilityInvalidRequestStreamFailuresRemainVisible(t *testing.T
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 			info := &relaycommon.RelayInfo{UsingGroup: tc.name, IsStream: len(tc.events) > 0, StartTime: time.Now(), ChannelMeta: &relaycommon.ChannelMeta{}}
+			info.SetEstimatePromptTokens(20000)
 			if len(tc.events) > 0 {
 				var body strings.Builder
 				for _, event := range tc.events {
@@ -180,15 +183,16 @@ func TestGroupAvailabilityInvalidRequestJSONProviderSignals(t *testing.T) {
 		wantStatus                   int
 		wantRequests                 int64
 	}{
-		{"openai_filtered", "openai", `{"model":"test","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"content_filter"}],"usage":{"prompt_tokens":100,"completion_tokens":2,"total_tokens":102,"prompt_tokens_details":{"cached_tokens":40}}}`, "openai_finish_reason=content_filter", 200, 0},
-		{"gemini_blocked", "gemini", `{"candidates":[],"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":2,"totalTokenCount":102,"cachedContentTokenCount":40}}`, "gemini_block_reason=SAFETY", 200, 0},
-		{"gemini_empty", "gemini_chat", `{"candidates":[],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":2,"totalTokenCount":102,"cachedContentTokenCount":40}}`, "gemini_empty_candidates", 500, 1},
+		{"openai_filtered", "openai", `{"model":"test","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"content_filter"}],"usage":{"prompt_tokens":20000,"completion_tokens":2,"total_tokens":102,"prompt_tokens_details":{"cached_tokens":8000}}}`, "openai_finish_reason=content_filter", 200, 0},
+		{"gemini_blocked", "gemini", `{"candidates":[],"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":20000,"candidatesTokenCount":2,"totalTokenCount":102,"cachedContentTokenCount":8000}}`, "gemini_block_reason=SAFETY", 200, 0},
+		{"gemini_empty", "gemini_chat", `{"candidates":[],"usageMetadata":{"promptTokenCount":20000,"candidatesTokenCount":2,"totalTokenCount":102,"cachedContentTokenCount":8000}}`, "gemini_empty_candidates", 500, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(recorder)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 			info := &relaycommon.RelayInfo{UsingGroup: tc.name, RelayFormat: types.RelayFormatOpenAI, StartTime: time.Now(), ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "test"}}
+			info.SetEstimatePromptTokens(20000)
 			response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(tc.body))}
 			var usage *dto.Usage
 			var apiErr *types.NewAPIError
@@ -203,8 +207,8 @@ func TestGroupAvailabilityInvalidRequestJSONProviderSignals(t *testing.T) {
 			}
 			require.Nil(t, apiErr, "these adapters signal through request context after handling the response")
 			require.NotNil(t, usage)
-			assert.Equal(t, 100, usage.PromptTokens)
-			assert.Equal(t, 40, usage.PromptTokensDetails.CachedTokens)
+			assert.Equal(t, 20000, usage.PromptTokens)
+			assert.Equal(t, 8000, usage.PromptTokensDetails.CachedTokens)
 			assert.Equal(t, tc.wantStatus, recorder.Code)
 			assert.Equal(t, tc.marker, common.GetContextKeyString(c, constant.ContextKeyAdminRejectReason))
 			groupavailability.RecordRelayResultWithContext(c, info, apiErr)
@@ -225,7 +229,7 @@ func TestGroupAvailabilityInvalidRequestJSONProviderSignals(t *testing.T) {
 			// marker. The real handler and billed usage above stay untouched.
 			info.UsingGroup = tc.name + "-retry"
 			groupavailability.BeginAttempt(c, info)
-			groupavailability.ObserveCacheUsageString(c, `{"usage":{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":20}}}`)
+			groupavailability.ObserveCacheUsageString(c, `{"usage":{"prompt_tokens":20000,"prompt_tokens_details":{"cached_tokens":4000}}}`)
 			groupavailability.RecordRelayResultWithContext(c, info, nil)
 			require.NoError(t, collector.Flush())
 			retried, err := collector.Query(context.Background(), "90m", map[string]string{info.UsingGroup: info.UsingGroup}, true)

@@ -73,7 +73,8 @@ export function WeChatNativePaymentDialog(
     let cancelled = false
     let timeoutID: ReturnType<typeof setTimeout> | undefined
     let consecutiveVerificationErrors = 0
-    const stopAt = expireAt > 0 ? expireAt * 1000 : Date.now() + FALLBACK_POLL_DURATION_MS
+    const stopAt =
+      expireAt > 0 ? expireAt * 1000 : Date.now() + FALLBACK_POLL_DURATION_MS
 
     setStatus('pending')
     successHandledRef.current = false

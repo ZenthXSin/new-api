@@ -53,8 +53,8 @@ import {
   uploadManagedDistributionAsset,
   distributionErrorMessage,
 } from './api'
-import { ServerFileBrowserDialog } from './components/server-file-browser-dialog'
 import { CustomMessagesPanel } from './components/custom-messages-panel'
+import { ServerFileBrowserDialog } from './components/server-file-browser-dialog'
 import { DistributionTargetSelects } from './distribution-target-selects'
 import {
   clearBrowserSelection,

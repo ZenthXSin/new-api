@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -222,4 +223,43 @@ func TestRedisFailurePolicies(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, userResponse.Code)
 	assert.Empty(t, userResponse.Body.String())
 	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/email", "192.0.2.62:12345").Code)
+}
+
+func TestCanceledBrowserRequestDoesNotBecomeRateLimiterFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	redisServer, _ := useRateLimitMiniRedis(t)
+	var logs bytes.Buffer
+	common.LogWriterMu.Lock()
+	previousWriter := gin.DefaultErrorWriter
+	gin.DefaultErrorWriter = &logs
+	common.LogWriterMu.Unlock()
+	t.Cleanup(func() {
+		common.LogWriterMu.Lock()
+		gin.DefaultErrorWriter = previousWriter
+		common.LogWriterMu.Unlock()
+	})
+	for _, byUser := range []bool{false, true} {
+		t.Run(map[bool]string{false: "IP", true: "user"}[byUser], func(t *testing.T) {
+			logs.Reset()
+			router := gin.New()
+			require.NoError(t, router.SetTrustedProxies(nil))
+			limiter := rateLimitFactory(1, 30, "CANCELED")
+			if byUser {
+				limiter = userRateLimitFactory(1, 30, "CANCELED")
+			}
+			called := false
+			router.GET("/limited", func(c *gin.Context) { c.Set("id", 7) }, limiter, func(c *gin.Context) { called = true; c.Status(http.StatusNoContent) })
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			request := httptest.NewRequest(http.MethodGet, "/limited", nil).WithContext(ctx)
+			request.RemoteAddr = "192.0.2.70:12345"
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			assert.Equal(t, 499, response.Code, "a browser cancellation is not a Redis outage")
+			assert.Empty(t, response.Body.String())
+			assert.False(t, called)
+			assert.Empty(t, redisServer.Keys())
+			assert.NotContains(t, logs.String(), "rate limit check failed")
+		})
+	}
 }

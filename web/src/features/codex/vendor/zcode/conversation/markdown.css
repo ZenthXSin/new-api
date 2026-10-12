@@ -1,0 +1,66 @@
+/* ZCode MessageResponse presentation adaptation; see CONVERSATION-PROVENANCE.md. */
+.zcode-markdown {
+  overflow-wrap: anywhere;
+  font-size: 16px;
+  line-height: 1.65;
+  letter-spacing: normal;
+}
+.zcode-markdown p {
+  margin-block: 0.85em;
+}
+.zcode-markdown pre {
+  overflow-wrap: normal;
+}
+.zcode-markdown hr {
+  border-color: var(--border);
+  margin-block: 1.75rem;
+}
+.zcode-markdown blockquote {
+  padding-inline-start: 1rem;
+  border-inline-start-width: 3px;
+}
+.zcode-markdown li::marker {
+  color: currentColor;
+}
+.zcode-markdown .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.25rem;
+}
+.zcode-code-block {
+  /* github-light token colors are calibrated against a white surface. */
+  background-color: #fff;
+}
+.zcode-code-header {
+  background-color: #ededed;
+}
+.dark .zcode-code-block {
+  background-color: #171717;
+}
+.dark .zcode-code-header {
+  background-color: #2f2f2f;
+}
+.zcode-markdown .zcode-highlight code {
+  font: inherit;
+}
+.dark .zcode-markdown .zcode-highlight span[style] {
+  color: var(--shiki-dark) !important;
+}
+.zcode-markdown [data-streamdown='code-block'],
+.zcode-markdown [data-markdown-table-frame] {
+  min-width: 0;
+  max-width: 100%;
+}
+.zcode-markdown [data-streamdown='code-block'] pre,
+.zcode-markdown .zcode-highlight {
+  margin: 0;
+}
+.zcode-markdown-table th > :first-child,
+.zcode-markdown-table td > :first-child {
+  margin-top: 0;
+}
+.zcode-markdown-table th > :last-child,
+.zcode-markdown-table td > :last-child {
+  margin-bottom: 0;
+}

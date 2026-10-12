@@ -64,40 +64,48 @@ const codeHighlight = HighlightStyle.define([
 const editorTheme = EditorView.theme({
   '&': {
     height: '100%',
-    backgroundColor: 'var(--background)',
+    backgroundColor: 'transparent',
     color: 'var(--foreground)',
     fontSize: '13px',
+    fontWeight: '400',
   },
-  '&.cm-focused': { outline: 'none' },
+  '&.cm-focused': {
+    outline: '2px solid var(--ring)',
+    outlineOffset: '-2px',
+  },
   '.cm-scroller': {
     fontFamily: 'var(--font-mono)',
-    lineHeight: '1.6rem',
+    lineHeight: '1.65rem',
+    overscrollBehavior: 'contain',
     overflow: 'auto',
   },
   '.cm-content': {
     minWidth: 'max-content',
-    padding: '12px 0',
+    padding: '18px 0 32px',
     caretColor: 'var(--foreground)',
   },
-  '.cm-line': { padding: '0 16px 0 12px' },
+  '.cm-line': { padding: '0 24px 0 16px' },
   '.cm-gutters': {
-    backgroundColor: 'var(--muted)',
+    backgroundColor: 'var(--background)',
     color: 'var(--muted-foreground)',
-    borderRight: '1px solid var(--border)',
+    borderRight: 'none',
   },
-  '.cm-gutterElement': { padding: '0 10px', minWidth: '38px' },
+  '.cm-gutterElement': { padding: '0 8px 0 16px', minWidth: '42px' },
   '.cm-activeLine': { backgroundColor: 'var(--muted)' },
   '.cm-activeLineGutter': {
     color: 'var(--foreground)',
     backgroundColor: 'var(--muted)',
   },
-  '.cm-selectionBackground': { backgroundColor: 'var(--accent)' },
+  '.cm-selectionBackground': { backgroundColor: 'var(--zcode-selected)' },
+  '.cm-cursor': { borderLeftColor: 'var(--foreground)' },
 })
 
 export function WorkspaceCodeEditor(props: {
   path: string
+  initialLine?: number
   value: string
   readOnly: boolean
+  focusOnEdit?: boolean
   onChange: (value: string) => void
   onSave: () => void
 }) {
@@ -143,7 +151,11 @@ export function WorkspaceCodeEditor(props: {
           EditorView.contentAttributes.of({
             'aria-label': ariaLabel,
             'aria-multiline': 'true',
+            tabindex: '0',
             spellcheck: 'false',
+            'aria-description': t(
+              'Press Escape, then Tab to leave the editor.'
+            ),
           }),
           permissions.current.of([
             EditorState.readOnly.of(callbacks.current.readOnly),
@@ -186,7 +198,7 @@ export function WorkspaceCodeEditor(props: {
       editor.destroy()
       view.current = null
     }
-  }, [props.path, ariaLabel])
+  }, [props.path, ariaLabel, t])
   useEffect(() => {
     const editor = view.current
     if (!editor) return
@@ -201,6 +213,9 @@ export function WorkspaceCodeEditor(props: {
     })
   }, [props.readOnly])
   useEffect(() => {
+    if (props.focusOnEdit) view.current?.focus()
+  }, [props.focusOnEdit])
+  useEffect(() => {
     const editor = view.current
     if (!editor || editor.state.doc.toString() === props.value) return
     changingValue.current = true
@@ -210,6 +225,17 @@ export function WorkspaceCodeEditor(props: {
     })
     changingValue.current = false
   }, [props.value])
+  useEffect(() => {
+    const editor = view.current
+    if (!editor || !props.initialLine) return
+    const line = editor.state.doc.line(
+      Math.min(props.initialLine, editor.state.doc.lines)
+    )
+    editor.dispatch({
+      selection: { anchor: line.from },
+      effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
+    })
+  }, [props.initialLine, props.value])
   return (
     <div
       ref={host}

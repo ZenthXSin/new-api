@@ -34,6 +34,7 @@ iptables -w -C DOCKER-USER -i "$task_bridge" -j NEWAPI_CODEX_OUT 2>/dev/null || 
 iptables -w -N NEWAPI_CODEX_HOST 2>/dev/null || true
 iptables -w -F NEWAPI_CODEX_HOST
 iptables -w -A NEWAPI_CODEX_HOST -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -w -A NEWAPI_CODEX_HOST -s "$task_subnet" -d 172.31.240.1 -p tcp --dport 7430 -j ACCEPT
 iptables -w -A NEWAPI_CODEX_HOST -p tcp --dport 443 -j ACCEPT
 iptables -w -A NEWAPI_CODEX_HOST -j REJECT
 iptables -w -C INPUT -i "$task_bridge" -j NEWAPI_CODEX_HOST 2>/dev/null || iptables -w -I INPUT 1 -i "$task_bridge" -j NEWAPI_CODEX_HOST

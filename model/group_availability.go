@@ -23,9 +23,15 @@ type GroupAvailabilityBucket struct {
 	LastRequestAt    int64
 	CacheInputTokens int64 `gorm:"not null;default:0"`
 	CacheReadTokens  int64 `gorm:"not null;default:0"`
+	MinInputTokens   int64 `gorm:"not null;default:0"`
+	OutputTokens     int64 `gorm:"not null;default:0"`
+	GenerationMs     int64 `gorm:"not null;default:0"`
 }
 
-const groupAvailabilityStartedKey = "group_availability.collection_started_at"
+// Old aggregate buckets cannot be filtered by individual request input size.
+// Keep them for retention/rollback, but query only the current sampling policy.
+const GroupAvailabilityMinInputTokens int64 = 10000
+const groupAvailabilityStartedKey = "group_availability.input_over_10000.collection_started_at"
 
 func InitGroupAvailability(now int64) (int64, error) {
 	option := Option{Key: groupAvailabilityStartedKey, Value: strconv.FormatInt(now, 10)}
@@ -49,7 +55,7 @@ func SaveGroupAvailabilityBuckets(buckets []GroupAvailabilityBucket) error {
 	return DB.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "group"}, {Name: "bucket_ts"}, {Name: "source_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"request_count", "success_count", "total_latency_ms", "ttft_sum_ms", "ttft_count", "last_request_at", "cache_input_tokens", "cache_read_tokens",
+			"request_count", "success_count", "total_latency_ms", "ttft_sum_ms", "ttft_count", "last_request_at", "cache_input_tokens", "cache_read_tokens", "min_input_tokens", "output_tokens", "generation_ms",
 		}),
 	}).CreateInBatches(buckets, 200).Error
 }
@@ -62,8 +68,9 @@ func GetGroupAvailabilityBuckets(ctx context.Context, groups []string, start, en
 		return rows, nil
 	}
 	err := DB.WithContext(ctx).Model(&GroupAvailabilityBucket{}).
-		Select(commonGroupCol+", bucket_ts, SUM(request_count) AS request_count, SUM(success_count) AS success_count, SUM(total_latency_ms) AS total_latency_ms, SUM(ttft_sum_ms) AS ttft_sum_ms, SUM(ttft_count) AS ttft_count, MAX(last_request_at) AS last_request_at, SUM(cache_input_tokens) AS cache_input_tokens, SUM(cache_read_tokens) AS cache_read_tokens").
+		Select(commonGroupCol+", bucket_ts, SUM(request_count) AS request_count, SUM(success_count) AS success_count, SUM(total_latency_ms) AS total_latency_ms, SUM(ttft_sum_ms) AS ttft_sum_ms, SUM(ttft_count) AS ttft_count, MAX(last_request_at) AS last_request_at, SUM(cache_input_tokens) AS cache_input_tokens, SUM(cache_read_tokens) AS cache_read_tokens, SUM(output_tokens) AS output_tokens, SUM(generation_ms) AS generation_ms").
 		Where(commonGroupCol+" IN ? AND bucket_ts >= ? AND bucket_ts < ?", groups, start, end).
+		Where("min_input_tokens = ?", GroupAvailabilityMinInputTokens).
 		Group(commonGroupCol + ", bucket_ts").Order("bucket_ts ASC").Find(&rows).Error
 	return rows, err
 }

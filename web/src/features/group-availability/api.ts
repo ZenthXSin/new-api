@@ -32,6 +32,7 @@ export interface AvailabilityMetrics {
   cache_hit_rate: number | null
   avg_ttft_ms: number | null
   avg_duration_ms: number | null
+  avg_output_tps?: number | null
 }
 
 export interface AvailabilityBucket extends AvailabilityMetrics {
@@ -57,6 +58,7 @@ export interface GroupAvailabilityData {
   end_time: number
   collection_started_at: number
   coverage_complete: boolean
+  min_input_tokens?: number
   min_samples: number
   warning_error_rate: number
   critical_error_rate: number

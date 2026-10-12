@@ -28,7 +28,11 @@ import { toast } from 'sonner'
 import { z } from 'zod'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
-import { DataTablePage, TruncatedCell, useDataTable } from '@/components/data-table'
+import {
+  DataTablePage,
+  TruncatedCell,
+  useDataTable,
+} from '@/components/data-table'
 import { DatePicker } from '@/components/date-picker'
 import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
@@ -173,9 +177,7 @@ export function EntriesTab() {
         page: pagination.pageIndex + 1,
         size: pagination.pageSize,
         entry_type:
-          entryType === ALL_TYPES
-            ? undefined
-            : (entryType as FinanceEntryType),
+          entryType === ALL_TYPES ? undefined : (entryType as FinanceEntryType),
         start,
         end,
       }),
@@ -234,7 +236,9 @@ export function EntriesTab() {
       {
         accessorKey: 'note',
         header: t('Note'),
-        cell: ({ row }) => <TruncatedCell>{row.original.note || '-'}</TruncatedCell>,
+        cell: ({ row }) => (
+          <TruncatedCell>{row.original.note || '-'}</TruncatedCell>
+        ),
       },
       {
         accessorKey: 'created_at',
@@ -520,11 +524,7 @@ export function EntriesTab() {
             <DialogClose render={<Button variant='outline' />}>
               {t('Cancel')}
             </DialogClose>
-            <Button
-              form='entry-form'
-              type='submit'
-              disabled={isSubmitting}
-            >
+            <Button form='entry-form' type='submit' disabled={isSubmitting}>
               {isSubmitting ? t('Saving...') : t('Save')}
             </Button>
           </DialogFooter>

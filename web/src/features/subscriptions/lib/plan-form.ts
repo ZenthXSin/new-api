@@ -19,12 +19,14 @@ For commercial licensing, please contact support@quantumnous.com
 import type { TFunction } from 'i18next'
 import { z } from 'zod'
 
+import { codexPlanSchema, defaultCodexPlan } from '@/features/codex-admin/types'
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 
 import type { SubscriptionPlan, PlanPayload } from '../types'
 
 export function getPlanFormSchema(t: TFunction) {
   return z.object({
+    codex: codexPlanSchema,
     title: z.string().min(1, t('Please enter plan title')),
     subtitle: z.string().optional(),
     price_amount: z.coerce.number().min(0, t('Please enter amount')),
@@ -57,6 +59,7 @@ export function getPlanFormSchema(t: TFunction) {
 export type PlanFormValues = z.infer<ReturnType<typeof getPlanFormSchema>>
 
 export const PLAN_FORM_DEFAULTS: PlanFormValues = {
+  codex: defaultCodexPlan,
   title: '',
   subtitle: '',
   price_amount: 0,
@@ -81,6 +84,7 @@ export const PLAN_FORM_DEFAULTS: PlanFormValues = {
 
 export function planToFormValues(plan: SubscriptionPlan): PlanFormValues {
   return {
+    codex: { ...defaultCodexPlan, ...plan.codex },
     title: plan.title || '',
     subtitle: plan.subtitle || '',
     price_amount: Number(plan.price_amount || 0),

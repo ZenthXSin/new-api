@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # prepare-runtime-image.sh copies only installed distribution binaries, never ~/.codex.
 COPY --chmod=755 runtime-vendor/codex /usr/local/bin/codex
 COPY --chmod=755 runtime-vendor/codex-code-mode-host /usr/local/bin/codex-code-mode-host
+COPY --chmod=755 runtime-vendor/gh /usr/local/bin/gh
 COPY --chmod=644 workspace-git.py workspace-process.py migrate-codex-home.py /opt/new-api-codex/
 ENV HOME=/home/codex/user LANG=C.UTF-8
 WORKDIR /workspace

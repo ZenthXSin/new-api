@@ -100,9 +100,7 @@ test('keeps event counts and unique IP trend values separate', () => {
     7200
   )
 
-  expect(result.events).toEqual([
-    { name: 'opened', count: 7, unique_users: 1 },
-  ])
+  expect(result.events).toEqual([{ name: 'opened', count: 7, unique_users: 1 }])
   expect(result.trend).toEqual([
     { bucket_ts: 3600, name: 'opened', count: 7, unique_users: 1 },
     { bucket_ts: 7200, name: 'opened', count: 0, unique_users: 0 },
@@ -121,9 +119,10 @@ test('ranks usage and event rows by the selected metric', () => {
     { name: 'starts-first', starts: 20, online_seconds: 30, active_users: 5 },
     { name: 'users-first', starts: 2, online_seconds: 300, active_users: 30 },
   ]
-  expect(
-    rankUsageRows(usageRows, 'starts').map((row) => row.name)
-  ).toEqual(['starts-first', 'users-first'])
+  expect(rankUsageRows(usageRows, 'starts').map((row) => row.name)).toEqual([
+    'starts-first',
+    'users-first',
+  ])
   expect(
     rankUsageRows(usageRows, 'active_users').map((row) => row.name)
   ).toEqual(['users-first', 'starts-first'])
@@ -132,9 +131,10 @@ test('ranks usage and event rows by the selected metric', () => {
     { name: 'count-first', count: 40, unique_users: 3 },
     { name: 'ip-first', count: 4, unique_users: 30 },
   ]
-  expect(
-    rankEventRows(eventRows, 'count').map((row) => row.name)
-  ).toEqual(['count-first', 'ip-first'])
+  expect(rankEventRows(eventRows, 'count').map((row) => row.name)).toEqual([
+    'count-first',
+    'ip-first',
+  ])
   expect(
     rankEventRows(eventRows, 'unique_users').map((row) => row.name)
   ).toEqual(['ip-first', 'count-first'])

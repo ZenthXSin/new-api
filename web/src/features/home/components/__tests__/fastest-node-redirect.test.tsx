@@ -29,9 +29,8 @@ const reactTestGlobals = globalThis as typeof globalThis & {
 reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 
 const { FastestNodeRedirect } = await import('../fastest-node-redirect')
-const { FASTEST_NODE_STORAGE_KEY, readProbeMemory } = await import(
-  '../../lib/fastest-node'
-)
+const { FASTEST_NODE_STORAGE_KEY, readProbeMemory } =
+  await import('../../lib/fastest-node')
 
 type RenderedRedirect = {
   container: HTMLDivElement
@@ -126,7 +125,9 @@ describe('fastest node redirect', () => {
       // Simulate react-query swapping placeholder status for fresh data:
       // the items array identity changes, which re-runs the effect.
       await act(async () => {
-        rendered.root.render(<FastestNodeRedirect items={[node(NODE_A), node(NODE_B)]} />)
+        rendered.root.render(
+          <FastestNodeRedirect items={[node(NODE_A), node(NODE_B)]} />
+        )
       })
       expect(
         fetchControl.fetchCalls(),

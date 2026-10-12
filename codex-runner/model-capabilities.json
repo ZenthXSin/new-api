@@ -1,0 +1,133 @@
+{
+  "runtimeVersion": "0.160.0",
+  "source": "Native bundled Codex model/list (no user identity or model request)",
+  "models": {
+    "gpt-6.1-sol": {
+      "name": "GPT-6.1-Sol",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "defaultEffort": "low"
+    },
+    "gpt-6-astra": {
+      "name": "GPT-6-Astra",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "defaultEffort": "low"
+    },
+    "gpt-6-sol": {
+      "name": "GPT-6-Sol",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "defaultEffort": "medium"
+    },
+    "gpt-6-luna": {
+      "name": "GPT-6-Luna",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "medium"
+    },
+    "gpt-5.6-sol": {
+      "name": "GPT-5.6-Sol",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "defaultEffort": "low"
+    },
+    "gpt-5.6-terra": {
+      "name": "GPT-5.6-Terra",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "defaultEffort": "medium"
+    },
+    "gpt-5.6-luna": {
+      "name": "GPT-5.6-Luna",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "medium"
+    },
+    "gpt-daybreak-blue-latest": {
+      "name": "Daybreak Blue",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "defaultEffort": "low"
+    },
+    "gpt-daybreak-red-latest": {
+      "name": "Daybreak Red",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "defaultEffort": "medium"
+    },
+    "gpt-5.5": {
+      "name": "GPT-5.5",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "defaultEffort": "medium"
+    },
+    "codex-auto-review": {
+      "name": "Codex Auto Review",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "medium"
+    }
+  }
+}

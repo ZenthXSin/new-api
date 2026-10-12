@@ -36,7 +36,10 @@ import {
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 
-import { SettingsForm, SettingsSwitchField } from '../components/settings-form-layout'
+import {
+  SettingsForm,
+  SettingsSwitchField,
+} from '../components/settings-form-layout'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 

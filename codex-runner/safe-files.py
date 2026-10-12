@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Bounded workspace access. Never follow project-controlled symbolic links."""
 import base64
+import codecs
+from contextlib import contextmanager
 import hashlib
 import io
 import json
@@ -11,11 +13,14 @@ import sys
 import zipfile
 
 MAX_FILE = 1024 * 1024
+MAX_DOWNLOAD = 1024 * 1024 * 1024
+MAX_UPLOAD = 25 * 1024 * 1024
 MAX_ARCHIVE = 25 * 1024 * 1024
 MAX_EXPANDED = 100 * 1024 * 1024
 MAX_FILES = 5000
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 EXPORT_EXCLUDED = {".git", "node_modules", ".ssh", ".aws", ".azure", ".codex", ".npmrc", ".pypirc", ".netrc", "auth.json"}
+REMOTE_EXCLUDED = json.loads(os.environ.get("NEW_API_CODEX_REMOTE_EXCLUDED_PATHS", "[]")) if os.environ.get("NEW_API_CODEX_REMOTE") == "1" else []
 
 
 class Rejected(Exception):
@@ -32,6 +37,8 @@ def parts(path, empty=False):
     result = path.split("/")
     if len(result) > 128 or any(p in ("", ".", "..", ".git") or any(ord(c) < 32 for c in p) for p in result):
         raise Rejected("Invalid workspace path")
+    if any(path == excluded or path.startswith(excluded + "/") for excluded in REMOTE_EXCLUDED):
+        raise Rejected("The remote runtime directory is managed by the workbench", "protected_path", 403)
     return result
 
 
@@ -44,7 +51,7 @@ def directory(root, components, create=False, created=None):
                     os.mkdir(component, 0o755, dir_fd=fd)
                     if created is not None:
                         created.append(components[:index + 1])
-                    if os.geteuid() == 0:
+                    if os.geteuid() == 0 and os.environ.get("NEW_API_CODEX_REMOTE") != "1":
                         os.chown(component, 1000, 1000, dir_fd=fd, follow_symlinks=False)
                 except FileExistsError:
                     pass
@@ -57,7 +64,8 @@ def directory(root, components, create=False, created=None):
         raise
 
 
-def read_bytes(root, path, limit=MAX_FILE):
+@contextmanager
+def opened_file(root, path):
     components = parts(path)
     parent = directory(root, components[:-1])
     try:
@@ -66,41 +74,72 @@ def read_bytes(root, path, limit=MAX_FILE):
             info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode):
                 raise Rejected("Only regular files are supported")
-            if info.st_size > limit:
-                raise Rejected("File exceeds the size limit", "file_too_large", 413)
-            with os.fdopen(fd, "rb", closefd=False) as source:
-                data = source.read(limit + 1)
-            if len(data) > limit:
-                raise Rejected("File exceeds the size limit", "file_too_large", 413)
-            return data
+            yield fd, info
         finally:
             os.close(fd)
     finally:
         os.close(parent)
 
 
-def put_bytes(root, path, data, expected=None, check=False, created=None):
+def read_bytes(root, path, limit=MAX_FILE):
+    with opened_file(root, path) as (fd, info):
+        if info.st_size > limit:
+            raise Rejected("File exceeds the size limit", "file_too_large", 413)
+        with os.fdopen(fd, "rb", closefd=False) as source:
+            data = source.read(limit + 1)
+        if len(data) > limit:
+            raise Rejected("File exceeds the size limit", "file_too_large", 413)
+        return data
+
+
+def download(root, request):
+    with opened_file(root, request.get("path", "")) as (fd, info):
+        if info.st_size > MAX_DOWNLOAD:
+            raise Rejected("File exceeds the 1 GiB download limit", "file_too_large", 413)
+        print(json.dumps({"ok": True, "result": {"size": info.st_size}}), flush=True)
+        remaining = info.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 256 * 1024))
+            if not chunk:
+                raise Rejected("File changed; retry download.", "file_conflict", 409)
+            sys.stdout.buffer.write(chunk)
+            remaining -= len(chunk)
+        current = os.fstat(fd)
+        if (info.st_size, info.st_mtime_ns, info.st_ctime_ns) != (current.st_size, current.st_mtime_ns, current.st_ctime_ns):
+            raise Rejected("File changed; retry download.", "file_conflict", 409)
+        sys.stdout.buffer.flush()
+
+
+def put_bytes(root, path, data, expected=None, check=False, created=None, create_only=False):
     components = parts(path)
     parent = directory(root, components[:-1], create=True, created=created)
     temp_name = ".codex-upload-" + secrets.token_hex(12)
     try:
-        try:
-            current = read_bytes(root, path, MAX_EXPANDED)
-        except FileNotFoundError:
-            current = None
-        if check and (hashlib.sha256(current).hexdigest() if current is not None else None) != expected:
-            raise Rejected("File changed; reload before saving", "file_conflict", 409)
+        if not create_only:
+            try:
+                current = read_bytes(root, path, MAX_EXPANDED)
+            except FileNotFoundError:
+                current = None
+            if check and (hashlib.sha256(current).hexdigest() if current is not None else None) != expected:
+                raise Rejected("File changed; reload before saving", "file_conflict", 409)
         fd = os.open(temp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=parent)
         try:
             with os.fdopen(fd, "wb", closefd=False) as output:
                 output.write(data)
                 output.flush()
                 os.fsync(fd)
-            if os.geteuid() == 0:
+            if os.geteuid() == 0 and os.environ.get("NEW_API_CODEX_REMOTE") != "1":
                 os.fchown(fd, 1000, 1000)
         finally:
             os.close(fd)
-        os.rename(temp_name, components[-1], src_dir_fd=parent, dst_dir_fd=parent)
+        if create_only:
+            # Publish the complete file atomically only if its name is still free.
+            try:
+                os.link(temp_name, components[-1], src_dir_fd=parent, dst_dir_fd=parent, follow_symlinks=False)
+            except FileExistsError:
+                raise Rejected("This file already exists. Rename it before uploading.", "file_conflict", 409)
+        else:
+            os.rename(temp_name, components[-1], src_dir_fd=parent, dst_dir_fd=parent)
     finally:
         try:
             os.unlink(temp_name, dir_fd=parent)
@@ -117,7 +156,8 @@ def run(root, request):
         try:
             entries = []
             for name in sorted(os.listdir(fd)):
-                if name == ".git" or name.startswith(".codex-upload-"):
+                relative = f"{path}/{name}" if path else name
+                if name == ".git" or name.startswith(".codex-upload-") or relative in REMOTE_EXCLUDED:
                     continue
                 info = os.stat(name, dir_fd=fd, follow_symlinks=False)
                 if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
@@ -131,13 +171,19 @@ def run(root, request):
         finally:
             os.close(fd)
     if operation == "read":
-        data = read_bytes(root, path)
+        with opened_file(root, path) as (fd, info):
+            with os.fdopen(fd, "rb", closefd=False) as source:
+                data = source.read(min(info.st_size, MAX_FILE) + 1)
+        truncated = info.st_size > MAX_FILE or len(data) > MAX_FILE
+        preview = data[:8192] if truncated else data
         try:
-            content = data.decode("utf-8", errors="strict")
+            content = codecs.getincrementaldecoder("utf-8")(errors="strict").decode(preview, final=not truncated)
         except UnicodeDecodeError:
-            raise Rejected("Binary files cannot be edited as text", "binary_file", 415)
-        if "\x00" in content:
-            raise Rejected("Binary files cannot be edited as text", "binary_file", 415)
+            content = "\x00"
+        binary = "\x00" in content
+        if binary or truncated:
+            return {"path": path, "content": "", "hash": None, "size": info.st_size,
+                    **({"binary": True} if binary else {}), **({"truncated": True} if truncated else {})}
         return {"path": path, "content": content, "hash": hashlib.sha256(data).hexdigest(), "size": len(data)}
     if operation == "write":
         content = request.get("content")
@@ -150,6 +196,20 @@ def run(root, request):
             raise Rejected("expectedHash is required", "hash_required")
         put_bytes(root, path, data, request["expectedHash"], check=True)
         return {"path": path, "content": content, "hash": hashlib.sha256(data).hexdigest(), "size": len(data)}
+    if operation == "upload":
+        payload = request.get("data")
+        if not isinstance(payload, str):
+            raise Rejected("Invalid upload payload", "invalid_upload")
+        if len(payload) > 4 * ((MAX_UPLOAD + 2) // 3):
+            raise Rejected("The file exceeds the upload limit.", "file_too_large", 413)
+        try:
+            data = base64.b64decode(payload, validate=True)
+        except ValueError:
+            raise Rejected("Invalid upload payload", "invalid_upload")
+        if len(data) > MAX_UPLOAD:
+            raise Rejected("The file exceeds the upload limit.", "file_too_large", 413)
+        put_bytes(root, path, data, create_only=True)
+        return {"path": path, "size": len(data)}
     if operation == "import":
         try:
             archive_bytes = base64.b64decode(request["data"], validate=True)
@@ -229,7 +289,7 @@ def run(root, request):
                     prefix, fd = pending.pop()
                     try:
                         for name in sorted(os.listdir(fd)):
-                            if name in EXPORT_EXCLUDED or name.startswith(".env") or name.endswith((".pem", ".key", ".p12", ".pfx")) or name.startswith(".codex-upload-"):
+                            if name in EXPORT_EXCLUDED or name.startswith(".env") or name.endswith((".pem", ".key", ".p12", ".pfx")) or name.startswith(".codex-upload-") or "/".join(prefix + [name]) in REMOTE_EXCLUDED:
                                 skipped += 1
                                 continue
                             info = os.stat(name, dir_fd=fd, follow_symlinks=False)
@@ -261,12 +321,18 @@ try:
     root_fd = os.open(sys.argv[1], DIR_FLAGS)
     try:
         request = json.load(sys.stdin)
-        print(json.dumps({"ok": True, "result": run(root_fd, request)}, ensure_ascii=False))
+        if request.get("operation") == "download":
+            download(root_fd, request)
+        else:
+            print(json.dumps({"ok": True, "result": run(root_fd, request)}, ensure_ascii=False))
     finally:
         os.close(root_fd)
 except Rejected as error:
     print(json.dumps({"ok": False, "error": str(error), "code": error.code, "statusCode": error.status}))
+    sys.exit(1)
 except FileNotFoundError:
     print(json.dumps({"ok": False, "error": "File or directory not found", "code": "not_found", "statusCode": 404}))
+    sys.exit(1)
 except (OSError, ValueError, KeyError, TypeError):
     print(json.dumps({"ok": False, "error": "Workspace path is unavailable or unsafe", "code": "unsafe_path", "statusCode": 400}))
+    sys.exit(1)

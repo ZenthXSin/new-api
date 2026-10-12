@@ -149,6 +149,10 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		return
 	}
 	req.Plan.Id = 0
+	if err := req.Plan.Codex.Validate(); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	if strings.TrimSpace(req.Plan.Title) == "" {
 		common.ApiErrorMsg(c, "套餐标题不能为空")
 		return
@@ -241,6 +245,10 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, "参数错误")
 		return
 	}
+	if err := req.Plan.Codex.Validate(); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	if strings.TrimSpace(req.Plan.Title) == "" {
 		common.ApiErrorMsg(c, "套餐标题不能为空")
 		return
@@ -328,6 +336,13 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"quota_reset_period":         req.Plan.QuotaResetPeriod,
 			"quota_reset_custom_seconds": req.Plan.QuotaResetCustomSeconds,
 			"updated_at":                 common.GetTimestamp(),
+		}
+		if req.Plan.Codex != nil {
+			encoded, err := common.Marshal(req.Plan.Codex)
+			if err != nil {
+				return err
+			}
+			updateMap["codex_config"] = string(encoded)
 		}
 		if req.Plan.AllowBalancePay != nil {
 			updateMap["allow_balance_pay"] = *req.Plan.AllowBalancePay

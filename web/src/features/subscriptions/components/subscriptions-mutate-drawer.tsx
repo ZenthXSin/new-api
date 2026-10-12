@@ -80,6 +80,7 @@ import {
   type PlanFormValues,
 } from '../lib'
 import type { PlanRecord } from '../types'
+import { CodexPlanFields } from './codex-plan-fields'
 import { useSubscriptions } from './subscriptions-provider'
 
 interface Props {
@@ -400,9 +401,9 @@ export function SubscriptionsMutateDrawer({
                           ...groupOptions.map((g) => ({ value: g, label: g })),
                         ]}
                         onValueChange={(v) =>
-                          field.onChange(v === '__none__' ? '' : v)
+                          field.onChange(v === '__none__' ? '' : (v ?? ''))
                         }
-                        value={field.value || ''}
+                        value={field.value || '__none__'}
                       >
                         <FormControl>
                           <SelectTrigger>
@@ -442,9 +443,9 @@ export function SubscriptionsMutateDrawer({
                           ...groupOptions.map((g) => ({ value: g, label: g })),
                         ]}
                         onValueChange={(v) =>
-                          field.onChange(v === '__none__' ? '' : v)
+                          field.onChange(v === '__none__' ? '' : (v ?? ''))
                         }
-                        value={field.value || ''}
+                        value={field.value || '__none__'}
                       >
                         <FormControl>
                           <SelectTrigger>
@@ -608,6 +609,8 @@ export function SubscriptionsMutateDrawer({
                 />
               </div>
             </SideDrawerSection>
+
+            <CodexPlanFields />
 
             {/* Duration Settings */}
             <SideDrawerSection>

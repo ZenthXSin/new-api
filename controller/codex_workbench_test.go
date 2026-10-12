@@ -43,7 +43,7 @@ func newCodexProxyFixture(t *testing.T) codexProxyFixture {
 	previousType := common.MainDatabaseType()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.CodexGitHubConnection{}, &model.CodexUserConfig{}, &model.SubscriptionPlan{}, &model.UserSubscription{}))
 	model.DB, common.RedisEnabled, common.SessionSecret = db, false, "codex-proxy-isolated-session-secret"
 	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
 	t.Cleanup(func() {
@@ -81,23 +81,83 @@ func newCodexProxyFixture(t *testing.T) codexProxyFixture {
 	}
 	gin.SetMode(gin.TestMode)
 	fixture.engine = gin.New()
-	group := fixture.engine.Group("/api/codex", middleware.AdminAuth(), func(c *gin.Context) {
+	group := fixture.engine.Group("/api/codex", middleware.CodexWorkbenchAuth(), func(c *gin.Context) {
 		// Isolate proxy/auth assertions from the unrelated asynchronous audit sink.
 		c.Set(string(constant.ContextKeyAuditLogged), true)
 		c.Next()
 	})
+	group.GET("/github/pulls", CodexWorkbenchProxy)
+	group.GET("/github/pulls/:owner/:repo/:number", CodexWorkbenchProxy)
+	group.GET("/github/pulls/:owner/:repo/:number/context", CodexWorkbenchProxy)
+	group.POST("/github/pulls/:owner/:repo/:number/task", CodexWorkbenchProxy)
+	group.POST("/github/pulls/:owner/:repo/:number/comments", CodexWorkbenchProxy)
+	group.POST("/github/pulls/:owner/:repo/:number/reviews", CodexWorkbenchProxy)
 	group.GET("/status", CodexWorkbenchProxy)
+	group.GET("/tasks", CodexWorkbenchProxy)
 	group.GET("/environment", CodexWorkbenchProxy)
 	group.POST("/environment/start", CodexWorkbenchProxy)
 	group.POST("/environment/stop", CodexWorkbenchProxy)
+	group.GET("/environments", CodexWorkbenchProxy)
+	group.POST("/environments", CodexWorkbenchProxy)
+	group.GET("/environments/:id", CodexWorkbenchProxy)
+	group.PATCH("/environments/:id", CodexWorkbenchProxy)
+	group.DELETE("/environments/:id", CodexWorkbenchProxy)
+	group.POST("/environments/:id/setup", CodexWorkbenchProxy)
+	group.POST("/environments/:id/publish", CodexWorkbenchProxy)
+	group.POST("/environments/:id/tasks", CodexWorkbenchProxy)
 	group.GET("/workspaces", CodexWorkbenchProxy)
 	group.POST("/workspaces", CodexWorkbenchProxy)
 	group.GET("/workspaces/:id/file", CodexWorkbenchProxy)
+	group.GET("/workspaces/:id/download", CodexWorkbenchProxy)
 	group.PUT("/workspaces/:id/file", CodexWorkbenchProxy)
 	group.GET("/workspaces/:id/events", CodexWorkbenchProxy)
 	group.GET("/workspaces/:id/export", CodexWorkbenchProxy)
 	group.POST("/workspaces/:id/import", CodexWorkbenchProxy)
+	group.POST("/workspaces/:id/upload", CodexWorkbenchProxy)
+	group.GET("/workspaces/:id/repository", CodexWorkbenchProxy)
+	group.POST("/workspaces/:id/repository/checkout", CodexWorkbenchProxy)
+	group.POST("/workspaces/:id/turns", CodexWorkbenchProxy)
+	group.GET("/workspaces/:id/git/status", CodexWorkbenchProxy)
+	group.POST("/workspaces/:id/git/commit", CodexWorkbenchProxy)
+	group.POST("/workspaces/:id/git/push", CodexWorkbenchProxy)
+	group.POST("/workspaces/:id/git/pull-request", CodexWorkbenchProxy)
 	return fixture
+}
+
+func TestCodexTaskAndRepositoryProxyPreservesSessionScopeAndInputs(t *testing.T) {
+	fixture := newCodexProxyFixture(t)
+	var paths, bodies []string
+	runner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, fmt.Sprint(fixture.adminID), r.Header.Get("X-Codex-Admin-Id"))
+		assert.Equal(t, codexTestRunnerKey, r.Header.Get("X-Codex-Runner-Key"))
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		paths = append(paths, r.URL.RequestURI())
+		bodies = append(bodies, string(body))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{}}`))
+	}))
+	t.Cleanup(runner.Close)
+	t.Setenv("CODEX_RUNNER_URL", runner.URL)
+	operations := []struct{ method, path, body string }{
+		{http.MethodGet, "/api/codex/tasks?query=project&archived=false&limit=20&offset=2", ""},
+		{http.MethodGet, "/api/codex/workspaces/fixture/repository", ""},
+		{http.MethodPost, "/api/codex/workspaces/fixture/repository/checkout", `{"branch":"feature/review","remote":"origin"}`},
+	}
+	for _, operation := range operations {
+		for _, token := range []string{"", fixture.adminPAT, fixture.commonToken} {
+			request, response := fixture.request(operation.method, operation.path, token, strings.NewReader(operation.body))
+			fixture.engine.ServeHTTP(response, request)
+			assert.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, response.Code)
+		}
+		request, response := fixture.request(operation.method, operation.path, fixture.adminToken, strings.NewReader(operation.body))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-Codex-Admin-Id", "999999")
+		fixture.engine.ServeHTTP(response, request)
+		assert.Equal(t, http.StatusOK, response.Code)
+	}
+	assert.Equal(t, []string{"/tasks?query=project&archived=false&limit=20&offset=2", "/workspaces/fixture/repository", "/workspaces/fixture/repository/checkout"}, paths)
+	assert.Equal(t, []string{"", "", `{"branch":"feature/review","remote":"origin"}`}, bodies)
 }
 
 func (fixture codexProxyFixture) request(method, target, token string, body io.Reader) (*http.Request, *httptest.ResponseRecorder) {
@@ -273,6 +333,8 @@ func TestCodexWorkbenchRejectsOversizedBodiesBeforeRuntimeContact(t *testing.T) 
 		{"JSON declared length", "/api/codex/workspaces", (8 << 20) + 1, false},
 		{"JSON chunked body", "/api/codex/workspaces", (8 << 20) + 1, true},
 		{"ZIP declared length", "/api/codex/workspaces/fixture/import", (26 << 20) + 1, false},
+		{"File declared length", "/api/codex/workspaces/fixture/upload?path=photo.png", (25 << 20) + 1, false},
+		{"File chunked body", "/api/codex/workspaces/fixture/upload?path=photo.png", (25 << 20) + 1, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request, response := fixture.request(http.MethodPost, test.target, fixture.adminToken, bytes.NewReader(make([]byte, test.size)))
@@ -290,6 +352,25 @@ func TestCodexWorkbenchRejectsOversizedBodiesBeforeRuntimeContact(t *testing.T) 
 	fixture.engine.ServeHTTP(response, request)
 	assert.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	assert.Equal(t, int32(1), calls.Load())
+}
+
+func TestCodexWorkbenchUploadsBinaryFilesWithoutJSONTransformation(t *testing.T) {
+	fixture := newCodexProxyFixture(t)
+	payload := bytes.Repeat([]byte{0, 255, 128, 0x89}, (9<<20)/4)
+	runner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "application/octet-stream", r.Header.Get("Content-Type"))
+		assert.Equal(t, "assets/照片.png", r.URL.Query().Get("path"))
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		assert.Equal(t, payload, body)
+		_, _ = w.Write([]byte(`{"success":true,"data":{"path":"assets/照片.png"}}`))
+	}))
+	t.Cleanup(runner.Close)
+	t.Setenv("CODEX_RUNNER_URL", runner.URL)
+	request, response := fixture.request(http.MethodPost, "/api/codex/workspaces/fixture/upload?path=assets%2F%E7%85%A7%E7%89%87.png", fixture.adminToken, bytes.NewReader(payload))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	fixture.engine.ServeHTTP(response, request)
+	assert.Equal(t, http.StatusOK, response.Code, response.Body.String())
 }
 
 type codexFailingReader struct{}
@@ -380,4 +461,45 @@ func TestCodexWorkbenchRejectsOversizedRuntimeDownload(t *testing.T) {
 	assert.Equal(t, http.StatusBadGateway, response.Code)
 	assert.Equal(t, "application/json; charset=utf-8", response.Header().Get("Content-Type"))
 	assert.Empty(t, response.Header().Get("Content-Disposition"))
+}
+
+func TestCodexWorkbenchDownloadsArtifactBytesAndPreservesHeaders(t *testing.T) {
+	fixture := newCodexProxyFixture(t)
+	artifact := bytes.Repeat([]byte{'P', 'K', 0, 255}, 4<<20)
+	runner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/workspaces/fixture/download", r.URL.Path)
+		assert.Equal(t, "dist/Phira.ipa", r.URL.Query().Get("path"))
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", fmt.Sprint(len(artifact)))
+		w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''Phira.ipa")
+		_, _ = w.Write(artifact)
+	}))
+	t.Cleanup(runner.Close)
+	t.Setenv("CODEX_RUNNER_URL", runner.URL)
+	request, response := fixture.request(http.MethodGet, "/api/codex/workspaces/fixture/download?path=dist%2FPhira.ipa", fixture.adminToken, nil)
+	fixture.engine.ServeHTTP(response, request)
+	assert.Equal(t, http.StatusOK, response.Code)
+	assert.Equal(t, artifact, response.Body.Bytes())
+	assert.Equal(t, fmt.Sprint(len(artifact)), response.Header().Get("Content-Length"))
+	assert.Equal(t, "application/octet-stream", response.Header().Get("Content-Type"))
+	assert.Contains(t, response.Header().Get("Content-Disposition"), "Phira.ipa")
+}
+
+func TestCodexWorkbenchKeepsDownloadLimitSeparateFromExportLimit(t *testing.T) {
+	fixture := newCodexProxyFixture(t)
+	for _, route := range []string{"download", "export"} {
+		t.Run(route, func(t *testing.T) {
+			runner := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Length", fmt.Sprint((1<<30)+1))
+				w.Header().Set("Content-Type", "application/octet-stream")
+				_, _ = w.Write([]byte("PK"))
+			}))
+			t.Cleanup(runner.Close)
+			t.Setenv("CODEX_RUNNER_URL", runner.URL)
+			request, response := fixture.request(http.MethodGet, "/api/codex/workspaces/fixture/"+route, fixture.adminToken, nil)
+			fixture.engine.ServeHTTP(response, request)
+			assert.Equal(t, http.StatusBadGateway, response.Code)
+			assert.Empty(t, response.Header().Get("Content-Disposition"))
+		})
+	}
 }

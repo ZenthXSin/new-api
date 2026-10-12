@@ -177,7 +177,11 @@ export function joinMessageRegion(
     .join(' / ')
 }
 
-export function getMessagePageBounds(total: number, page: number, size: number) {
+export function getMessagePageBounds(
+  total: number,
+  page: number,
+  size: number
+) {
   const totalPages = Math.max(1, Math.ceil(total / size))
   return {
     totalPages,

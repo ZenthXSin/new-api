@@ -27,6 +27,7 @@ import { CacheStatsDialog } from '@/features/system-settings/general/channel-aff
 import { useSidebarConfig } from '@/hooks/use-sidebar-config'
 
 import { UserInfoDialog } from './components/dialogs/user-info-dialog'
+import { ImageTasksPanel } from './components/image-tasks-panel'
 import {
   type LogsViewScope,
   UsageLogsProvider,
@@ -151,8 +152,23 @@ function UsageLogsContent() {
                 </TabsList>
               </Tabs>
             )}
-            <div className='min-h-0 flex-1'>
-              <UsageLogsTable logCategory={activeCategory} />
+            <div
+              className={
+                activeCategory === 'drawing'
+                  ? 'min-h-0 flex-1 space-y-3 overflow-y-auto'
+                  : 'min-h-0 flex-1'
+              }
+            >
+              {activeCategory === 'drawing' && <ImageTasksPanel />}
+              <div
+                className={
+                  activeCategory === 'drawing'
+                    ? 'h-[520px] min-h-0'
+                    : 'h-full min-h-0'
+                }
+              >
+                <UsageLogsTable logCategory={activeCategory} />
+              </div>
             </div>
           </div>
         </SectionPageLayout.Content>

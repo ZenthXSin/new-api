@@ -20,10 +20,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AxiosError } from 'axios'
+import { createInstance } from 'i18next'
+import { I18nextProvider } from 'react-i18next'
 import { toast } from 'sonner'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { resources } from '@/i18n/config'
 import { api } from '@/lib/http-client'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -496,3 +499,90 @@ test('refreshes observation time and distinguishes sparse activity from an empty
   )
   expect(within(group).queryByText('Healthy')).not.toBeInTheDocument()
 })
+
+test.each([
+  { speed: 42.5, display: '42.5 t/s' },
+  { speed: null, display: '—' },
+  { speed: undefined, display: '—' },
+])(
+  'shows average output speed $display including unavailable usage',
+  async ({ speed, display }) => {
+    api.defaults.adapter = async (config) => ({
+      config,
+      data: {
+        success: true,
+        data: availabilityData([
+          {
+            ...availabilityGroup(),
+            avg_output_tps: speed,
+          } as AvailabilityGroup,
+        ]),
+      },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+    })
+    renderPage()
+    const card = await screen.findByRole('region', { name: 'Premium' })
+    expect(
+      within(card).getByRole('definition', { name: 'Average output speed' })
+    ).toHaveTextContent(display)
+  }
+)
+
+test.each([
+  {
+    language: 'zhCN',
+    label: '平均输出速度',
+    description:
+      '每个可访问分组一张聚合卡片，仅统计输入超过 10,000 token 的请求（含缓存输入），无符合条件的流量时显示为未知。',
+  },
+  {
+    language: 'zhTW',
+    label: '平均輸出速度',
+    description:
+      '每個可存取群組一張彙總卡片，僅統計輸入超過 10,000 token 的請求（含快取輸入），無符合條件的流量時顯示為未知。',
+  },
+  {
+    language: 'en',
+    label: 'Average output speed',
+    description:
+      'One summary per accessible group, based only on requests with more than 10,000 input tokens, including cached input. No qualifying traffic is shown as unknown.',
+  },
+])(
+  'uses the real $language language bundle for output speed and the sampling rule',
+  async ({ language, label, description }) => {
+    const instance = createInstance()
+    await instance.init({
+      resources,
+      lng: language,
+      fallbackLng: 'en',
+      nsSeparator: false,
+      interpolation: { escapeValue: false },
+    })
+    api.defaults.adapter = async (config) => ({
+      config,
+      data: {
+        success: true,
+        data: availabilityData([availabilityGroup({ avg_output_tps: 42.5 })]),
+      },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+    })
+    render(
+      <I18nextProvider i18n={instance}>
+        <QueryClientProvider client={client}>
+          <TooltipProvider>
+            <GroupAvailability />
+          </TooltipProvider>
+        </QueryClientProvider>
+      </I18nextProvider>
+    )
+    const card = await screen.findByRole('region', { name: 'Premium' })
+    expect(
+      within(card).getByRole('definition', { name: label })
+    ).toHaveTextContent('42.5 t/s')
+    expect(screen.getByText(description)).toBeVisible()
+  }
+)

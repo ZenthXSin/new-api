@@ -16,9 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { describe, expect, test } from 'vitest'
-
 import type { TFunction } from 'i18next'
+import { describe, expect, test } from 'vitest'
 
 import type { SubscriptionPlan } from '../../types'
 import {

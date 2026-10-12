@@ -125,7 +125,7 @@ export function GroupAvailability() {
         <div className='flex min-w-0 flex-col gap-5'>
           <p className='text-muted-foreground text-sm'>
             {t(
-              'One summary per accessible group, based on real requests. No traffic is shown as unknown.'
+              'One summary per accessible group, based only on requests with more than 10,000 input tokens, including cached input. No qualifying traffic is shown as unknown.'
             )}
           </p>
           <div className='flex flex-wrap items-center justify-between gap-3'>

@@ -18,26 +18,37 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import {
+  AlertCircle,
   ChevronDown,
   Download,
   ExternalLink,
   FileCode2,
   GitCompareArrows,
+  ListFilter,
+  WrapText,
   LoaderCircle,
   RefreshCw,
 } from 'lucide-react'
+import { useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import { cn } from '@/features/codex/vendor/zcode/utils'
 
 import { codexApi, codexError, downloadCodexFile } from '../api'
+import { parseWorkspaceChanges } from '../lib/workspace-review'
+import { Button } from '../vendor/zcode/button'
+import { LightweightDiffPreview } from '../vendor/zcode/inspector/lightweight-diff-preview'
+import { parseUnifiedDiffLines } from '../vendor/zcode/inspector/patch-lines'
+import { GitActionsPanel } from './git-actions-panel'
 
 export function WorkspaceDiff(props: {
   id: string
   actor: string
   running: boolean
   onOpenFile: (path: string) => void
+  readOnly?: boolean
+  onBusy?: (busy: boolean) => void
+  showGitActions?: boolean
 }) {
   const { t } = useTranslation()
   const query = useQuery({
@@ -45,321 +56,383 @@ export function WorkspaceDiff(props: {
     queryFn: ({ signal }) => codexApi.diff(props.id, signal),
     refetchInterval: props.running ? 5000 : false,
   })
-  const chunks = (query.data?.diff ?? '')
-    .split(/(?=^diff --git )/m)
-    .filter((chunk) => chunk.trim())
-    .map((patch) => {
-      const lines = patch.split('\n')
-      const newPath = lines
-        .find((line) => line.startsWith('+++ '))
-        ?.slice(4)
-        .split('\t')[0]
-      const oldPath = lines
-        .find((line) => line.startsWith('--- '))
-        ?.slice(4)
-        .split('\t')[0]
-      let path = newPath === '/dev/null' ? oldPath : newPath
-      if (!path) {
-        path = lines.find((line) => line.startsWith('rename to '))?.slice(10)
-        if (!path) {
-          path = lines[0]?.match(
-            /^diff --git (?:"(?:[^"\\]|\\.)*"|.*?) ("(?:[^"\\]|\\.)*"|b\/.*)$/
-          )?.[1]
-        }
-      }
-      if (path?.startsWith('"')) {
-        try {
-          // Git quotes UTF-8 paths with octal byte escapes. Decode the bytes before
-          // passing the real path to the file API; never use summary-list order.
-          const decoded = path
-            .slice(1, -1)
-            .replaceAll(/\\([0-7]{3}|[\\"tnr])/g, (_, value: string) => {
-              if (/^[0-7]{3}$/.test(value)) {
-                return String.fromCharCode(Number.parseInt(value, 8))
-              }
-              return (
-                ({ t: '\t', n: '\n', r: '\r' } as Record<string, string>)[
-                  value
-                ] || value
-              )
-            })
-          path = new TextDecoder().decode(
-            Uint8Array.from(decoded, (character) => character.charCodeAt(0))
-          )
-        } catch {
-          path = undefined
-        }
-      }
-      if (path?.startsWith('a/') || path?.startsWith('b/')) path = path.slice(2)
+  const chunks = useMemo(() => parseWorkspaceChanges(query.data), [query.data])
+  const [viewed, setViewed] = useState<Record<string, string>>({})
+  const [wrapLines, setWrapLines] = useState(false)
+  const [fileFilter, setFileFilter] = useState('')
+  const [showFileList, setShowFileList] = useState(false)
+  const cards = useRef(new Map<string, HTMLElement>())
+  const reviewedCount = chunks.filter(
+    (chunk) => viewed[chunk.path] === chunk.patch
+  ).length
+  const visibleChunks = chunks.filter((chunk) =>
+    chunk.path.toLocaleLowerCase().includes(fileFilter.toLocaleLowerCase())
+  )
+  const totals = chunks.reduce(
+    (count, chunk) => {
+      const parsed = parseUnifiedDiffLines(chunk.patch)
       return {
-        patch,
-        path,
-        deleted:
-          newPath === '/dev/null' ||
-          query.data?.files.find((file) => file.path === path)?.status === 'D',
+        added: count.added + parsed.added,
+        removed: count.removed + parsed.removed,
       }
-    })
-  let added = 0,
-    removed = 0
-  for (const line of (query.data?.diff ?? '').split('\n')) {
-    if (line.startsWith('+') && !line.startsWith('+++')) added++
-    if (line.startsWith('-') && !line.startsWith('---')) removed++
-  }
+    },
+    { added: 0, removed: 0 }
+  )
   return (
     <>
-      <div className='flex shrink-0 items-center gap-2 border-b px-4 py-3'>
-        <div className='min-w-0 flex-1'>
-          <p className='text-sm font-medium'>
-            {t('Changed files')}{' '}
-            <span className='text-muted-foreground ml-1 font-normal'>
-              {query.data?.files.length ?? 0}
+      <div className='flex min-h-0 min-w-0 flex-1 flex-col'>
+        <div className='border-border flex min-h-18 shrink-0 items-center gap-2 border-b px-5 py-3 max-sm:px-4'>
+          <div className='min-w-0 flex-1'>
+            <p className='text-foreground flex items-center gap-2 text-sm font-medium'>
+              {t('Changed files')}
+              <span className='bg-surface text-foreground-subtle rounded-md px-1.5 py-0.5 text-xs font-normal tabular-nums'>
+                {chunks.length}
+              </span>
+            </p>
+            <p className='text-foreground-subtle mt-1 text-xs leading-5'>
+              {t('Changes from the initial project')}
+            </p>
+          </div>
+          {chunks.length > 0 && (
+            <span
+              className='flex shrink-0 gap-2 font-mono text-xs tabular-nums'
+              aria-label={t('Line changes')}
+            >
+              <span className='text-diff-added'>+{totals.added}</span>
+              <span className='text-diff-removed'>−{totals.removed}</span>
             </span>
-          </p>
-          <p className='text-muted-foreground mt-0.5 text-xs'>
-            {t('Changes from the initial project')}
-          </p>
-        </div>
-        {!!query.data?.diff && (
-          <span className='flex shrink-0 gap-2 font-mono text-xs'>
-            <span className='text-emerald-700 dark:text-emerald-400'>
-              +{added}
-            </span>
-            <span className='text-red-700 dark:text-red-400'>−{removed}</span>
-          </span>
-        )}
-        <Button
-          type='button'
-          variant='ghost'
-          size='icon-sm'
-          aria-label={t('Refresh changes')}
-          title={t('Refresh changes')}
-          onClick={() => void query.refetch()}
-          disabled={query.isFetching}
-        >
-          <RefreshCw
-            className={cn('size-4', query.isFetching && 'animate-spin')}
-            aria-hidden
-          />
-        </Button>
-        <Button
-          type='button'
-          variant='outline'
-          size='icon-sm'
-          aria-label={t('Download patch')}
-          title={t('Download patch')}
-          disabled={!query.data?.diff}
-          onClick={() =>
-            downloadCodexFile(
-              new Blob([query.data?.diff ?? ''], { type: 'text/plain' }),
-              'workspace.patch'
-            )
-          }
-        >
-          <Download className='size-4' aria-hidden />
-        </Button>
-      </div>
-      {query.isError && (
-        <div
-          role='alert'
-          className='bg-destructive/5 text-destructive flex items-start gap-3 border-b p-4 text-sm'
-        >
-          <p className='min-w-0 flex-1 break-words'>
-            {t(codexError(query.error))}
-          </p>
+          )}
           <Button
             type='button'
-            variant='outline'
-            size='sm'
+            variant='ghost'
+            size='icon-md'
+            className='text-foreground-subtle focus-visible:outline-ring size-9 rounded-full focus-visible:outline-2 max-sm:size-11'
+            aria-label={t('Refresh changes')}
+            title={t('Refresh changes')}
             onClick={() => void query.refetch()}
+            disabled={query.isFetching}
           >
-            {t('Retry')}
+            <RefreshCw
+              className={cn('size-4', query.isFetching && 'animate-spin')}
+              aria-hidden
+            />
+          </Button>
+          <Button
+            type='button'
+            variant='ghost'
+            size='icon-md'
+            className='text-foreground-subtle focus-visible:outline-ring size-9 rounded-full focus-visible:outline-2 max-sm:size-11'
+            aria-label={t('Download patch')}
+            title={t('Download patch')}
+            disabled={!query.data?.diff}
+            onClick={() =>
+              downloadCodexFile(
+                new Blob([query.data?.diff ?? ''], { type: 'text/plain' }),
+                'workspace.patch'
+              )
+            }
+          >
+            <Download className='size-4' aria-hidden />
           </Button>
         </div>
-      )}
-      {query.isLoading && (
-        <div
-          role='status'
-          className='text-muted-foreground flex items-center justify-center gap-2 p-10 text-sm'
-        >
-          <LoaderCircle className='size-4 animate-spin' aria-hidden />
-          {t('Loading changes...')}
-        </div>
-      )}
-      {!query.isLoading && !query.isError && !query.data?.diff && (
-        <div className='text-muted-foreground flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center text-sm'>
-          <span className='bg-muted rounded-2xl p-4'>
-            <GitCompareArrows className='size-6' aria-hidden />
-          </span>
-          <p className='text-foreground font-medium'>{t('No changes yet.')}</p>
-          <p className='max-w-xs'>
+        {chunks.length > 0 && (
+          <div className='border-border bg-background shrink-0 border-b px-4 py-2'>
+            <div className='flex items-center gap-2'>
+              <Button
+                variant='ghost'
+                className='focus-visible:outline-ring h-8 gap-2 rounded-md px-2 text-xs focus-visible:outline-2'
+                aria-expanded={showFileList}
+                aria-label={t('Show changed files')}
+                onClick={() => setShowFileList(!showFileList)}
+              >
+                <ListFilter className='size-3.5' aria-hidden />
+                {t('Files')}
+              </Button>
+              <span className='text-foreground-subtle text-xs'>
+                {t('{{viewed}} of {{total}} viewed', {
+                  viewed: reviewedCount,
+                  total: chunks.length,
+                })}
+              </span>
+              <Button
+                variant='ghost'
+                className='focus-visible:outline-ring ml-auto size-8 rounded-md focus-visible:outline-2'
+                aria-label={t('Wrap diff lines')}
+                title={t('Wrap diff lines')}
+                aria-pressed={wrapLines}
+                onClick={() => setWrapLines(!wrapLines)}
+              >
+                <WrapText className='size-4' aria-hidden />
+              </Button>
+            </div>
+            {showFileList && (
+              <nav
+                aria-label={t('Changed file list')}
+                className='mt-2 space-y-2 pb-1'
+              >
+                <input
+                  type='search'
+                  aria-label={t('Filter changed files')}
+                  value={fileFilter}
+                  onChange={(event) => setFileFilter(event.target.value)}
+                  placeholder={t('Filter changed files')}
+                  className='border-border bg-background focus-visible:outline-ring h-9 w-full rounded-lg border px-3 text-xs focus-visible:outline-2'
+                />
+                <ul className='max-h-44 space-y-0.5 overflow-auto'>
+                  {visibleChunks.map((chunk) => (
+                    <li key={chunk.path}>
+                      <button
+                        type='button'
+                        className='hover:bg-hover focus-visible:outline-ring flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-xs focus-visible:outline-2'
+                        aria-label={t('Go to {{path}}', { path: chunk.path })}
+                        onClick={() => {
+                          const card = cards.current.get(chunk.path)
+                          card?.scrollIntoView({
+                            block: 'start',
+                            behavior: 'smooth',
+                          })
+                          card?.focus({ preventScroll: true })
+                        }}
+                      >
+                        <span className='min-w-0 flex-1 truncate'>
+                          {chunk.path}
+                        </span>
+                        <span className='text-foreground-subtle font-mono'>
+                          {chunk.status}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {!visibleChunks.length && (
+                  <p className='text-foreground-subtle px-2 py-3 text-xs'>
+                    {t('No matching files.')}
+                  </p>
+                )}
+              </nav>
+            )}
+          </div>
+        )}
+        {query.isError && (
+          <div
+            role='alert'
+            className='border-destructive/20 bg-destructive/5 text-destructive mx-4 my-4 flex items-start gap-3 rounded-2xl border p-4 text-sm leading-6'
+          >
+            <AlertCircle className='mt-1 size-4 shrink-0' aria-hidden />
+            <p className='min-w-0 flex-1 break-words'>
+              {t(codexError(query.error))}
+            </p>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              className='h-8 rounded-full px-3'
+              disabled={query.isFetching}
+              onClick={() => void query.refetch()}
+            >
+              {t('Retry')}
+            </Button>
+          </div>
+        )}
+        {query.isLoading && (
+          <div
+            role='status'
+            className='text-foreground-subtle flex flex-1 flex-col items-center justify-center gap-4 px-8 py-12 text-sm'
+          >
+            <LoaderCircle className='size-5 animate-spin' aria-hidden />
+            {t('Loading changes...')}
+          </div>
+        )}
+        {!query.isLoading && !query.isError && chunks.length === 0 && (
+          <div
+            role='status'
+            className='text-foreground-subtle flex flex-1 flex-col items-center justify-center gap-3 px-8 py-12 text-center text-sm leading-6'
+          >
+            <span className='bg-surface mb-1 flex size-12 items-center justify-center rounded-2xl'>
+              <GitCompareArrows className='size-5' aria-hidden />
+            </span>
+            <p className='text-foreground font-medium'>
+              {t('No changes yet.')}
+            </p>
+            <p className='max-w-xs'>
+              {t(
+                'File changes will appear here after you or Codex edit the project.'
+              )}
+            </p>
+          </div>
+        )}
+        {query.data?.truncated && (
+          <p
+            role='status'
+            className='mx-4 mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs leading-5'
+          >
             {t(
-              'File changes will appear here after you or Codex edit the project.'
+              'This diff is truncated. Export the project to inspect all changes.'
             )}
           </p>
-        </div>
-      )}
-      {query.data?.truncated && (
-        <p className='border-b bg-amber-500/10 p-3 text-sm'>
-          {t(
-            'This diff is truncated. Export the project to inspect all changes.'
-          )}
-        </p>
-      )}
-      {chunks.length > 0 && (
-        <div className='min-h-0 min-w-0 flex-1 space-y-3 overflow-auto p-3 sm:p-4'>
-          {chunks.map((chunk, index) => (
-            <FileDiff
-              key={chunk.path || String(index)}
-              path={chunk.path || t('Changes')}
-              patch={chunk.patch}
-              onOpenFile={chunk.path ? props.onOpenFile : undefined}
-              deleted={chunk.deleted}
-            />
-          ))}
-        </div>
+        )}
+        {chunks.length > 0 && (
+          <div className='min-h-0 min-w-0 flex-1 space-y-4 overflow-auto p-4'>
+            {chunks.map((chunk) => (
+              <WorkspaceChangeCard
+                key={chunk.path}
+                path={chunk.path}
+                patch={chunk.patch}
+                onOpenFile={props.onOpenFile}
+                deleted={chunk.deleted}
+                status={chunk.status}
+                viewed={viewed[chunk.path] === chunk.patch}
+                onViewed={(checked) =>
+                  setViewed((current) => {
+                    const next = { ...current }
+                    if (checked) next[chunk.path] = chunk.patch
+                    else delete next[chunk.path]
+                    return next
+                  })
+                }
+                wrapLines={wrapLines}
+                cardRef={(element) => {
+                  if (element) cards.current.set(chunk.path, element)
+                  else cards.current.delete(chunk.path)
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+      {props.showGitActions && (
+        <GitActionsPanel
+          id={props.id}
+          actor={props.actor}
+          running={props.running}
+          readOnly={props.readOnly}
+          onBusy={props.onBusy}
+        />
       )}
     </>
   )
 }
 
-function FileDiff(props: {
+function WorkspaceChangeCard(props: {
   path: string
   patch: string
-  deleted?: boolean
+  deleted: boolean
+  status: string
+  viewed: boolean
+  onViewed: (checked: boolean) => void
+  wrapLines: boolean
+  cardRef: (element: HTMLElement | null) => void
   onOpenFile?: (path: string) => void
 }) {
   const { t } = useTranslation()
-  let oldLine = 0,
-    newLine = 0,
-    added = 0,
-    removed = 0
-  const rows = props.patch.split('\n').flatMap((line, index) => {
-    if (
-      line.startsWith('diff --git ') ||
-      line.startsWith('index ') ||
-      line.startsWith('--- ') ||
-      line.startsWith('+++ ')
-    ) {
-      return []
-    }
-    const range = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/)
-    if (range) {
-      oldLine = Number(range[1])
-      newLine = Number(range[2])
-      return [{ id: index, line, oldNumber: '', newNumber: '', kind: 'range' }]
-    }
-    if (line.startsWith('+')) {
-      added++
-      return [
-        {
-          id: index,
-          line,
-          oldNumber: '',
-          newNumber: String(newLine++),
-          kind: 'added',
-        },
-      ]
-    }
-    if (line.startsWith('-')) {
-      removed++
-      return [
-        {
-          id: index,
-          line,
-          oldNumber: String(oldLine++),
-          newNumber: '',
-          kind: 'removed',
-        },
-      ]
-    }
-    if (line.startsWith(' ')) {
-      return [
-        {
-          id: index,
-          line,
-          oldNumber: String(oldLine++),
-          newNumber: String(newLine++),
-          kind: 'context',
-        },
-      ]
-    }
-    if (!line) return []
-    return [{ id: index, line, oldNumber: '', newNumber: '', kind: 'meta' }]
-  })
+  const contentId = useId()
+  const [expanded, setExpanded] = useState(true)
+  const preview = useMemo(
+    () => parseUnifiedDiffLines(props.patch),
+    [props.patch]
+  )
+  const filename = props.path.split('/').at(-1)
+  const directory = props.path.includes('/')
+    ? props.path.slice(0, props.path.lastIndexOf('/'))
+    : ''
   return (
-    <details open className='group overflow-hidden rounded-xl border'>
-      <summary className='bg-muted/35 flex cursor-pointer list-none items-center gap-2 px-3 py-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-[-2px]'>
-        <ChevronDown
-          className='size-3.5 shrink-0 transition-transform group-not-open:-rotate-90'
-          aria-hidden
-        />
-        <FileCode2
-          className='text-muted-foreground size-4 shrink-0'
-          aria-hidden
-        />
-        <span className='min-w-0 flex-1 font-medium break-all'>
-          {props.path}
-        </span>
-        <span
-          aria-label={t('Line changes')}
-          className='flex shrink-0 gap-2 font-mono text-xs'
+    <article
+      ref={props.cardRef}
+      tabIndex={-1}
+      aria-label={t('Changes in {{path}}', {
+        path: props.path,
+        interpolation: { escapeValue: false },
+      })}
+      className='border-border bg-background focus-visible:outline-ring min-w-0 overflow-hidden rounded-xl border focus-visible:outline-2'
+    >
+      <div className='bg-surface/45 flex min-w-0 items-center gap-1 pr-2'>
+        <button
+          type='button'
+          aria-label={props.path}
+          aria-expanded={expanded}
+          aria-controls={contentId}
+          title={props.path}
+          className='hover:bg-hover focus-visible:outline-ring flex min-h-13 min-w-0 flex-1 items-center gap-2.5 px-3 py-2.5 text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px]'
+          onClick={() => setExpanded(!expanded)}
         >
-          <span className='text-emerald-700 dark:text-emerald-400'>
-            +{added}
+          <ChevronDown
+            className={cn(
+              'text-foreground-subtle size-3.5 shrink-0 transition-transform',
+              !expanded && '-rotate-90'
+            )}
+            aria-hidden
+          />
+          <FileCode2
+            className='text-foreground-subtle size-4 shrink-0'
+            aria-hidden
+          />
+          <span className='min-w-0 flex-1'>
+            <span className='text-foreground block truncate text-[13px] font-medium'>
+              {filename}
+            </span>
+            {directory && (
+              <span className='text-foreground-subtle mt-0.5 block truncate text-xs'>
+                {directory}
+              </span>
+            )}
           </span>
-          <span className='text-red-700 dark:text-red-400'>−{removed}</span>
-        </span>
-      </summary>
-      {!props.deleted && props.onOpenFile && (
-        <div className='flex justify-end border-t px-3 py-1'>
+          <span
+            className='flex shrink-0 gap-2 font-mono text-xs tabular-nums'
+            aria-label={t('Line changes')}
+          >
+            <span className='text-diff-added'>+{preview.added}</span>
+            <span className='text-diff-removed'>−{preview.removed}</span>
+          </span>
+        </button>
+        <label className='text-foreground-subtle flex shrink-0 cursor-pointer items-center gap-1.5 px-2 text-xs'>
+          <input
+            type='checkbox'
+            checked={props.viewed}
+            aria-label={t('Mark {{path}} as viewed', {
+              path: props.path,
+              interpolation: { escapeValue: false },
+            })}
+            onChange={(event) => props.onViewed(event.target.checked)}
+          />
+          <span className='max-sm:sr-only'>{t('Viewed')}</span>
+        </label>
+        {!props.deleted && props.onOpenFile && (
           <Button
             type='button'
             variant='ghost'
-            size='sm'
+            size='icon-md'
+            className='text-foreground-subtle focus-visible:outline-ring size-8 rounded-full focus-visible:outline-2 max-sm:size-11'
+            aria-label={t('Open file')}
+            title={t('Open file')}
             onClick={() => props.onOpenFile?.(props.path)}
           >
             <ExternalLink className='size-3.5' aria-hidden />
-            {t('Open file')}
           </Button>
-        </div>
-      )}
-      <div
-        className='max-h-[60vh] overflow-auto border-t'
-        role='region'
-        aria-label={props.path}
-        tabIndex={0}
-      >
-        <pre className='min-w-max py-2 font-mono text-[13px] leading-6'>
-          {rows.map((row) => (
-            <span
-              key={row.id}
-              className={cn(
-                'flex',
-                row.kind === 'added' &&
-                  'bg-emerald-500/10 text-emerald-900 dark:text-emerald-200',
-                row.kind === 'removed' &&
-                  'bg-red-500/10 text-red-900 dark:text-red-200',
-                row.kind === 'range' && 'bg-muted text-muted-foreground',
-                row.kind === 'meta' && 'text-muted-foreground'
-              )}
-            >
-              <span
-                className='text-muted-foreground w-9 shrink-0 pr-1 text-right text-[11px] select-none'
-                aria-hidden
-              >
-                {row.oldNumber}
-              </span>
-              <span
-                className='text-muted-foreground w-9 shrink-0 border-r pr-2 text-right text-[11px] select-none'
-                aria-hidden
-              >
-                {row.newNumber}
-              </span>
-              <span className='px-3'>{row.line}</span>
-            </span>
-          ))}
-        </pre>
+        )}
       </div>
-    </details>
+      {expanded && !!props.patch && (
+        <LightweightDiffPreview
+          id={contentId}
+          role='region'
+          aria-label={props.path}
+          tabIndex={0}
+          className='border-border focus-visible:outline-ring max-h-[60vh] border-t py-2 focus-visible:outline-2 focus-visible:outline-offset-[-2px]'
+          lines={preview.lines}
+          lineNumbers={preview.lineNumbers}
+          codePreviewSettings={{
+            fontSizePx: 12,
+            showLineNumbers: true,
+            wrapLongLines: props.wrapLines,
+          }}
+        />
+      )}
+      {expanded && !props.patch && (
+        <p className='text-foreground-subtle border-border border-t px-4 py-5 text-xs leading-5'>
+          {t(
+            'No text preview is available for this change. Open the file or download the project to inspect it.'
+          )}
+        </p>
+      )}
+    </article>
   )
 }

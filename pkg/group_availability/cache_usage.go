@@ -5,6 +5,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/QuantumNous/new-api/relaykit/dto"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -20,12 +23,15 @@ type cacheUsage struct {
 	mu                                                       sync.Mutex
 	semantic                                                 string
 	input, read, creation, creation5m, creation1h, toolInput int64
+	output, reasoning                                        int64
+	hasOutput                                                bool
 	hasInput, hasRead, invalid                               bool
 }
 
 func ResetCacheUsage(c *gin.Context) {
 	if Default != nil {
 		c.Set(cacheUsageKey, &cacheUsage{})
+		c.Set(relayUsageKey, relayUsage{})
 	}
 }
 
@@ -77,6 +83,10 @@ func observeCacheFields(c *gin.Context, usage gjson.Result, gemini, claudeMessag
 	if !input.Exists() {
 		input = usage.Get("input_tokens")
 	}
+	output := usage.Get("completion_tokens")
+	if !output.Exists() {
+		output = usage.Get("output_tokens")
+	}
 	read := usage.Get("prompt_tokens_details.cached_tokens")
 	if !read.Exists() {
 		read = usage.Get("input_tokens_details.cached_tokens")
@@ -89,6 +99,7 @@ func observeCacheFields(c *gin.Context, usage gjson.Result, gemini, claudeMessag
 	}
 	if gemini {
 		semantic, input, read = "gemini", usage.Get("promptTokenCount"), usage.Get("cachedContentTokenCount")
+		output = usage.Get("candidatesTokenCount")
 	}
 	if state.semantic != "" && semantic != state.semantic {
 		state.invalid = true
@@ -106,6 +117,8 @@ func observeCacheFields(c *gin.Context, usage gjson.Result, gemini, claudeMessag
 		present *bool
 	}{
 		{input, &state.input, &state.hasInput}, {read, &state.read, &state.hasRead},
+		{output, &state.output, &state.hasOutput},
+		{usage.Get("thoughtsTokenCount"), &state.reasoning, nil},
 		{usage.Get("toolUsePromptTokenCount"), &state.toolInput, nil},
 		{usage.Get("cache_creation_input_tokens"), &state.creation, nil},
 		{usage.Get("cache_creation.ephemeral_5m_input_tokens"), &state.creation5m, nil},
@@ -156,4 +169,68 @@ func cacheUsageSnapshot(c *gin.Context) (int64, int64) {
 		return 0, 0
 	}
 	return total, state.read
+}
+
+const relayUsageKey = "group_availability_relay_usage"
+
+type relayUsage struct {
+	input, output int64
+	hasInput      bool
+	endedAt       time.Time
+}
+
+// ObserveRelayUsage captures the adapter's normalized usage before settlement
+// writes. This covers providers without raw cache hooks and avoids adding DB
+// settlement time to the generation duration. Billing usage is never mutated.
+func ObserveRelayUsage(c *gin.Context, usage *dto.Usage) {
+	if Default == nil || c == nil || usage == nil {
+		return
+	}
+	input := int64(usage.InputTokens)
+	if input <= 0 {
+		input = int64(usage.PromptTokens)
+		if usage.UsageSemantic == dto.BillingUsageSemanticAnthropic {
+			input += int64(usage.PromptTokensDetails.CachedTokens) + int64(usage.PromptTokensDetails.CacheCreationTokensTotal())
+		}
+	}
+	output := int64(usage.CompletionTokens)
+	if output == 0 {
+		output = int64(usage.OutputTokens)
+	}
+	c.Set(relayUsageKey, relayUsage{input: input, output: output, hasInput: input > 0, endedAt: time.Now()})
+}
+
+func tokenUsageSnapshot(c *gin.Context) relayUsage {
+	result := relayUsage{}
+	if c == nil {
+		return result
+	}
+	if value, exists := c.Get(relayUsageKey); exists {
+		result, _ = value.(relayUsage)
+	}
+	if value, exists := c.Get(cacheUsageKey); exists {
+		if state, ok := value.(*cacheUsage); ok {
+			state.mu.Lock()
+			defer state.mu.Unlock()
+			if !state.invalid {
+				if state.hasInput {
+					total := state.input
+					if state.semantic == "anthropic" {
+						total += state.read + max(state.creation, state.creation5m+state.creation1h)
+					}
+					if state.semantic == "gemini" {
+						total += state.toolInput
+					}
+					if total >= 0 && total <= maxCacheUsageTokens {
+						result.input = total
+						result.hasInput = true
+					}
+				}
+				if state.hasOutput && state.output+state.reasoning <= maxCacheUsageTokens {
+					result.output = state.output + state.reasoning
+				}
+			}
+		}
+	}
+	return result
 }

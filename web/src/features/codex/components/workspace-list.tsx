@@ -16,262 +16,659 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Collapsible } from '@base-ui/react/collapsible'
+import { Dialog } from '@base-ui/react/dialog'
 import {
   Archive,
   ArrowLeft,
-  CircleCheck,
+  ChevronDown,
+  ChevronRight,
+  FolderOpen,
   Clock3,
-  FolderGit2,
+  Cloud,
+  Folder,
+  FolderPlus,
+  GitPullRequest,
   LoaderCircle,
+  ListChecks,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plug,
   Plus,
   Search,
+  Settings,
+  SquarePen,
   Terminal,
   X,
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import { cn } from '@/features/codex/vendor/zcode/utils'
+import { useMediaQuery } from '@/hooks/use-media-query'
 
 import { isCodexBusy } from '../lib/events'
-import type { CodexWorkspace } from '../types'
+import type { CodexWorkspace, CodexProjectConversation } from '../types'
+import { Button } from '../vendor/zcode/button'
+import { WorkspaceConversations } from './workspace-conversations'
 
 interface WorkspaceListProps {
+  presentation?: 'sidebar' | 'drawer'
+  tasks?: ReactNode
+  onEnvironments?: () => void
+  onPullRequests?: () => void
+  onSettings?: () => void
+  onManage?: () => void
   workspaces: CodexWorkspace[]
+  conversationsByWorkspace?: Record<string, CodexProjectConversation[]>
+  expandedWorkspaceIds: readonly string[]
+  onToggleWorkspace: (id: string) => void
+  loadingWorkspaceIds?: readonly string[]
+  conversationErrors?: Record<string, string | undefined>
+  onRetryConversations?: (id: string) => void
+  conversationId?: string
+  onConversation?: (workspaceId: string, conversationId: string) => void
+  renderProjectActions?: (workspace: CodexWorkspace) => ReactNode
+  conversationActionsDisabled?: boolean
+  onRenameConversation?: (
+    workspaceId: string,
+    conversation: CodexProjectConversation
+  ) => void
+  onArchiveConversation?: (
+    workspaceId: string,
+    conversation: CodexProjectConversation
+  ) => void
+  onDeleteConversation?: (
+    workspaceId: string,
+    conversation: CodexProjectConversation
+  ) => void
+  onCreate?: () => void
+  onConnections?: () => void
+  onSearch?: () => void
+  onNewChat?: () => void
+  newDisabled?: boolean
+  createDisabled?: boolean
   selected?: string
   open: boolean
   onClose: () => void
-  onNew: () => void
+  onNew: (workspaceId: string) => void
   onSelect: (id: string) => void
   onBack: () => void
   loading?: boolean
+  collapsed?: boolean
+  onToggle?: () => void
+  brand?: ReactNode
+  footer?: ReactNode
 }
 export function WorkspaceList(props: WorkspaceListProps) {
   const { t } = useTranslation()
+  const desktop = useMediaQuery('(min-width: 768px)')
   const [search, setSearch] = useState('')
   const [archived, setArchived] = useState(false)
-  const drawer = useRef<HTMLElement>(null)
-  const { open, onClose } = props
+  const [projectsOpen, setProjectsOpen] = useState(true)
+  const closeButton = useRef<HTMLButtonElement>(null)
+  const mobileDrawer = useRef<HTMLDivElement>(null)
+  const requestedHistories = useRef(new Set<string>())
+  const query = search.trim().toLocaleLowerCase()
+  const selectedArchived = props.workspaces.find(
+    (workspace) => workspace.id === props.selected
+  )?.archived
   useEffect(() => {
-    if (!open || window.matchMedia('(min-width: 768px)').matches) return
-    const previous = document.activeElement as HTMLElement | null
-    drawer.current?.querySelector<HTMLButtonElement>('button')?.focus()
-    function escape(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose()
-      if (event.key !== 'Tab') return
-      const controls = drawer.current?.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input'
-      )
-      const first = controls?.[0]
-      const last = controls ? [...controls].at(-1) : undefined
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last?.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first?.focus()
+    if (selectedArchived !== undefined) setArchived(!!selectedArchived)
+  }, [props.selected, selectedArchived])
+  const selectedWorkspace = props.workspaces.find(
+    (workspace) => workspace.id === props.selected && !workspace.archived
+  )
+  let newChatDisabled = props.createDisabled || !props.onCreate
+  if (props.onNewChat) {
+    newChatDisabled = !!props.createDisabled
+  } else if (selectedWorkspace) {
+    newChatDisabled = props.newDisabled || isCodexBusy(selectedWorkspace.status)
+  }
+
+  useEffect(() => {
+    if (!query) {
+      requestedHistories.current.clear()
+      return
+    }
+    for (const workspace of props.workspaces) {
+      if (
+        !!workspace.archived !== archived ||
+        props.conversationsByWorkspace?.[workspace.id] ||
+        props.expandedWorkspaceIds.includes(workspace.id) ||
+        requestedHistories.current.has(workspace.id)
+      ) {
+        continue
       }
+      requestedHistories.current.add(workspace.id)
+      props.onToggleWorkspace(workspace.id)
     }
-    document.addEventListener('keydown', escape)
-    return () => {
-      document.removeEventListener('keydown', escape)
-      previous?.focus()
-    }
-  }, [open, onClose])
+  }, [query, archived, props])
+
   const workspaces = props.workspaces
-    .filter(
-      (workspace) =>
-        workspace.archived === archived &&
-        workspace.name.toLowerCase().includes(search.trim().toLowerCase())
-    )
+    .filter((workspace) => {
+      if (!!workspace.archived !== archived) return false
+      if (!query || workspace.name.toLocaleLowerCase().includes(query)) {
+        return true
+      }
+      return props.conversationsByWorkspace?.[workspace.id]?.some(
+        (conversation) => conversation.name.toLocaleLowerCase().includes(query)
+      )
+    })
     .sort(
       (a, b) =>
         new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     )
-  const groups = archived
-    ? [{ label: t('Archived projects'), entries: workspaces }]
-    : [
-        {
-          label: t('In progress'),
-          entries: workspaces.filter((workspace) =>
-            isCodexBusy(workspace.status)
-          ),
-        },
-        {
-          label: t('Recent projects'),
-          entries: workspaces.filter(
-            (workspace) => !isCodexBusy(workspace.status)
-          ),
-        },
-      ]
-  return (
+  const searchingHistory = !!query && !!props.loadingWorkspaceIds?.length
+  const mobileDialog = !desktop || props.presentation === 'drawer'
+  const collapsedRail = !!props.collapsed && desktop && !mobileDialog
+
+  function startNewChat() {
+    if (mobileDialog) props.onClose()
+    if (props.onNewChat) props.onNewChat()
+    else if (selectedWorkspace) props.onNew(selectedWorkspace.id)
+    else props.onCreate?.()
+  }
+
+  const content = (
     <>
-      {props.open && (
-        <button
-          type='button'
-          className='absolute inset-0 z-40 bg-black/35 md:hidden'
-          onClick={props.onClose}
-          aria-label={t('Close project list')}
-          tabIndex={-1}
-        />
-      )}
-      <aside
-        ref={drawer}
-        aria-label={t('Codex projects')}
-        className={cn(
-          'bg-muted/30 absolute inset-y-0 left-0 z-50 flex w-[min(300px,86vw)] shrink-0 flex-col border-r bg-background md:static md:z-auto md:flex md:w-60 lg:w-64',
-          !props.open && 'hidden'
-        )}
-      >
-        <div className='flex h-16 shrink-0 items-center gap-2.5 px-5'>
-          <Terminal className='size-5' aria-hidden />
-          <span className='text-base font-semibold tracking-tight'>Codex</span>
-          <span className='text-muted-foreground rounded border px-1.5 py-0.5 text-[10px]'>
-            {t('Admin')}
-          </span>
+      <header className='chatgpt-sidebar-header flex h-14 shrink-0 items-center gap-2 px-3'>
+        <div
+          aria-hidden={collapsedRail || undefined}
+          inert={collapsedRail || undefined}
+          className='chatgpt-sidebar-brand flex min-w-0 flex-1 items-center gap-2'
+        >
+          {props.brand || (
+            <span className='flex items-center gap-2 px-1 text-base font-medium'>
+              <Terminal className='size-5' aria-hidden />
+              Codex
+            </span>
+          )}
+        </div>
+        {props.onSearch && !collapsedRail && (
           <Button
             type='button'
-            size='icon-sm'
             variant='ghost'
-            className='ml-auto size-10 md:hidden'
-            aria-label={t('Close project list')}
-            onClick={props.onClose}
+            size='icon-md'
+            className='chatgpt-sidebar-search chatgpt-icon-button size-9 rounded-lg'
+            aria-label={t('Search tasks')}
+            title={t('Search tasks')}
+            onClick={() => {
+              if (mobileDialog) props.onClose()
+              props.onSearch?.()
+            }}
           >
-            <X />
+            <Search className='size-4' aria-hidden />
+          </Button>
+        )}
+        {mobileDialog ? (
+          <Dialog.Close
+            ref={closeButton}
+            render={
+              <Button
+                variant='ghost'
+                size='icon-md'
+                className='chatgpt-icon-button ml-auto size-11 rounded-lg'
+              />
+            }
+            aria-label={t('Close project list')}
+          >
+            <PanelLeftClose className='size-5' aria-hidden />
+          </Dialog.Close>
+        ) : (
+          <Button
+            type='button'
+            variant='ghost'
+            size='icon-md'
+            className='chatgpt-sidebar-toggle chatgpt-icon-button hidden size-9 rounded-lg md:inline-flex'
+            aria-label={t(
+              props.collapsed ? 'Open project list' : 'Close project list'
+            )}
+            title={t(
+              props.collapsed ? 'Open project list' : 'Close project list'
+            )}
+            onClick={props.onToggle}
+          >
+            {props.collapsed ? (
+              <PanelLeftOpen className='size-5' />
+            ) : (
+              <PanelLeftClose className='size-5' />
+            )}
+          </Button>
+        )}
+      </header>
+      {desktop && !mobileDialog && (
+        <div
+          className='chatgpt-sidebar-rail flex flex-col items-center gap-1 px-2'
+          aria-hidden={!collapsedRail || undefined}
+          inert={!collapsedRail || undefined}
+        >
+          <Button
+            type='button'
+            variant='ghost'
+            size='icon-md'
+            className='chatgpt-icon-button size-9 rounded-lg'
+            aria-label={t('New task')}
+            title={t('New task')}
+            disabled={newChatDisabled}
+            onClick={startNewChat}
+          >
+            <SquarePen className='size-5' aria-hidden />
+          </Button>
+          <Button
+            type='button'
+            variant='ghost'
+            size='icon-md'
+            className='chatgpt-icon-button size-9 rounded-lg'
+            aria-label={t('Search tasks')}
+            title={t('Search tasks')}
+            disabled={!props.onSearch && !props.onToggle}
+            onClick={() => {
+              if (props.onSearch) props.onSearch()
+              else props.onToggle?.()
+            }}
+          >
+            <Search className='size-5' aria-hidden />
           </Button>
         </div>
-        <div className='space-y-3 px-3'>
+      )}
+      <div
+        aria-hidden={collapsedRail || undefined}
+        inert={collapsedRail || undefined}
+        className='chatgpt-sidebar-expanded flex min-h-0 flex-1 flex-col'
+      >
+        <div className='space-y-0.5 px-2'>
           <Button
             type='button'
-            variant='outline'
-            className='bg-background h-10 w-full justify-start rounded-lg px-3 shadow-none'
-            onClick={props.onNew}
+            variant='ghost'
+            className='chatgpt-nav-item min-h-11 w-full justify-start gap-3 rounded-lg px-3 text-sm font-normal md:min-h-9'
+            disabled={newChatDisabled}
+            onClick={startNewChat}
           >
-            <Plus className='size-4' />
+            <SquarePen className='size-5' aria-hidden />
             {t('New task')}
           </Button>
-          <label className='focus-within:ring-ring/40 flex h-9 items-center gap-2 rounded-lg px-3 focus-within:ring-2'>
-            <Search aria-hidden className='text-muted-foreground size-4' />
-            <input
-              aria-label={t('Search projects')}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              className='placeholder:text-muted-foreground w-full min-w-0 bg-transparent text-base outline-none md:text-sm'
-              placeholder={t('Search projects')}
-            />
-            {!!search && (
-              <button
+          {!props.onSearch && (
+            <label className='chatgpt-search-field text-foreground hover:bg-hover focus-within:bg-hover flex min-h-11 items-center gap-3 rounded-lg px-3 md:min-h-9'>
+              <Search aria-hidden className='size-5 shrink-0' />
+              <input
+                aria-label={t('Search projects')}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape' && search) {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    setSearch('')
+                  }
+                }}
+                className='placeholder:text-foreground w-full min-w-0 border-0 bg-transparent text-base outline-none md:text-sm'
+                placeholder={t('Search tasks')}
+              />
+              {!!search && (
+                <button
+                  type='button'
+                  aria-label={t('Clear project search')}
+                  className='text-muted-foreground hover:text-foreground -mr-2 flex size-9 shrink-0 items-center justify-center rounded-lg'
+                  onClick={() => setSearch('')}
+                >
+                  <X className='size-4' aria-hidden />
+                </button>
+              )}
+            </label>
+          )}
+          <div className='chatgpt-sidebar-shortcuts space-y-0.5'>
+            {props.onPullRequests && (
+              <Button
                 type='button'
-                aria-label={t('Clear project search')}
-                className='text-muted-foreground hover:text-foreground p-1'
-                onClick={() => setSearch('')}
+                variant='ghost'
+                className='chatgpt-nav-item min-h-11 w-full justify-start gap-2.5 rounded-lg px-3 text-sm font-normal md:min-h-8'
+                title={t('Pull requests')}
+                onClick={() => {
+                  if (mobileDialog) props.onClose()
+                  props.onPullRequests?.()
+                }}
               >
-                <X className='size-3.5' />
-              </button>
+                <GitPullRequest className='size-4' aria-hidden />
+                <span className='max-w-full truncate'>
+                  {t('Pull requests')}
+                </span>
+              </Button>
             )}
-          </label>
+            {props.onEnvironments && (
+              <Button
+                type='button'
+                variant='ghost'
+                className='chatgpt-nav-item min-h-11 w-full justify-start gap-2.5 rounded-lg px-3 text-sm font-normal md:min-h-8'
+                title={t('Environments')}
+                onClick={() => {
+                  if (mobileDialog) props.onClose()
+                  props.onEnvironments?.()
+                }}
+              >
+                <Cloud className='size-4' aria-hidden />
+                <span className='max-w-full truncate'>{t('Environments')}</span>
+              </Button>
+            )}
+            {props.onConnections && (
+              <Button
+                type='button'
+                variant='ghost'
+                className='chatgpt-nav-item min-h-11 w-full justify-start gap-2.5 rounded-lg px-3 text-sm font-normal md:min-h-8'
+                title={t('Connections')}
+                onClick={() => {
+                  if (mobileDialog) props.onClose()
+                  props.onConnections?.()
+                }}
+              >
+                <Plug className='size-4' aria-hidden />
+                <span className='max-w-full truncate'>{t('Connections')}</span>
+              </Button>
+            )}
+          </div>
         </div>
-        <div className='mt-4 flex items-center justify-between px-5'>
-          <span className='text-muted-foreground text-xs font-medium'>
-            {archived ? t('Archived projects') : t('Your projects')}
-          </span>
-          <Button
-            type='button'
-            size='icon-xs'
-            variant='ghost'
-            aria-pressed={archived}
-            aria-label={t('Show archived projects')}
-            onClick={() => setArchived(!archived)}
-          >
-            <Archive className='size-3.5' />
-          </Button>
-        </div>
-        <nav className='min-h-0 flex-1 overflow-y-auto px-3 py-2'>
-          {props.loading && (
+        <nav
+          aria-label={t('Project history')}
+          className='chatgpt-sidebar-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-2 pb-3'
+        >
+          <div className='chatgpt-project-heading mt-2 flex min-h-8 items-center justify-between gap-1 px-3'>
+            <button
+              type='button'
+              className='chatgpt-section-label flex min-h-8 items-center gap-1.5 rounded-lg text-left'
+              aria-expanded={projectsOpen}
+              aria-controls='codex-sidebar-projects'
+              onClick={() => setProjectsOpen(!projectsOpen)}
+            >
+              {archived ? t('Archived projects') : t('Projects')}
+              <ChevronDown
+                aria-hidden
+                className={cn(
+                  'size-3.5 transition-transform duration-200',
+                  !projectsOpen && '-rotate-90'
+                )}
+              />
+            </button>
+            <div className='chatgpt-project-tools flex items-center gap-0.5'>
+              {props.onManage && (
+                <Button
+                  type='button'
+                  size='icon-md'
+                  variant='ghost'
+                  className='chatgpt-icon-button size-9'
+                  aria-label={t('Manage projects and conversations')}
+                  title={t('Manage projects and conversations')}
+                  onClick={props.onManage}
+                >
+                  <ListChecks className='size-4' aria-hidden />
+                </Button>
+              )}
+              <Button
+                type='button'
+                size='icon-md'
+                variant='ghost'
+                className='chatgpt-icon-button size-9'
+                aria-label={t('New project')}
+                title={t('New project')}
+                onClick={props.onCreate}
+                disabled={props.createDisabled || !props.onCreate}
+              >
+                <FolderPlus className='size-4' aria-hidden />
+              </Button>
+              <Button
+                type='button'
+                size='icon-md'
+                variant='ghost'
+                className='chatgpt-icon-button size-9'
+                aria-pressed={archived}
+                aria-label={t('Show archived projects')}
+                title={t('Show archived projects')}
+                onClick={() => setArchived(!archived)}
+              >
+                <Archive className='size-4' aria-hidden />
+              </Button>
+            </div>
+          </div>
+          {(props.loading || searchingHistory) && (
             <p
               role='status'
-              className='text-muted-foreground px-2 py-4 text-sm'
+              className='text-muted-foreground flex items-center gap-2 px-3 py-4 text-xs'
             >
-              {t('Loading projects...')}
+              <LoaderCircle className='size-4 animate-spin' aria-hidden />
+              {t(
+                props.loading
+                  ? 'Loading projects...'
+                  : 'Loading conversations...'
+              )}
             </p>
           )}
-          {!props.loading && workspaces.length === 0 && (
-            <div className='text-muted-foreground px-2 py-6 text-sm leading-6'>
-              <FolderGit2 className='mb-3 size-5' aria-hidden />
+          {!props.loading && !searchingHistory && workspaces.length === 0 && (
+            <div className='text-muted-foreground px-3 py-4 text-sm leading-6'>
               <p>
                 {search ? t('No matching projects.') : t('No projects yet.')}
               </p>
               {!search && !archived && (
-                <p className='mt-2 text-xs'>
+                <p className='mt-1 text-xs'>
                   {t('Start a task or import a project to begin.')}
                 </p>
               )}
             </div>
           )}
-          {groups
-            .filter((group) => group.entries.length > 0)
-            .map((group) => (
-              <section
-                key={group.label}
-                aria-label={group.label}
-                className='mb-3'
-              >
-                {!archived && (
-                  <h2 className='text-muted-foreground px-2 py-2 text-[11px] font-medium'>
-                    {group.label}
-                    <span className='ml-1.5 tabular-nums'>
-                      {group.entries.length}
-                    </span>
-                  </h2>
-                )}
-                <div className='space-y-1'>
-                  {group.entries.map((workspace) => (
-                    <button
-                      type='button'
-                      key={workspace.id}
-                      aria-current={
-                        workspace.id === props.selected ? 'page' : undefined
-                      }
-                      title={workspace.name}
-                      onClick={() => props.onSelect(workspace.id)}
-                      className={cn(
-                        'hover:bg-muted focus-visible:ring-ring/40 group flex w-full items-start gap-2.5 rounded-lg border border-transparent px-2.5 py-2.5 text-left outline-none focus-visible:ring-2',
-                        workspace.id === props.selected &&
-                          'border-border/70 bg-background shadow-sm'
-                      )}
-                    >
-                      <WorkspaceState status={workspace.status} />
-                      <span className='min-w-0 flex-1'>
-                        <span className='block truncate text-sm font-medium'>
-                          {workspace.name}
-                        </span>
-                        <span className='text-muted-foreground mt-1 flex items-center gap-2 text-xs'>
-                          <span className='min-w-0 flex-1 truncate'>
-                            {workspace.model || t('New project')}
+          <Collapsible.Root open={projectsOpen}>
+            <Collapsible.Panel
+              id='codex-sidebar-projects'
+              className='codex-project-history-panel'
+            >
+              <div className='space-y-0.5 pb-1'>
+                {workspaces.map((workspace) => {
+                  const expanded =
+                    props.expandedWorkspaceIds.includes(workspace.id) || !!query
+                  const active = workspace.id === props.selected
+                  const matchingProject =
+                    !!query &&
+                    workspace.name.toLocaleLowerCase().includes(query)
+                  return (
+                    <Collapsible.Root key={workspace.id} open={expanded}>
+                      <div
+                        role='group'
+                        aria-label={workspace.name}
+                        className={cn(
+                          'chatgpt-project-row group/project hover:bg-hover relative flex min-w-0 items-center rounded-lg transition-colors',
+                          active && 'bg-selected'
+                        )}
+                      >
+                        <Button
+                          type='button'
+                          variant='ghost'
+                          size='icon-md'
+                          className='size-11 shrink-0 rounded-lg md:size-8'
+                          aria-label={t(
+                            expanded
+                              ? 'Collapse project {{name}}'
+                              : 'Expand project {{name}}',
+                            { name: workspace.name }
+                          )}
+                          aria-expanded={expanded}
+                          aria-controls={`codex-project-conversations-${workspace.id}`}
+                          onClick={() => {
+                            if (query) setSearch('')
+                            if (
+                              !query ||
+                              props.expandedWorkspaceIds.includes(workspace.id)
+                            ) {
+                              props.onToggleWorkspace(workspace.id)
+                            }
+                          }}
+                        >
+                          <span className='relative flex size-5 items-center justify-center'>
+                            {expanded ? (
+                              <FolderOpen
+                                aria-hidden
+                                className='text-muted-foreground size-4 transition-opacity group-focus-within/project:opacity-0 group-hover/project:opacity-0'
+                              />
+                            ) : (
+                              <Folder
+                                aria-hidden
+                                className='text-muted-foreground size-4 transition-opacity group-focus-within/project:opacity-0 group-hover/project:opacity-0'
+                              />
+                            )}
+                            <ChevronRight
+                              aria-hidden
+                              className={cn(
+                                'absolute size-4 opacity-0 transition-transform group-hover/project:opacity-100 group-focus-within/project:opacity-100',
+                                expanded && 'rotate-90'
+                              )}
+                            />
                           </span>
-                          <ProjectTime value={workspace.updatedAt} />
-                        </span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            ))}
+                        </Button>
+                        <button
+                          type='button'
+                          aria-label={workspace.name}
+                          title={workspace.name}
+                          aria-current={active ? 'page' : undefined}
+                          className='text-foreground focus-visible:ring-ring/30 flex min-h-11 min-w-0 flex-1 items-center gap-1.5 rounded-lg pr-2 text-left text-sm outline-none focus-visible:ring-2 md:min-h-8'
+                          onClick={() => props.onSelect(workspace.id)}
+                        >
+                          <span className='min-w-0 flex-1 truncate'>
+                            {workspace.name}
+                          </span>
+                          <WorkspaceState status={workspace.status} />
+                        </button>
+                        <div
+                          className={cn(
+                            'chatgpt-row-actions flex shrink-0 items-center gap-0.5 pr-1 md:opacity-0 md:group-hover/project:opacity-100 md:group-focus-within/project:opacity-100 md:has-[[aria-expanded=true]]:opacity-100 [@media(hover:none)]:opacity-100 [&_button]:size-9 md:[&_button]:size-7'
+                          )}
+                        >
+                          {props.renderProjectActions?.(workspace)}
+                          <Button
+                            type='button'
+                            variant='ghost'
+                            size='icon-md'
+                            aria-label={t('New conversation in {{name}}', {
+                              name: workspace.name,
+                            })}
+                            title={t('New conversation')}
+                            disabled={
+                              props.newDisabled ||
+                              workspace.archived ||
+                              isCodexBusy(workspace.status)
+                            }
+                            onClick={() => props.onNew(workspace.id)}
+                          >
+                            <Plus className='size-4' aria-hidden />
+                          </Button>
+                        </div>
+                      </div>
+                      <Collapsible.Panel
+                        className='codex-project-history-panel'
+                        id={`codex-project-conversations-${workspace.id}`}
+                      >
+                        <WorkspaceConversations
+                          workspaceId={workspace.id}
+                          workspaceArchived={workspace.archived}
+                          conversations={
+                            props.conversationsByWorkspace?.[workspace.id] ?? []
+                          }
+                          selectedConversationId={
+                            active ? props.conversationId : undefined
+                          }
+                          searchQuery={matchingProject ? undefined : query}
+                          loading={props.loadingWorkspaceIds?.includes(
+                            workspace.id
+                          )}
+                          error={props.conversationErrors?.[workspace.id]}
+                          onRetry={props.onRetryConversations}
+                          actionsDisabled={props.conversationActionsDisabled}
+                          onSelect={props.onConversation}
+                          onRename={props.onRenameConversation}
+                          onArchive={props.onArchiveConversation}
+                          onDelete={props.onDeleteConversation}
+                        />
+                      </Collapsible.Panel>
+                    </Collapsible.Root>
+                  )
+                })}
+              </div>
+            </Collapsible.Panel>
+          </Collapsible.Root>
+          {props.tasks}
         </nav>
-        <div className='border-border/60 border-t p-3'>
+        <div className='chatgpt-sidebar-footer flex shrink-0 items-center gap-1 px-2 py-1.5 pb-[max(6px,env(safe-area-inset-bottom))]'>
           <Button
             type='button'
             variant='ghost'
-            className='h-10 w-full justify-start text-sm'
+            size='icon-md'
+            className='chatgpt-icon-button size-9 shrink-0 rounded-lg'
+            aria-label={t('Back to dashboard')}
+            title={t('Back to dashboard')}
             onClick={props.onBack}
           >
-            <ArrowLeft className='size-4' />
-            {t('Back to dashboard')}
+            <ArrowLeft className='size-4' aria-hidden />
           </Button>
+          {props.onSettings && !props.footer && (
+            <Button
+              type='button'
+              variant='ghost'
+              className='chatgpt-nav-item min-h-11 w-full justify-start gap-3 px-3 text-sm'
+              onClick={() => {
+                if (mobileDialog) props.onClose()
+                props.onSettings?.()
+              }}
+            >
+              <Settings className='size-5' aria-hidden />
+              {t('Settings')}
+            </Button>
+          )}
+          <div className='min-w-0 flex-1'>{props.footer}</div>
         </div>
-      </aside>
+      </div>
     </>
+  )
+
+  if (mobileDialog) {
+    return (
+      <Dialog.Root
+        open={props.open}
+        onOpenChange={(open) => {
+          if (!open) props.onClose()
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Backdrop className='codex-chatgpt codex-sidebar-backdrop fixed inset-0 z-40 bg-black/40' />
+          <Dialog.Popup
+            ref={mobileDrawer}
+            aria-label={t('Codex projects')}
+            aria-modal='true'
+            initialFocus={() => {
+              const focused = document.activeElement
+              if (
+                focused instanceof HTMLElement &&
+                mobileDrawer.current?.contains(focused)
+              ) {
+                return false
+              }
+              return closeButton.current
+            }}
+            className='codex-zcode codex-chatgpt chatgpt-sidebar chatgpt-sidebar-drawer bg-sidebar fixed inset-y-0 left-0 z-50 flex w-[min(320px,86vw)] flex-col outline-none'
+          >
+            {content}
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
+    )
+  }
+  if (!desktop || props.presentation === 'drawer') return null
+
+  return (
+    <aside
+      aria-label={t('Codex projects')}
+      data-collapsed={props.collapsed || undefined}
+      className={cn(
+        'chatgpt-sidebar bg-sidebar hidden shrink-0 flex-col overflow-hidden md:relative md:flex',
+        props.collapsed ? 'md:w-14' : 'md:w-[300px]'
+      )}
+    >
+      {content}
+    </aside>
   )
 }
 export function ProjectTime(props: { value: string | number }) {
@@ -310,7 +707,7 @@ function WorkspaceState(props: { status: string }) {
   if (props.status === 'running' || props.status === 'starting') {
     return (
       <LoaderCircle
-        className='mt-0.5 size-4 shrink-0 animate-spin text-emerald-700 dark:text-emerald-400'
+        className='text-foreground size-3.5 shrink-0 animate-spin'
         aria-label={t('Running')}
       />
     )
@@ -318,7 +715,7 @@ function WorkspaceState(props: { status: string }) {
   if (props.status === 'waiting_approval') {
     return (
       <Clock3
-        className='mt-0.5 size-4 shrink-0 text-amber-600'
+        className='size-3.5 shrink-0 text-amber-600'
         aria-label={t('Waiting for approval')}
       />
     )
@@ -326,18 +723,10 @@ function WorkspaceState(props: { status: string }) {
   if (props.status === 'error') {
     return (
       <span
-        className='bg-destructive mt-1.5 size-2 shrink-0 rounded-full'
+        className='bg-destructive size-1.5 shrink-0 rounded-full'
         aria-label={t('Failed')}
       />
     )
   }
-  if (props.status === 'idle') {
-    return (
-      <CircleCheck
-        className='text-muted-foreground mt-0.5 size-4 shrink-0'
-        aria-label={t('Ready')}
-      />
-    )
-  }
-  return <FolderGit2 className='text-muted-foreground mt-0.5 size-4 shrink-0' />
+  return null
 }
