@@ -1219,6 +1219,7 @@ function CodexSession(props: CodexProps & { actor: string }) {
           .then(() => undefined)
       }
       running={running}
+      activeTurnId={workspace?.activeTurnId}
       finishing={running && !taskRunning}
       disabled={
         !ready ||

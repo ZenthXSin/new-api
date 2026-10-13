@@ -48,6 +48,7 @@ class FixtureRuntime {
         if (message.method === 'initialize') result = { userAgent: 'fixture/0.160.0' };
         else if (message.method === 'thread/start' || message.method === 'thread/resume') result = { thread: { id: message.params.threadId || `thread-${sessionId}`, turns: [] } };
         else if (message.method === 'thread/fork') result = { thread: { id: `fork-${this.requests.filter((request) => request.method === 'thread/fork').length}-${id}`, forkedFromId: message.params.threadId, turns: [] } };
+        else if (message.method === 'turn/steer') result = { turnId: message.params.expectedTurnId };
         else if (message.method === 'turn/start') { this.turns++; result = { turn: { id: `turn-${this.turns}`, status: 'inProgress', items: [] } }; }
         queueMicrotask(() => {
           if (message.method === 'thread/fork') child.send({ method: 'thread/started', params: { thread: result.thread } });
@@ -1263,4 +1264,109 @@ test('task concurrency has an independent default and rejects invalid configured
   for (const value of ['0', '65', '2.5']) {
     await assert.rejects(loadConfig({ ...env, CODEX_MAX_ACTIVE_TASKS: value }), /Invalid maxActiveTasks/);
   }
+});
+
+
+test('steering adds native input to the selected running conversation exactly once without starting or stopping a task', async (t) => {
+  const f = await fixture(t, { maxActiveTasks: 2 });
+  const id = await newWorkspace(f);
+  const second = (await f.manager.createConversation(1, id, {})).conversationId;
+  const first = await f.manager.turn(1, id, turnInput());
+  const active = await f.manager.turn(1, id, turnInput(), null, second);
+  const state = f.store.get(1, id, second);
+  const input = { ...turnInput(), prompt: '先完成登录修复', busyAction: 'steer', expectedTurnId: active.turnId };
+  const url = `/workspaces/${id}/turns?conversation=${second}`;
+  const sent = await f.request(url, { method: 'POST', body: input });
+  assert.equal(sent.status, 200);
+  assert.equal(sent.data.steered, true);
+  assert.equal(sent.data.turnId, active.turnId);
+  assert.equal((await f.request(url, { method: 'POST', body: input })).data.duplicate, true);
+  assert.deepEqual(f.runtime.requests.filter(r => r.method === 'turn/steer').map(r => r.params), [{
+    threadId: state.workspace.threadId, expectedTurnId: active.turnId,
+    clientUserMessageId: input.requestId, input: [{ type: 'text', text: input.prompt }],
+  }]);
+  assert.equal(f.runtime.turns, 2);
+  assert.equal(f.runtime.requests.filter(r => r.method === 'turn/interrupt').length, 0);
+  assert.equal(state.workspace.status, 'running');
+  assert.equal(state.queuedTurns?.length || 0, 0);
+  assert.equal(f.store.get(1, id).workspace.activeTurnId, first.turnId);
+  await assert.rejects(f.manager.turn(1, id, { ...input, prompt: '不同内容' }, null, second), { code: 'idempotency_conflict' });
+  const item = { id: input.requestId, type: 'userMessage', content: [{ type: 'text', text: input.prompt }] };
+  f.runtime.children.get(`${id}:${second}`).send({ method: 'item/completed', params: { threadId: state.workspace.threadId, turnId: active.turnId, item } });
+  await f.store.persist(state);
+  const reopened = new WorkspaceStore({ dataDir: f.dataDir }); await reopened.initialize();
+  assert.deepEqual(reopened.get(1, id, second).thread.turns[0].items.find(i => i.id === input.requestId), item);
+  await reopened.close();
+});
+
+test('steering rejects stale or absent turns and mismatched settings while preserving the running task', async (t) => {
+  const f = await fixture(t); const id = await newWorkspace(f);
+  const active = await f.manager.turn(1, id, turnInput());
+  const state = f.store.get(1, id);
+  for (const [change, code] of [
+    [{ expectedTurnId: undefined }, 'invalid_steer_turn'],
+    [{ expectedTurnId: 'previous-turn' }, 'steer_turn_changed'],
+    [{ mode: 'ask' }, 'steer_settings_mismatch'],
+  ]) {
+    await assert.rejects(f.manager.turn(1, id, { ...turnInput(), busyAction: 'steer', expectedTurnId: active.turnId, ...change }), { code });
+    assert.equal(state.workspace.status, 'running');
+    assert.equal(state.workspace.activeTurnId, active.turnId);
+  }
+  assert.equal((await f.request(`/workspaces/${id}/turns`, { owner: '2', method: 'POST', body: { ...turnInput(), busyAction: 'steer', expectedTurnId: active.turnId } })).status, 404);
+  f.runtime.children.get(id).send({ method: 'turn/completed', params: { threadId: state.workspace.threadId, turn: { id: active.turnId, status: 'completed', items: [] } } });
+  await assert.rejects(f.manager.turn(1, id, { ...turnInput(), busyAction: 'steer', expectedTurnId: active.turnId }), { code: 'steer_no_active_turn' });
+  assert.equal(f.runtime.requests.filter(r => r.method === 'turn/steer').length, 0);
+  assert.equal(f.runtime.turns, 1);
+});
+
+test('a rejected steering message never marks the ongoing task as failed or resends on retry', async (t) => {
+  const f = await fixture(t); const id = await newWorkspace(f);
+  const active = await f.manager.turn(1, id, turnInput());
+  const state = f.store.get(1, id);
+  const input = { ...turnInput(), busyAction: 'steer', expectedTurnId: active.turnId };
+  f.runtime.rpcFailures = new Map([['turn/steer', { code: -32600, message: 'Native turn changed' }]]);
+  await assert.rejects(f.manager.turn(1, id, input), { code: 'steer_rejected' });
+  f.runtime.rpcFailures.clear();
+  await assert.rejects(f.manager.turn(1, id, input), { code: 'steer_rejected' });
+  assert.equal(state.workspace.status, 'running');
+  assert.equal(state.workspace.activeTurnId, active.turnId);
+  assert.equal(state.workspace.lastError, null);
+  assert.equal(f.runtime.requests.filter(r => r.method === 'turn/steer').length, 1);
+});
+
+test('an unconfirmed steering response preserves the draft contract and never resends the message', async (t) => {
+  const f = await fixture(t, { rpcTimeoutMs: 20 }); const id = await newWorkspace(f);
+  const active = await f.manager.turn(1, id, turnInput());
+  const input = { ...turnInput(), busyAction: 'steer', expectedTurnId: active.turnId };
+  f.runtime.unansweredMethods = new Set(['turn/steer']);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await f.request(`/workspaces/${id}/turns`, { method: 'POST', body: input });
+    assert.equal(result.status, 504); assert.equal(result.code, 'steer_state_uncertain');
+  }
+  assert.equal(f.store.get(1, id).workspace.status, 'running');
+  assert.equal(f.store.get(1, id).workspace.lastError, null);
+  assert.equal(f.runtime.requests.filter(r => r.method === 'turn/steer').length, 1);
+});
+
+
+test('steering reaches a running conversation while another conversation is still starting', { timeout: 5000 }, async (t) => {
+  const f = await fixture(t); const id = await newWorkspace(f);
+  const active = await f.manager.turn(1, id, turnInput());
+  const second = (await f.manager.createConversation(1, id, {})).conversationId;
+  f.runtime.unansweredMethods = new Set(['turn/start']);
+  let release;
+  const requested = new Promise(resolve => { f.runtime.onRequest = (message, child) => {
+    if (message.method !== 'turn/start') return;
+    release = () => child.send({ id: message.id, result: { turn: { id: 'turn-second', status: 'inProgress', items: [] } } });
+    resolve();
+  }; });
+  t.after(() => release?.());
+  const starting = f.manager.turn(1, id, turnInput(), null, second);
+  await requested;
+  try {
+    const result = await f.request(`/workspaces/${id}/turns`, { method: 'POST', body: { ...turnInput(), busyAction: 'steer', expectedTurnId: active.turnId } });
+    assert.equal(result.status, 200);
+    assert.equal(result.data.turnId, active.turnId);
+    assert.equal(f.store.get(1, id, second).workspace.status, 'starting');
+  } finally { release(); await starting; }
 });

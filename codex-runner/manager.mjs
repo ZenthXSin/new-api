@@ -710,7 +710,7 @@ export class WorkspaceManager {
     }
     this.store.record(state, message.method, params);
     if (message.method === 'turn/started') {
-      const request = Object.values(state.requests).find((entry) => entry.status === 'pending');
+      const request = Object.values(state.requests).find((entry) => entry.status === 'pending' && entry.kind !== 'steer');
       if (request) { request.turnId = params.turn?.id; request.status = 'accepted'; }
     }
     if (message.method === 'turn/started') {
@@ -741,9 +741,67 @@ export class WorkspaceManager {
     const input = this.validateTurn(body, authorization);
     const replayTurnId = body.replayTurnId;
     if (replayTurnId !== undefined && (typeof replayTurnId !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(replayTurnId))) throw apiError(400, 'invalid_turn', 'Invalid task turn');
-    if (body.busyAction !== undefined && !['queue', 'interrupt'].includes(body.busyAction)) throw apiError(400, 'invalid_busy_action', 'Choose queue or interrupt for a busy conversation');
+    if (body.busyAction !== undefined && !['queue', 'interrupt', 'steer'].includes(body.busyAction)) throw apiError(400, 'invalid_busy_action', '请选择排队、打断或引导消息模式');
     if (body.busyAction && replayTurnId) throw apiError(400, 'invalid_queue', 'Conversation replay cannot be queued or interrupt another task');
-    const fingerprint = createHash('sha256').update(JSON.stringify({ prompt: input.prompt, model: input.model, effort: input.effort, mode: input.mode, ...(input.group ? { group: input.group } : {}), ...(replayTurnId ? { replayTurnId } : {}) })).digest('hex');
+    const steering = body.busyAction === 'steer';
+    if (steering && (typeof body.expectedTurnId !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(body.expectedTurnId))) throw apiError(400, 'invalid_steer_turn', '引导消息必须指定当前正在执行的任务');
+    const fingerprint = createHash('sha256').update(JSON.stringify({ prompt: input.prompt, model: input.model, effort: input.effort, mode: input.mode, ...(input.group ? { group: input.group } : {}), ...(replayTurnId ? { replayTurnId } : {}), ...(steering ? { busyAction: 'steer', expectedTurnId: body.expectedTurnId } : {}) })).digest('hex');
+    if (steering) {
+      const state = this.store.get(ownerId, id, conversationId);
+      // Steering must not wait for another conversation's slow turn/start.
+      return this.lock(`steer:${sessionKey(state)}`, async () => {
+        const previous = state.requests[input.requestId];
+        if (previous) {
+          if (previous.fingerprint !== fingerprint) throw apiError(409, 'idempotency_conflict', 'This request ID was already used for different input');
+          if (previous.status === 'accepted') return { workspace: this.store.publicWorkspace(state), turnId: previous.turnId, steered: true, duplicate: true };
+          throw apiError(previous.statusCode || 504, previous.code || 'steer_state_uncertain', previous.message || '引导消息的接收状态尚未确认，请先查看会话。同一请求不会重复发送。');
+        }
+        if (state.queuedTurns?.some(entry => entry.requestId === input.requestId)) throw apiError(409, 'idempotency_conflict', 'This request ID was already used for different input');
+        if (state.workspace.archived || state.conversation.archived) throw apiError(409, 'conversation_archived', '请先恢复项目和会话');
+        if (Object.keys(state.requests).length >= 10_000) throw apiError(409, 'turn_limit', '该项目已达到消息历史上限，请新建项目');
+        if (this.store.projectStates(this.store.root(state)).reduce((sum, entry) => sum + (entry.historyBytes || 0), 0) >= (this.config.historyBytes || 64 * 1024 * 1024)) throw apiError(409, 'history_limit', '项目历史已达到上限，请导出项目后新建项目');
+        const session = this.sessions.get(sessionKey(state));
+        if (!['running', 'waiting_approval'].includes(state.workspace.status) || !state.workspace.activeTurnId || !session || session.rpc.closed || this.interruptions.has(sessionKey(state))) throw apiError(409, 'steer_no_active_turn', '当前任务已结束或正在停止，草稿已保留，请选择其他发送方式');
+        if (state.workspace.activeTurnId !== body.expectedTurnId) throw apiError(409, 'steer_turn_changed', '当前任务已变化，草稿已保留，请确认当前任务后重新发送');
+        if (input.model !== state.workspace.model || input.group !== (state.workspace.group || '') || input.effort !== state.workspace.effort || input.mode !== state.workspace.mode) throw apiError(409, 'steer_settings_mismatch', '引导消息沿用当前任务的模型、思考强度和审批方式，请刷新会话后重试');
+        const record = { fingerprint, kind: 'steer', expectedTurnId: body.expectedTurnId, status: 'pending', createdAt: Date.now(), turnId: null };
+        state.requests[input.requestId] = record;
+        await this.store.persist(state);
+        try {
+          // Completion and stop do not take this lock. Codex checks the same
+          // active turn precondition again when accepting the message.
+          if (state.workspace.activeTurnId !== body.expectedTurnId || this.interruptions.has(sessionKey(state))) throw apiError(409, 'steer_turn_changed', '当前任务已变化，草稿已保留，请确认当前任务后重新发送');
+          record.sent = true;
+          const result = await session.rpc.request('turn/steer', {
+            threadId: state.workspace.threadId,
+            expectedTurnId: body.expectedTurnId,
+            clientUserMessageId: input.requestId,
+            input: [{ type: 'text', text: input.prompt }],
+          });
+          if (result?.turnId !== body.expectedTurnId) throw apiError(502, 'steer_state_uncertain', '引导消息的接收状态尚未确认，请先查看会话。同一请求不会重复发送。');
+          record.status = 'accepted'; record.turnId = result.turnId;
+          this.store.record(state, 'workbench/turn/steered', { requestId: input.requestId, turnId: result.turnId });
+          await this.store.persist(state);
+          return { workspace: this.store.publicWorkspace(state), turnId: result.turnId, steered: true };
+        } catch (error) {
+          if (record.status === 'accepted') throw error;
+          const uncertain = record.sent && ['runtime_timeout', 'runtime_stopped', 'steer_state_uncertain'].includes(error.code);
+          record.status = uncertain ? 'uncertain' : 'failed';
+          if (uncertain) {
+            record.code = 'steer_state_uncertain'; record.statusCode = 504;
+            record.message = '引导消息的接收状态尚未确认，请先查看会话。同一请求不会重复发送。';
+          } else if (error.code === 'steer_turn_changed') {
+            record.code = error.code; record.statusCode = 409; record.message = error.message;
+          } else {
+            record.code = 'steer_rejected'; record.statusCode = 502;
+            record.message = '当前任务未接收引导消息，草稿已保留，请查看任务状态并调整消息后重新发送';
+          }
+          // A supplementary message failure must never fail or stop the task.
+          await this.store.persist(state);
+          throw apiError(record.statusCode, record.code, record.message);
+        }
+      });
+    }
     if (body.busyAction === 'interrupt' && !queuedExecution) {
       const state = this.store.get(ownerId, id, conversationId);
       const previous = state.requests[input.requestId], queued = state.queuedTurns?.find((entry) => entry.requestId === input.requestId);

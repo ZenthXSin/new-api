@@ -550,6 +550,8 @@ For commercial licensing, please contact support@quantumnous.com
 
 .codex-chatgpt .codex-task-composer-actions {
   display: flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   min-height: 36px;
   flex-shrink: 0;
   align-items: center;

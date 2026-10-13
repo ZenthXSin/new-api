@@ -265,7 +265,8 @@ export interface CodexEvents {
   reset?: boolean
 }
 export interface CodexTurnInput {
-  busyAction?: 'queue' | 'interrupt'
+  busyAction?: 'queue' | 'interrupt' | 'steer'
+  expectedTurnId?: string
   replayTurnId?: string
   group?: string
   prompt: string

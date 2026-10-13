@@ -198,7 +198,8 @@ func CodexWorkbenchProxy(c *gin.Context) {
 		switch failure.Code {
 		case "invalid_prompt", "invalid_request_id", "invalid_model", "invalid_effort", "invalid_mode", "invalid_turn", "invalid_busy_action", "invalid_queue", "invalid_model_credentials",
 			"environment_workspace_in_use", "workspace_busy", "workspace_archived", "conversation_archived", "not_found", "conversation_not_found", "idempotency_conflict",
-			"environment_busy", "environment_setup_failed", "environment_publish_failed", "runtime_start_failed", "runtime_stopped", "runtime_timeout", "internal_error", "active_limit", "task_start_failed", "history_limit", "storage_unavailable", "workspace_storage_limit", "disk_space_low":
+			"environment_busy", "environment_setup_failed", "environment_publish_failed", "runtime_start_failed", "runtime_stopped", "runtime_timeout", "internal_error", "active_limit", "task_start_failed", "history_limit", "storage_unavailable", "workspace_storage_limit", "disk_space_low",
+			"invalid_steer_turn", "steer_no_active_turn", "steer_turn_changed", "steer_settings_mismatch", "steer_state_uncertain", "steer_rejected":
 			code = failure.Code
 		}
 		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Codex request rejected owner=%d route=%s status=%d stage=runner code=%s", identity.UserID, c.FullPath(), response.StatusCode, code))

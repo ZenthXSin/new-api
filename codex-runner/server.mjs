@@ -83,13 +83,14 @@ export function createRunnerServer({ manager, key }) {
       if (/%2f|%5c|%00/i.test(url.pathname)) throw apiError(400, 'invalid_path', 'Invalid request path');
       const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
       const method = request.method;
+      const turnBody = method === 'POST' && segments.length === 3 && segments[0] === 'workspaces' && segments[2] === 'turns' ? await readJson(request) : null;
       manager.accountTools?.accept(ownerId,request.headers['x-codex-tools-token']);
       manager.acceptPolicy?.(ownerId,request.headers['x-codex-user-policy']);
       if(segments[0]==='ssh') manager.requireExecution?.(ownerId,true);
       if(segments[0]==='workspaces' && segments[1] && !(method === 'GET' && (segments.length === 2 || segments.length === 3 && ['events','conversations'].includes(segments[2])))) manager.requireExecution?.(ownerId,Boolean(manager.store.get(ownerId,segments[1]).workspace.remote),Boolean(manager.store.get(ownerId,segments[1]).workspace.host));
       const needsGitHub = (method === 'POST' && ['environments','github'].includes(segments[0])) || (segments[2] === 'git') || method === 'POST' && (
         segments.length === 1 && segments[0] === 'workspaces' ||
-        segments.length === 3 && segments[0] === 'workspaces' && segments[2] === 'turns' ||
+        segments.length === 3 && segments[0] === 'workspaces' && segments[2] === 'turns' && turnBody?.busyAction !== 'steer' ||
         segments.length === 2 && segments[0] === 'environment' && segments[1] === 'start');
       if (needsGitHub) await manager.syncGitHubCredentials(ownerId, request.headers);
       let data;
@@ -164,7 +165,7 @@ export function createRunnerServer({ manager, key }) {
           const action = segments[2];
           if (action === 'conversations' && method === 'GET') data = { conversations: manager.store.conversations(state) };
           else if (action === 'conversations' && method === 'POST') data = await manager.createConversation(ownerId, id, await readJson(request));
-          else if (action === 'turns' && method === 'POST') data = await manager.turn(ownerId, id, await readJson(request), modelCredential(request.headers), conversationId);
+          else if (action === 'turns' && method === 'POST') data = await manager.turn(ownerId, id, turnBody, modelCredential(request.headers), conversationId);
           else if (action === 'interrupt' && method === 'POST') data = await manager.interrupt(ownerId, id, conversationId);
           else if (action === 'events' && method === 'GET') {
             const after = url.searchParams.get('after') || '0';

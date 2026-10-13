@@ -7276,6 +7276,8 @@
     "Intelligence check inconclusive": "无法判定",
     "Intelligence check request failed": "检测请求失败",
     "Automatically disabled by intelligence check": "已因降智检测自动停用",
-    "Start parallel task": "并行新任务"
+    "Start parallel task": "并行新任务",
+    "Steer current task": "引导当前任务",
+    "Add guidance to the running task": "补充要求，引导当前任务继续执行"
   }
 }

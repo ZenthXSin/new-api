@@ -21,6 +21,7 @@ import {
   CornerUpLeft,
   GitBranch,
   LoaderCircle,
+  MessageSquarePlus,
   Paperclip,
   Plus,
   Square,
@@ -80,6 +81,7 @@ type ComposerProps = {
   onParallel?: (input: CodexTurnInput) => Promise<void>
   onStop?: () => void | Promise<void>
   running?: boolean
+  activeTurnId?: string | null
   busy?: boolean
   disabled?: boolean
   compact?: boolean
@@ -194,9 +196,15 @@ export function CodexComposer(props: ComposerProps) {
     }
   }
   async function submit(
-    busyAction: 'queue' | 'interrupt' | 'parallel' = 'queue'
+    busyAction: 'queue' | 'interrupt' | 'parallel' | 'steer' = 'queue'
   ) {
     if (!enabled || locked.current) return
+    if (
+      busyAction === 'steer' &&
+      (!props.running || !props.activeTurnId || stopping || props.finishing)
+    ) {
+      return
+    }
     locked.current = true
     restoreFocus.current = document.activeElement === textarea.current
     setSending(true)
@@ -208,6 +216,7 @@ export function CodexComposer(props: ComposerProps) {
       props.mode,
       props.group,
       busy ? busyAction : 'send',
+      ...(busyAction === 'steer' ? [props.activeTurnId] : []),
       ...(props.uploadedFiles?.length ? [props.uploadedFiles] : []),
     ])
     if (retry.current?.signature !== signature) {
@@ -225,6 +234,9 @@ export function CodexComposer(props: ComposerProps) {
         effort: props.effort,
         mode: props.mode,
         ...(busy && busyAction !== 'parallel' ? { busyAction } : {}),
+        ...(busyAction === 'steer'
+          ? { expectedTurnId: props.activeTurnId ?? undefined }
+          : {}),
       }
       if (busyAction === 'parallel' && props.onParallel) {
         await props.onParallel(input)
@@ -420,6 +432,22 @@ export function CodexComposer(props: ComposerProps) {
   )
   const sendControls = (
     <>
+      {props.running && props.activeTurnId && hasDraft && (
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon-md'
+          className='codex-task-steer size-11 rounded-full sm:size-9'
+          aria-label={t('Steer current task', { defaultValue: '引导当前任务' })}
+          title={t('Add guidance to the running task', {
+            defaultValue: '补充要求，引导当前任务继续执行',
+          })}
+          disabled={!enabled || stopping || props.finishing}
+          onClick={() => void submit('steer')}
+        >
+          <MessageSquarePlus className='size-4' aria-hidden />
+        </Button>
+      )}
       {busy && hasDraft && props.onParallel && (
         <Button
           type='button'
