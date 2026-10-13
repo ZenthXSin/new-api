@@ -78,6 +78,7 @@ test.each([
       'Edit files and run commands',
       'Explore your project without changing files',
       'Queue message',
+      'Start parallel task',
       'Interrupt and send',
       'Queued messages',
       'Queued messages ({{count}})',

@@ -1,5 +1,4 @@
 {
-  "Invitees' top-ups earn you a share by ratio; rewards are credited to your referral balance and can be transferred to your balance anytime.": "Пополнения приглашённых приносят вам долю по коэффициенту; вознаграждение зачисляется на реферальный баланс и может быть переведено в любой момент.",
   "translation": {
     "View a file from this project.": "Просмотр файла этого проекта.",
     "360": "360",
@@ -7264,18 +7263,19 @@
     "Grant repository access": "Разрешить доступ к репозиториям",
     "Refresh repositories": "Обновить репозитории",
     "To access all your repositories, install this GitHub App on your account and choose All repositories.": "Для доступа ко всем вашим репозиториям установите это приложение GitHub в своей учётной записи и выберите All repositories.",
-    "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes.": "Отслеживание изменений недоступно для домашнего каталога хоста. Выберите каталог проекта, чтобы просматривать изменения файлов."
-  },
-  "Automatic intelligence check": "Автопроверка снижения качества",
-  "Uses the fixed question and Test Model at the channel testing interval. Results only reflect this question.": "Отправляет фиксированный вопрос тестовой модели с интервалом проверки каналов. Результат относится только к этому ответу.",
-  "Automatically disable degraded channels": "Автоотключение при снижении качества",
-  "Only an explicit degraded answer disables the tested channel or key. Errors and inconclusive replies do not disable it.": "Канал или проверяемый ключ отключается только при явном ответе о снижении качества. Ошибки и неопределённые ответы не вызывают отключение.",
-  "Run intelligence check": "Проверить сейчас",
-  "Save the channel before running an intelligence check.": "Сохраните канал перед проверкой.",
-  "Intelligence check passed": "Без снижения качества",
-  "Intelligence degraded": "Снижение качества",
-  "Intelligence check inconclusive": "Не определено",
-  "Intelligence check request failed": "Ошибка запроса проверки",
-  "Automatically disabled by intelligence check": "Автоотключён по результату проверки",
-  "Start parallel task": "Запустить параллельную задачу"
+    "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes.": "Отслеживание изменений недоступно для домашнего каталога хоста. Выберите каталог проекта, чтобы просматривать изменения файлов.",
+    "Invitees' top-ups earn you a share by ratio; rewards are credited to your referral balance and can be transferred to your balance anytime.": "Пополнения приглашённых приносят вам долю по коэффициенту; вознаграждение зачисляется на реферальный баланс и может быть переведено в любой момент.",
+    "Automatic intelligence check": "Автопроверка снижения качества",
+    "Uses the fixed question and Test Model at the channel testing interval. Results only reflect this question.": "Отправляет фиксированный вопрос тестовой модели с интервалом проверки каналов. Результат относится только к этому ответу.",
+    "Automatically disable degraded channels": "Автоотключение при снижении качества",
+    "Only an explicit degraded answer disables the tested channel or key. Errors and inconclusive replies do not disable it.": "Канал или проверяемый ключ отключается только при явном ответе о снижении качества. Ошибки и неопределённые ответы не вызывают отключение.",
+    "Run intelligence check": "Проверить сейчас",
+    "Save the channel before running an intelligence check.": "Сохраните канал перед проверкой.",
+    "Intelligence check passed": "Без снижения качества",
+    "Intelligence degraded": "Снижение качества",
+    "Intelligence check inconclusive": "Не определено",
+    "Intelligence check request failed": "Ошибка запроса проверки",
+    "Automatically disabled by intelligence check": "Автоотключён по результату проверки",
+    "Start parallel task": "Запустить параллельную задачу"
+  }
 }

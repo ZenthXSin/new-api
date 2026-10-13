@@ -1,5 +1,4 @@
 {
-  "Invitees' top-ups earn you a share by ratio; rewards are credited to your referral balance and can be transferred to your balance anytime.": "Invitees' top-ups earn you a share by ratio; rewards are credited to your referral balance and can be transferred to your balance anytime.",
   "translation": {
     "View a file from this project.": "View a file from this project.",
     "360": "360",
@@ -7264,18 +7263,19 @@
     "Grant repository access": "Grant repository access",
     "Refresh repositories": "Refresh repositories",
     "To access all your repositories, install this GitHub App on your account and choose All repositories.": "To access all your repositories, install this GitHub App on your account and choose All repositories.",
-    "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes.": "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes."
-  },
-  "Automatic intelligence check": "Automatic intelligence check",
-  "Uses the fixed question and Test Model at the channel testing interval. Results only reflect this question.": "Uses the fixed question and Test Model at the channel testing interval. Results only reflect this question.",
-  "Automatically disable degraded channels": "Automatically disable degraded channels",
-  "Only an explicit degraded answer disables the tested channel or key. Errors and inconclusive replies do not disable it.": "Only an explicit degraded answer disables the tested channel or key. Errors and inconclusive replies do not disable it.",
-  "Run intelligence check": "Run intelligence check",
-  "Save the channel before running an intelligence check.": "Save the channel before running an intelligence check.",
-  "Intelligence check passed": "Not degraded",
-  "Intelligence degraded": "Degraded",
-  "Intelligence check inconclusive": "Inconclusive",
-  "Intelligence check request failed": "Check request failed",
-  "Automatically disabled by intelligence check": "Automatically disabled by intelligence check",
-  "Start parallel task": "Start parallel task"
+    "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes.": "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes.",
+    "Invitees' top-ups earn you a share by ratio; rewards are credited to your referral balance and can be transferred to your balance anytime.": "Invitees' top-ups earn you a share by ratio; rewards are credited to your referral balance and can be transferred to your balance anytime.",
+    "Automatic intelligence check": "Automatic intelligence check",
+    "Uses the fixed question and Test Model at the channel testing interval. Results only reflect this question.": "Uses the fixed question and Test Model at the channel testing interval. Results only reflect this question.",
+    "Automatically disable degraded channels": "Automatically disable degraded channels",
+    "Only an explicit degraded answer disables the tested channel or key. Errors and inconclusive replies do not disable it.": "Only an explicit degraded answer disables the tested channel or key. Errors and inconclusive replies do not disable it.",
+    "Run intelligence check": "Run intelligence check",
+    "Save the channel before running an intelligence check.": "Save the channel before running an intelligence check.",
+    "Intelligence check passed": "Not degraded",
+    "Intelligence degraded": "Degraded",
+    "Intelligence check inconclusive": "Inconclusive",
+    "Intelligence check request failed": "Check request failed",
+    "Automatically disabled by intelligence check": "Automatically disabled by intelligence check",
+    "Start parallel task": "Start parallel task"
+  }
 }

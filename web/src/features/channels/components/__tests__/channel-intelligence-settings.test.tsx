@@ -18,11 +18,15 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { createInstance } from 'i18next'
 import { useForm } from 'react-hook-form'
+import { I18nextProvider } from 'react-i18next'
 import { expect, test, vi } from 'vitest'
 
 import { Form } from '@/components/ui/form'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import en from '@/i18n/locales/en.json'
+import zh from '@/i18n/locales/zh.json'
 
 import * as api from '../../api'
 import {
@@ -147,4 +151,45 @@ test('a failed manual detection restores its button without inventing a verdict'
     ).toBeEnabled()
   )
   expect(screen.queryByText('Intelligence degraded')).not.toBeInTheDocument()
+})
+
+test('Chinese channel settings show localized labels, guidance and a completed result', async () => {
+  const language = createInstance()
+  await language.init({
+    lng: 'zhCN',
+    fallbackLng: 'en',
+    nsSeparator: false,
+    resources: { en, zhCN: zh },
+  })
+  vi.spyOn(api, 'testChannel').mockResolvedValue({
+    success: true,
+    intelligence_check: {
+      status: 'passed',
+      response: '不降智',
+      model: 'gpt-test',
+      checked_at: 1,
+      auto_disabled: false,
+    },
+  })
+  render(
+    <I18nextProvider i18n={language}>
+      <Editor saved />
+    </I18nextProvider>
+  )
+  expect(screen.getByRole('switch', { name: '自动检测降智' })).toBeVisible()
+  expect(
+    screen.getByRole('switch', { name: '降智时自动停用' })
+  ).toHaveAttribute('aria-disabled', 'true')
+  expect(
+    screen.getByText(
+      '按渠道检测间隔，用测试模型独立回答固定题目。结果仅反映此题的回复。'
+    )
+  ).toBeVisible()
+  expect(
+    screen.getByText(
+      '仅明确回答“降智”才停用本次检测的渠道或密钥；请求失败和无法判定不会触发停用。'
+    )
+  ).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: '立即检测降智' }))
+  await waitFor(() => expect(screen.getByText('不降智')).toBeVisible())
 })
