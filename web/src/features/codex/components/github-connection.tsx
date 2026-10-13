@@ -34,6 +34,7 @@ import {
 import { codexApi, codexError } from '../api'
 import type { CodexGitHubStatus } from '../types'
 import { Button } from '../vendor/zcode/button'
+import { GitHubRepositoryAccess } from './github-repository-access'
 
 type GitHubConnectionProps = { actor: string; onChanged?: () => void }
 
@@ -137,7 +138,7 @@ function GitHubConnectionContent(props: GitHubConnectionProps) {
           className='size-10 rounded-full'
           aria-label={t('Refresh GitHub connection')}
           disabled={connection.isFetching || busy}
-          onClick={() => void connection.refetch()}
+          onClick={() => void client.invalidateQueries({ queryKey })}
         >
           {connection.isFetching ? (
             <LoaderCircle className='size-4 animate-spin' aria-hidden />
@@ -194,6 +195,11 @@ function GitHubConnectionContent(props: GitHubConnectionProps) {
                 'Authorize Codex to work with your GitHub repositories, issues, pull requests, and workflows within the permissions you grant.'
               )}
             </p>
+            <GitHubRepositoryAccess
+              actor={props.actor}
+              status={data}
+              disabled={busy}
+            />
             {!data.configured && (
               <p className='bg-muted text-muted-foreground rounded-xl p-4 text-sm leading-6'>
                 {t(

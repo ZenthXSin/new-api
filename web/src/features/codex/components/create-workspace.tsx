@@ -37,6 +37,7 @@ import { cn } from '@/features/codex/vendor/zcode/utils'
 import { codexApi, codexError } from '../api'
 import type { CodexCreateInput, CodexSshConnection } from '../types'
 import { Button } from '../vendor/zcode/button'
+import { GitHubRepositoryAccess } from './github-repository-access'
 import { CodexSelect } from './select'
 
 const projectSchema = z
@@ -396,6 +397,11 @@ export function CreateWorkspaceDialog(props: {
               )}
               {github.data?.connected && (
                 <div className='space-y-2.5'>
+                  <GitHubRepositoryAccess
+                    actor={props.actor}
+                    status={github.data}
+                    disabled={unavailable}
+                  />
                   <label
                     htmlFor='codex-github-repository'
                     className='text-sm font-medium'

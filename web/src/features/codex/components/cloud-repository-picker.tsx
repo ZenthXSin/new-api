@@ -26,6 +26,7 @@ import { codexApi, codexError } from '../api'
 import type { CodexGitHubRepository } from '../types'
 import { Button } from '../vendor/zcode/button'
 import { GitHubConnection } from './github-connection'
+import { GitHubRepositoryAccess } from './github-repository-access'
 
 type CloudRepositoryPickerProps = {
   actor?: string
@@ -148,6 +149,11 @@ function CloudRepositoryPickerContent(props: CloudRepositoryPickerProps) {
         ))}
       {connected && (
         <>
+          <GitHubRepositoryAccess
+            actor={actor}
+            status={connection.data}
+            disabled={props.disabled}
+          />
           <div className='flex flex-wrap items-center justify-between gap-2 text-sm'>
             <span className='flex min-w-0 items-center gap-2'>
               <FaGithub className='size-4 shrink-0' aria-hidden />

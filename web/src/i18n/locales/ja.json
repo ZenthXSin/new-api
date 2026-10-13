@@ -7259,6 +7259,10 @@
     "Zoom out": "縮小",
     "Fit diagram": "ウィンドウに合わせる",
     "Actual size": "実際のサイズ",
-    "Diagram canvas": "図のキャンバス"
+    "Diagram canvas": "図のキャンバス",
+    "GitHub repository access": "GitHub リポジトリへのアクセス",
+    "Grant repository access": "リポジトリへのアクセスを許可",
+    "Refresh repositories": "リポジトリを更新",
+    "To access all your repositories, install this GitHub App on your account and choose All repositories.": "すべてのリポジトリにアクセスするには、この GitHub App をアカウントにインストールし、All repositories を選択してください。"
   }
 }

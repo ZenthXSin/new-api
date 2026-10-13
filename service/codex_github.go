@@ -53,11 +53,15 @@ type CodexGitHubProviderError struct {
 func (err *CodexGitHubProviderError) Error() string { return "GitHub " + err.Stage + ": " + err.Reason }
 func (err *CodexGitHubProviderError) Unwrap() error { return ErrCodexGitHubProvider }
 
-type CodexGitHubConfig struct{ ClientID, ClientSecret, RedirectURI string }
+type CodexGitHubConfig struct{ ClientID, ClientSecret, RedirectURI, AppSlug string }
 
 // A dedicated development App overrides the site's configured GitHub App.
 func LoadCodexGitHubConfig() (CodexGitHubConfig, error) {
 	config := CodexGitHubConfig{ClientID: strings.TrimSpace(os.Getenv("CODEX_GITHUB_CLIENT_ID")), ClientSecret: strings.TrimSpace(os.Getenv("CODEX_GITHUB_CLIENT_SECRET")), RedirectURI: strings.TrimSpace(os.Getenv("CODEX_GITHUB_REDIRECT_URI"))}
+	config.AppSlug = strings.ToLower(strings.TrimSpace(os.Getenv("CODEX_GITHUB_APP_SLUG")))
+	if config.AppSlug != "" && !codexGitHubLoginPattern.MatchString(config.AppSlug) {
+		return config, ErrCodexGitHubUnconfigured
+	}
 	// Reuse the site's configured GitHub App when a dedicated Codex App is not
 	// supplied. The dedicated variables remain an override for operators who
 	// want repository access isolated from ordinary login OAuth.
@@ -86,14 +90,16 @@ func LoadCodexGitHubConfig() (CodexGitHubConfig, error) {
 }
 
 type CodexGitHubStatus struct {
-	Configured        bool     `json:"configured"`
-	Connected         bool     `json:"connected"`
-	Login             string   `json:"login,omitempty"`
-	AvatarURL         string   `json:"avatarUrl,omitempty"`
-	Scopes            []string `json:"scopes"`
-	Capabilities      []string `json:"capabilities"`
-	RevocationPending bool     `json:"revocationPending"`
-	Reason            string   `json:"reason,omitempty"`
+	Configured          bool     `json:"configured"`
+	Connected           bool     `json:"connected"`
+	Login               string   `json:"login,omitempty"`
+	AvatarURL           string   `json:"avatarUrl,omitempty"`
+	Scopes              []string `json:"scopes"`
+	Capabilities        []string `json:"capabilities"`
+	RevocationPending   bool     `json:"revocationPending"`
+	Reason              string   `json:"reason,omitempty"`
+	ApplicationType     string   `json:"applicationType,omitempty"`
+	RepositoryAccessURL string   `json:"repositoryAccessUrl,omitempty"`
 }
 
 func GetCodexGitHubStatus(userID int) (*CodexGitHubStatus, error) {
@@ -112,8 +118,14 @@ func GetCodexGitHubStatus(userID int) (*CodexGitHubStatus, error) {
 		status.Login, status.AvatarURL = connection.Login, connection.AvatarURL
 		status.Scopes = strings.Fields(connection.Scopes)
 		status.Capabilities = []string{"repositories", "issues", "pull_requests"}
+		status.ApplicationType = "oauth_app"
 		if strings.HasPrefix(connection.ClientID, "Iv") {
 			status.Capabilities = []string{"app_permissions"}
+			status.ApplicationType = "github_app"
+			status.RepositoryAccessURL = "https://github.com/settings/apps/authorizations"
+			if config.AppSlug != "" {
+				status.RepositoryAccessURL = "https://github.com/apps/" + config.AppSlug + "/installations/new"
+			}
 		}
 		if codexGitHubHasScope(connection.Scopes, "workflow") {
 			status.Capabilities = append(status.Capabilities, "workflows")

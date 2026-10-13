@@ -7259,6 +7259,10 @@
     "Zoom out": "Zoom out",
     "Fit diagram": "Fit diagram",
     "Actual size": "Actual size",
-    "Diagram canvas": "Diagram canvas"
+    "Diagram canvas": "Diagram canvas",
+    "GitHub repository access": "GitHub repository access",
+    "Grant repository access": "Grant repository access",
+    "Refresh repositories": "Refresh repositories",
+    "To access all your repositories, install this GitHub App on your account and choose All repositories.": "To access all your repositories, install this GitHub App on your account and choose All repositories."
   }
 }

@@ -32,7 +32,7 @@ def main():
     parser.add_argument('--api-base-image', default='debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a')
     parser.add_argument('--worker-base-image', help='Optional compatible prebuilt worker image; by default build Dockerfile.workspace')
     parser.add_argument('--max-active', type=int)
-    parser.add_argument('--efforts')
+    parser.add_argument('--efforts', default='low,medium,high,xhigh,max,ultra')
     parser.add_argument('--memory-mb', type=int)
     args = parser.parse_args()
     if not re.fullmatch(r'[a-z0-9][a-z0-9.-]{0,63}', args.release):

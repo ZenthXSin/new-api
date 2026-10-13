@@ -2,6 +2,7 @@
 """Build release metadata with isolated source and fake external build tools."""
 import contextlib
 import io
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -37,6 +38,8 @@ class PublicReleaseBuildTests(unittest.TestCase):
             self.assertTrue(api_recipe.startswith('FROM debian:bookworm-slim'))
             self.assertIn('ca-certificates', api_recipe)
             self.assertEqual((output / 'Dockerfile.worker').read_text(), worker_recipe)
+            manifest = json.loads((output / 'release.json').read_text())
+            self.assertEqual(manifest['runner_environment'].get('CODEX_EFFORTS'), 'low,medium,high,xhigh,max,ultra')
 
 
 if __name__ == '__main__':

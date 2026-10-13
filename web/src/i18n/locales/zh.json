@@ -7259,6 +7259,10 @@
     "Zoom out": "缩小",
     "Fit diagram": "适应窗口",
     "Actual size": "实际尺寸",
-    "Diagram canvas": "图表画布"
+    "Diagram canvas": "图表画布",
+    "GitHub repository access": "GitHub 仓库授权",
+    "Grant repository access": "授权仓库",
+    "Refresh repositories": "刷新仓库",
+    "To access all your repositories, install this GitHub App on your account and choose All repositories.": "要访问你的全部仓库，请将此 GitHub App 安装到你的账号，并选择 All repositories（全部仓库）。"
   }
 }

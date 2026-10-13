@@ -368,6 +368,8 @@ export interface CodexGitHubStatus {
   scopes: string[]
   capabilities: string[]
   reason?: string
+  applicationType?: 'github_app' | 'oauth_app'
+  repositoryAccessUrl?: string
 }
 export interface CodexGitHubRepository {
   id: number

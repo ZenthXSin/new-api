@@ -108,6 +108,50 @@ function mockRepositories(repositories = [frontend, backend]) {
   })
 }
 
+test('refreshing GitHub App permissions reveals a newly authorized private repository and keeps the existing selection', async () => {
+  let accessGranted = false
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/api/codex/github') {
+      return response({
+        ...connected,
+        scopes: [],
+        capabilities: ['app_permissions'],
+        applicationType: 'github_app',
+        repositoryAccessUrl:
+          'https://github.com/apps/fixture-workbench/installations/new',
+      })
+    }
+    return response({
+      repositories: accessGranted ? [backend, frontend] : [backend],
+      hasMore: false,
+    })
+  })
+  const user = userEvent.setup()
+  renderPicker({ initialValue: [backend] })
+  await screen.findByRole('checkbox', { name: backend.fullName })
+  expect(
+    screen.queryByRole('checkbox', { name: frontend.fullName })
+  ).not.toBeInTheDocument()
+  expect(
+    screen.getByRole('link', { name: 'Grant repository access' })
+  ).toHaveAttribute(
+    'href',
+    'https://github.com/apps/fixture-workbench/installations/new'
+  )
+
+  accessGranted = true
+  await user.click(screen.getByRole('button', { name: 'Refresh repositories' }))
+
+  expect(
+    await screen.findByRole('checkbox', { name: frontend.fullName })
+  ).toBeEnabled()
+  expect(screen.getByRole('checkbox', { name: backend.fullName })).toBeChecked()
+  await user.click(screen.getByRole('checkbox', { name: frontend.fullName }))
+  expect(
+    screen.getByRole('checkbox', { name: frontend.fullName })
+  ).toBeChecked()
+})
+
 test('status loading does not offer repositories until GitHub confirms a connection', async () => {
   let resolveStatus: (value: AxiosResponse) => void = () => undefined
   const get = vi.spyOn(api, 'get').mockImplementation((url) => {

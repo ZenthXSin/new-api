@@ -7259,6 +7259,10 @@
     "Zoom out": "Réduire",
     "Fit diagram": "Ajuster à la fenêtre",
     "Actual size": "Taille réelle",
-    "Diagram canvas": "Zone du diagramme"
+    "Diagram canvas": "Zone du diagramme",
+    "GitHub repository access": "Accès aux dépôts GitHub",
+    "Grant repository access": "Autoriser l’accès aux dépôts",
+    "Refresh repositories": "Actualiser les dépôts",
+    "To access all your repositories, install this GitHub App on your account and choose All repositories.": "Pour accéder à tous vos dépôts, installez cette GitHub App sur votre compte et choisissez All repositories."
   }
 }

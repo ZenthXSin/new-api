@@ -49,6 +49,7 @@ func newCodexGitHubFixture(t *testing.T) AuthIdentity {
 	t.Setenv("CODEX_GITHUB_CLIENT_SECRET", "github-test-client-secret-value")
 	t.Setenv("CODEX_GITHUB_CLIENT_SECRET_FILE", "")
 	t.Setenv("CODEX_GITHUB_REDIRECT_URI", "https://new-api.example/codex?github_oauth=1")
+	t.Setenv("CODEX_GITHUB_APP_SLUG", "")
 	user := model.User{Username: "github-admin", Password: "unused", Role: common.RoleAdminUser, Status: common.UserStatusEnabled, AuthVersion: 1, Group: "default"}
 	require.NoError(t, db.Create(&user).Error)
 	session := model.UserSession{SID: "github-browser-session", UserID: user.Id, Version: 1, UserAuthVersion: 1, Status: model.UserSessionStatusActive, RefreshHash: "test-refresh-hash", LoginMethod: "password", CreatedAt: time.Now().Unix(), ExpiresAt: time.Now().Add(time.Hour).Unix()}
@@ -218,6 +219,32 @@ func TestCodexGitHubPrivateRepositoryListingRemainsOwnerScoped(t *testing.T) {
 	t.Setenv("CODEX_GITHUB_CLIENT_ID", "replacement-app")
 	_, err = GetCodexGitHubCredential(identity.UserID)
 	assert.ErrorIs(t, err, ErrCodexGitHubUnconfigured)
+}
+
+func TestCodexGitHubAppStatusOffersRepositoryInstallation(t *testing.T) {
+	identity := newCodexGitHubFixture(t)
+	t.Setenv("CODEX_GITHUB_CLIENT_ID", "Iv23test-github-app")
+	connection := &model.CodexGitHubConnection{UserID: identity.UserID, ClientID: "Iv23test-github-app", Login: "fixture-user"}
+	require.NoError(t, model.SaveCodexGitHubConnection(connection, "ghu_app_user_fixture", 0, identity.UserAuthVersion))
+
+	for _, tc := range []struct{ name, slug, wantURL string }{
+		{"without installation link", "", "https://github.com/settings/apps/authorizations"},
+		{"configured app", "fixture-workbench", "https://github.com/apps/fixture-workbench/installations/new"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CODEX_GITHUB_APP_SLUG", tc.slug)
+			status, err := GetCodexGitHubStatus(identity.UserID)
+			require.NoError(t, err)
+			require.True(t, status.Connected)
+			encoded, err := common.Marshal(status)
+			require.NoError(t, err)
+			var data map[string]any
+			require.NoError(t, common.Unmarshal(encoded, &data))
+			assert.Equal(t, "github_app", data["applicationType"])
+			assert.Equal(t, tc.wantURL, data["repositoryAccessUrl"])
+			assert.Empty(t, status.Scopes)
+		})
+	}
 }
 
 func TestCodexGitHubCredentialCiphertextCannotMoveBetweenUsers(t *testing.T) {

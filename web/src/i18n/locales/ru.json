@@ -7259,6 +7259,10 @@
     "Zoom out": "Уменьшить",
     "Fit diagram": "По размеру окна",
     "Actual size": "Исходный размер",
-    "Diagram canvas": "Область диаграммы"
+    "Diagram canvas": "Область диаграммы",
+    "GitHub repository access": "Доступ к репозиториям GitHub",
+    "Grant repository access": "Разрешить доступ к репозиториям",
+    "Refresh repositories": "Обновить репозитории",
+    "To access all your repositories, install this GitHub App on your account and choose All repositories.": "Для доступа ко всем вашим репозиториям установите это приложение GitHub в своей учётной записи и выберите All repositories."
   }
 }

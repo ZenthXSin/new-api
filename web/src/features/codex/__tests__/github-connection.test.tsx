@@ -73,6 +73,80 @@ function renderConnection(actor = '1', onChanged = vi.fn()) {
   }
 }
 
+test('a connected GitHub App explains private repository installation and offers its installation page', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue(
+    response({
+      ...connected,
+      scopes: [],
+      capabilities: ['app_permissions'],
+      applicationType: 'github_app',
+      repositoryAccessUrl:
+        'https://github.com/apps/fixture-workbench/installations/new',
+    })
+  )
+  renderConnection()
+
+  const link = await screen.findByRole('link', {
+    name: 'Grant repository access',
+  })
+  expect(link).toHaveAttribute(
+    'href',
+    'https://github.com/apps/fixture-workbench/installations/new'
+  )
+  expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  expect(
+    screen.getByText(
+      'To access all your repositories, install this GitHub App on your account and choose All repositories.'
+    )
+  ).toBeVisible()
+})
+
+test('an untrusted GitHub App installation URL falls back to GitHub settings', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue(
+    response({
+      ...connected,
+      scopes: [],
+      capabilities: ['app_permissions'],
+      repositoryAccessUrl:
+        'https://github.com.evil.example/apps/fake/installations/new',
+    })
+  )
+  renderConnection()
+
+  expect(
+    await screen.findByRole('link', { name: 'Grant repository access' })
+  ).toHaveAttribute('href', 'https://github.com/settings/apps/authorizations')
+})
+
+test('repository refresh prevents duplicate requests while refreshing and becomes available again', async () => {
+  const status = {
+    ...connected,
+    scopes: [],
+    capabilities: ['app_permissions'],
+    applicationType: 'github_app',
+  }
+  let resolveRefresh: (value: AxiosResponse) => void = () => undefined
+  const get = vi
+    .spyOn(api, 'get')
+    .mockResolvedValueOnce(response(status))
+    .mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRefresh = resolve
+        })
+    )
+  renderConnection()
+  const refresh = await screen.findByRole('button', {
+    name: 'Refresh repositories',
+  })
+  await userEvent.click(refresh)
+  expect(refresh).toBeDisabled()
+  await userEvent.click(refresh)
+  expect(get).toHaveBeenCalledTimes(2)
+  await act(async () => resolveRefresh(response(status)))
+  await waitFor(() => expect(refresh).toBeEnabled())
+})
+
 describe('GitHub connection', () => {
   test('configuration is unavailable while loading and an unconfigured site explains why authorization is disabled', async () => {
     let resolveStatus: (value: AxiosResponse) => void = () => undefined

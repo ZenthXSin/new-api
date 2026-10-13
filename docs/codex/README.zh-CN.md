@@ -80,6 +80,10 @@ Code 允许修改当前用户的项目文件与运行命令；Ask 将当前用�
 
 ## GitHub 与 SSH 连接
 
+GitHub App 的登录授权与仓库安装授权分开进行。连接成功只代表身份授权完成；要访问私有仓库，还需将同一个 App 安装到仓库所属的个人或组织账号，并在 GitHub 安装页选择这些仓库。连接页、新建项目和云端环境仓库选择器提供“授权仓库”和“刷新仓库”入口，刷新会重新获取当前账号的连接及仓库列表，并保留已选择的仓库。
+
+管理员可设置 `CODEX_GITHUB_APP_SLUG`（GitHub App 页面 `/apps/<slug>` 中的 slug），让授权按钮直接打开该 App 的安装页。未设置时使用 GitHub 的授权应用设置页。组织的安装或权限变更可能需要组织管理员批准；App 本身还需配置读取仓库内容的权限，才能克隆私有仓库。OAuth App 使用 `repo` scope，仍按其已授予的权限读取列表。
+
 GitHub 开发授权与网站登录绑定分开管理。管理员通过 `/github/authorize` 开始 OAuth，在当前浏览器完成回调后可读取已授权仓库列表；创建项目可选公开仓库或授权可访问的仓库。凭据由 Go 服务端注入 runner，浏览器不接收仓库访问令牌。断开连接会撤销供应、停止该用户相关执行进程并尝试撤销提供方凭据；部分清理失败会显示待完成状态，可重试。
 
 SSH 连接先探测并核对主机指纹，再使用 SSH 凭据保存属于该管理员的连接。远程项目指定连接和现有绝对目录；文件操作、Git 和 Codex 命令实际在该服务器执行。远端需要 Python 3.8+、Git 和可写用户 home；Linux x86_64 可安装固定 Codex 运行包，其他架构要求自行提供兼容 Codex。远程 Code 使用已授权 SSH 身份，Ask 使用只读执行策略；它不是本地 Docker 容器的隔离机制。删除工作台远程项目会保留远端文件。
@@ -233,7 +237,7 @@ runner 以 root systemd 服务管理 Docker；服务配置文件系统只读保�
 | `CODEX_API_KEY_FILE` | `/etc/new-api-codex/model.key`；也支持 `CODEX_API_KEY` |
 | `CODEX_MODELS` | `gpt-6.1-sol,gpt-6-astra,gpt-5.6-sol` |
 | `CODEX_DEFAULT_MODEL` | `gpt-6.1-sol` |
-| `CODEX_EFFORTS` / `CODEX_DEFAULT_EFFORT` | `low,medium,high,xhigh` / `medium` |
+| `CODEX_EFFORTS` / `CODEX_DEFAULT_EFFORT` | `low,medium,high,xhigh,max,ultra` / `medium`；每个模型只展示原生支持的档位。发布工具默认写入完整档位，可用 `--efforts` 显式限制 |
 | `CODEX_MAX_ACTIVE` | 全局运行环境及活动任务容量，默认 2，可配置 1–8；手动启动同样占用容量，每用户始终最多 1 个任务 |
 | `CODEX_MAX_WORKSPACES` | 每用户项目数，含归档；默认 40，可配置 1–1000 |
 | `CODEX_IDLE_SECONDS` | 个人环境空闲停止时长，默认 600 秒，可配置 30–86400 |
