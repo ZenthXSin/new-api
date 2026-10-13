@@ -225,3 +225,13 @@ test('a successful retry still enforces the actual disk quota', async () => {
   await assert.rejects(f.runtime.enforceUserDiskLimit(1), { code: 'workspace_storage_limit', statusCode: 507 });
   assert.equal((await f.runtime.inspectUser(1)).State.Running, false);
 });
+
+test('storage checks can report usage before the manager stops the container', async () => {
+  const f = await fixture(); await f.runtime.start(f.id);
+  const usage = f.runtime.resources(1).workspaceBytes + 1;
+  f.runtime.command = async (program, args, options) => program === 'du'
+    ? { code: 0, stdout: `${usage}\t/user\n`, stderr: '' }
+    : f.command(program, args, options);
+  await assert.rejects(f.runtime.enforceUserDiskLimit(1, {stop:false}), {code:'workspace_storage_limit',usedBytes:usage,limitBytes:f.runtime.resources(1).workspaceBytes});
+  assert.equal((await f.runtime.inspectUser(1)).State.Running,true);
+});

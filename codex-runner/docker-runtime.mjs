@@ -311,11 +311,14 @@ export class DockerRuntime {
     throw workspaceError('Environment storage could not be measured', 'storage_unavailable', 503);
   }
   diskUsage(id) { return this.userDiskUsage(this.owner(id)); }
-  enforceDiskLimit(id) { return this.enforceUserDiskLimit(this.owner(id)); }
-  async enforceUserDiskLimit(ownerId) {
+  enforceDiskLimit(id, options) { return this.enforceUserDiskLimit(this.owner(id), options); }
+  async enforceUserDiskLimit(ownerId, { stop = true } = {}) {
     const usage = await this.userDiskUsage(ownerId);
-    try { await this.checkDisk(); } catch (error) { await this.stopUser(ownerId); throw error; }
-    if (usage.bytes > usage.limit) { await this.stopUser(ownerId); throw workspaceError('User environment exceeded its shared storage limit and has been stopped', 'workspace_storage_limit', 507); }
+    try { await this.checkDisk(); } catch (error) { if (stop) await this.stopUser(ownerId); throw error; }
+    if (usage.bytes > usage.limit) {
+      if (stop) await this.stopUser(ownerId);
+      throw Object.assign(workspaceError(`用户环境磁盘用量 ${Math.ceil(usage.bytes / 1024 ** 2)} MB 超过上限 ${Math.floor(usage.limit / 1024 ** 2)} MB，请调整磁盘额度或整理文件后重试。`, 'workspace_storage_limit', 507), { usedBytes: usage.bytes, limitBytes: usage.limit });
+    }
     return usage;
   }
   async dockerStop(name) { const result = await this.command('docker', ['stop', '--time', '10', name], { timeoutMs: 20_000, maxBytes: 128 * 1024 }); if (result.code) throw workspaceError('User environment could not be stopped', 'runtime_stop_failed', 503); }

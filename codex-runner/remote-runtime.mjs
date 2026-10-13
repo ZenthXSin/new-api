@@ -203,7 +203,7 @@ export class HybridRuntime {
   clone(id, repository) { return this.backend(id).clone(id, repository); }
   spawnAppServer(id, options) { return this.backend(id).spawnAppServer(id, options); }
   stopAppServer(id, options) { return this.backend(id).stopAppServer(id, options); }
-  enforceUserDiskLimit(ownerId) { return this.local.enforceUserDiskLimit(ownerId); }
+  enforceUserDiskLimit(ownerId, options) { return this.local.enforceUserDiskLimit(ownerId, options); }
   setGitHubCredential(ownerId, credential) { this.local.setGitHubCredential?.(ownerId, credential); this.remote.setGitHubCredential(ownerId, credential); this.host?.setGitHubCredential(ownerId, credential); }
 }
 

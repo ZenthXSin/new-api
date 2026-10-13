@@ -306,9 +306,12 @@ export class WorkspaceManager {
     });
   }
 
-  async stopOwnerEnvironment(ownerId) {
+  async stopOwnerEnvironment(ownerId, { dockerOnly = false } = {}) {
     const ids = new Set([...this.sessions.keys(), ...this.sessionClosures.keys(), ...this.pendingSessionCleanup]);
-    const owned = [...ids].filter((id) => this.store.states.get(sessionProjectId(id))?.workspace.ownerId === ownerId);
+    const owned = [...ids].filter((id) => {
+      const workspace = this.store.states.get(sessionProjectId(id))?.workspace;
+      return workspace?.ownerId === ownerId && (!dockerOnly || (!workspace.remote && !workspace.host));
+    });
     // Stopping the whole user environment is also the recovery path for a
     // failed per-project cleanup. Wait for all attempts, then stop the container.
     await Promise.allSettled(owned.map((id) => this.stopSession(id)));
@@ -1108,27 +1111,34 @@ export class WorkspaceManager {
         const dockerRunning = !diskProject && (await this.runtime.environment(ownerId)).status === 'running';
         if ((diskProject || dockerRunning) && (this.runtime.enforceUserDiskLimit || this.runtime.enforceDiskLimit)) {
           try {
-            if (this.runtime.enforceUserDiskLimit) await this.runtime.enforceUserDiskLimit(ownerId);
-            else await this.runtime.enforceDiskLimit(diskProject.workspace.id);
+            if (this.runtime.enforceUserDiskLimit) await this.runtime.enforceUserDiskLimit(ownerId, { stop: false });
+            else await this.runtime.enforceDiskLimit(diskProject.workspace.id, { stop: false });
           }
           catch (error) {
-            for (const entry of this.ownerWorkspaces(ownerId)) {
-              for (const queued of entry.queuedTurns || []) { queued.status = 'paused'; queued.error = this.sanitize(error.message || 'Queued message could not start. Resume the queue to retry.'); }
-              if (entry.queuedTurns?.length) { this.store.record(entry, 'workbench/queue/updated', {}); await this.store.persist(entry); }
+            let message = '用户环境存储超限或空间不足，环境已停止。请整理项目文件后重试。';
+            if (error.code === 'workspace_storage_limit' && Number.isFinite(error.usedBytes) && Number.isFinite(error.limitBytes)) {
+              message = `用户环境磁盘用量 ${Math.ceil(error.usedBytes / 1024 ** 2)} MB 超过上限 ${Math.floor(error.limitBytes / 1024 ** 2)} MB，环境已停止。请调整磁盘额度或整理文件后重试。`;
+            } else if (error.code === 'storage_unavailable') {
+              message = '用户环境磁盘用量暂时无法检查，环境已停止。请检查目录权限后重试。';
             }
-            await this.stopOwnerEnvironment(ownerId).catch(() => {});
-            const message = '用户环境存储超限或空间不足，环境已停止。请整理项目文件后重试。';
-            this.environmentErrors.set(ownerId, message);
-            for (const entry of this.ownerWorkspaces(ownerId).filter((entry) => ACTIVE_STATUSES.has(entry.workspace.status))) {
+            const affected = this.ownerWorkspaces(ownerId).filter((entry) => !entry.workspace.remote && !entry.workspace.host);
+            // Save the reason before stopping any process, whose exit callback
+            // must not replace this diagnostic with a generic exit code.
+            for (const entry of affected) {
+              for (const queued of entry.queuedTurns || []) { queued.status = 'paused'; queued.error = this.sanitize(message); }
+              if (entry.queuedTurns?.length) { this.store.record(entry, 'workbench/queue/updated', {}); await this.store.persist(entry); }
+              if (!ACTIVE_STATUSES.has(entry.workspace.status)) continue;
               const turn = entry.thread?.turns?.find((value) => value.id === entry.workspace.activeTurnId);
               if (turn) turn.status = 'failed';
               entry.workspace.status = 'error';
               entry.workspace.activeTurnId = null;
               entry.pendingApprovals = [];
-              entry.workspace.lastError = this.sanitize(error.message);
+              entry.workspace.lastError = this.sanitize(message);
               this.store.record(entry, 'workbench/error', { code: error.code, message: entry.workspace.lastError });
               await this.store.persist(entry);
             }
+            await this.stopOwnerEnvironment(ownerId, { dockerOnly: true }).catch(() => {});
+            this.environmentErrors.set(ownerId, message);
           }
         }
         if (this.runningOwners.has(ownerId) && !this.activeWorkspace(ownerId) && Date.now() - this.runningOwners.get(ownerId) > (this.policy(ownerId).idleSeconds || this.config.idleSeconds) * 1000) await this.stopOwnerEnvironment(ownerId);

@@ -1136,18 +1136,43 @@ test('a new project and conversation can be created while other tasks are active
  assert.equal((await f.manager.environment(1)).environment.activeTasks.length,3);
 });
 
-test('storage exhaustion settles every parallel conversation without leaving ghost active tasks', async (t) => {
+test('storage exhaustion preserves its diagnostic for every parallel conversation before stopping processes', async (t) => {
  const f=await fixture(t,{maxActive:4});const id=await newWorkspace(f);
  const second=(await f.manager.createConversation(1,id,{name:'Second'})).conversationId;
  await f.manager.turn(1,id,turnInput(),null,id);await f.manager.turn(1,id,turnInput(),null,second);
- f.runtime.enforceUserDiskLimit=async()=>{throw Object.assign(new Error('Storage limit'),{code:'disk_limit'});};
+ f.runtime.enforceUserDiskLimit=async(owner,options)=>{
+  assert.deepEqual(options,{stop:false});
+  throw Object.assign(new Error('Storage limit'),{code:'workspace_storage_limit',usedBytes:10284*1024**2,limitBytes:10240*1024**2});
+ };
  await f.manager.reapIdle();
  for (const cid of [id,second]) {
   const state=f.store.detail(f.store.get(1,id,cid));
   assert.equal(state.workspace.status,'error');assert.equal(state.workspace.activeTurnId,null);
   assert.equal(state.thread.turns[0].status,'failed');
+  assert.match(state.workspace.lastError,/10284 MB.*10240 MB/);
+  assert.notEqual(state.workspace.lastError,'Codex process stopped (0)');
  }
  assert.equal((await f.manager.environment(1)).environment.activeTasks.length,0);
+});
+
+test('Docker storage exhaustion leaves a parallel host task running', async (t) => {
+ const f=await fixture(t,{maxActive:4});const id=await newWorkspace(f);
+ f.runtime.host={};
+ const policy={userId:1,enabled:true,allowDocker:true,allowSSH:true,allowHost:true,cpuPercent:0,memoryMB:0,diskMB:0,maxProjects:0,idleSeconds:0};
+ f.manager.acceptPolicy(1,Buffer.from(JSON.stringify(policy)).toString('base64url'));
+ const host=(await f.manager.create(1,{name:'Host task',host:{path:'/tmp/admin-project'}})).workspace.id;
+ await f.manager.turn(1,id,turnInput());await f.manager.turn(1,host,{...turnInput(),mode:'full-access'});
+ // The Docker backend only stops its container; host processes are independent.
+ f.runtime.stopUser=async(owner)=>{
+  f.runtime.stops.push(owner);
+  f.runtime.environments.set(owner,{...(await f.runtime.environment(owner)),status:'stopped'});
+  f.runtime.children.get(id)?.kill();
+ };
+ f.runtime.enforceUserDiskLimit=async()=>{throw Object.assign(new Error('Storage limit'),{code:'workspace_storage_limit'});};
+ await f.manager.reapIdle();
+ assert.equal(f.store.get(1,host).workspace.status,'running');
+ assert.notEqual(f.runtime.children.get(host).killed,true);
+ assert.equal(f.store.get(1,id).workspace.status,'error');
 });
 
 test('host projects require administrator policy, bypass Docker and reject access after role loss', async (t) => {
