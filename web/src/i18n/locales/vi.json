@@ -7265,5 +7265,17 @@
     "Refresh repositories": "Làm mới kho",
     "To access all your repositories, install this GitHub App on your account and choose All repositories.": "Để truy cập tất cả kho của bạn, hãy cài GitHub App này vào tài khoản và chọn All repositories.",
     "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes.": "Không thể theo dõi thay đổi trong thư mục chính của máy chủ. Hãy chọn thư mục dự án để xem khác biệt giữa các tệp."
-  }
+  },
+  "Automatic intelligence check": "Tự động kiểm tra suy giảm",
+  "Uses the fixed question and Test Model at the channel testing interval. Results only reflect this question.": "Gửi riêng câu hỏi cố định đến mô hình kiểm tra theo chu kỳ kiểm tra kênh. Kết quả chỉ phản ánh câu trả lời này.",
+  "Automatically disable degraded channels": "Tự động tắt khi suy giảm",
+  "Only an explicit degraded answer disables the tested channel or key. Errors and inconclusive replies do not disable it.": "Chỉ câu trả lời xác nhận suy giảm mới tắt kênh hoặc khóa được kiểm tra. Lỗi yêu cầu và kết quả không xác định không làm tắt kênh.",
+  "Run intelligence check": "Kiểm tra ngay",
+  "Save the channel before running an intelligence check.": "Lưu kênh trước khi chạy kiểm tra.",
+  "Intelligence check passed": "Không suy giảm",
+  "Intelligence degraded": "Suy giảm",
+  "Intelligence check inconclusive": "Không xác định",
+  "Intelligence check request failed": "Yêu cầu kiểm tra thất bại",
+  "Automatically disabled by intelligence check": "Đã tự động tắt theo kết quả kiểm tra",
+  "Start parallel task": "Chạy tác vụ song song"
 }

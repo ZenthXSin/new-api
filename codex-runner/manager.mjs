@@ -368,7 +368,7 @@ export class WorkspaceManager {
       defaultModel: this.config.defaultModel,
       efforts: this.config.efforts,
       defaultEffort: this.config.defaultEffort,
-      limits: { maxActive: this.config.maxActive, maxWorkspaces: this.config.maxWorkspaces, uploadBytes: 25 * 1024 * 1024, fileBytes: 1024 * 1024 },
+      limits: { maxActive: this.config.maxActive, maxActiveTasks: this.config.maxActiveTasks ?? this.config.maxActive, maxWorkspaces: this.config.maxWorkspaces, uploadBytes: 25 * 1024 * 1024, fileBytes: 1024 * 1024 },
       capabilities: { ssh: Boolean(this.runtime.remote), gitImport: true, zipImport: true, files: true, diff: true, approvals: true, userEnvironment: true },
     };
   }
@@ -807,7 +807,7 @@ export class WorkspaceManager {
       if (state.conversation.archived) throw apiError(409, 'conversation_archived', 'Restore the conversation before starting a task');
       if (Object.keys(state.requests).length >= 10_000) throw apiError(409, 'turn_limit', 'This workspace has reached its task history limit; create another workspace');
       const active = this.store.allStates().filter((entry) => ACTIVE_STATUSES.has(entry.workspace.status)).length;
-      if (active >= this.config.maxActive) throw apiError(429, 'active_limit', 'Too many active Codex tasks; wait for a task to finish');
+      if (active >= (this.config.maxActiveTasks ?? this.config.maxActive)) throw apiError(429, 'active_limit', 'Too many active Codex tasks; wait for a task to finish');
       state.workspace.model = input.model;
       state.workspace.group = input.group;
       if (authorization) {

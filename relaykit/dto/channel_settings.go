@@ -74,6 +74,8 @@ const (
 )
 
 type ChannelOtherSettings struct {
+	IntelligenceCheckEnabled              bool          `json:"intelligence_check_enabled,omitempty"`
+	IntelligenceCheckAutoDisable          bool          `json:"intelligence_check_auto_disable,omitempty"`
 	AzureResponsesVersion                 string        `json:"azure_responses_version,omitempty"`
 	VertexKeyType                         VertexKeyType `json:"vertex_key_type,omitempty"` // "json" or "api_key"
 	OpenRouterEnterprise                  *bool         `json:"openrouter_enterprise,omitempty"`

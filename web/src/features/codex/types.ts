@@ -119,6 +119,7 @@ export interface CodexStatus {
   efforts: string[]
   limits: {
     maxActive: number
+    maxActiveTasks?: number
     maxWorkspaces: number
     uploadBytes: number
     fileBytes: number
@@ -208,7 +209,11 @@ export interface CodexItem {
   status?: string
   aggregatedOutput?: string
   exitCode?: number | null
-  changes?: { path: string; kind?: { type?: string } | string; diff?: string }[]
+  changes?: {
+    path: string
+    kind?: { type?: string } | string
+    diff?: string
+  }[]
   [key: string]: unknown
 }
 export interface CodexTurn {

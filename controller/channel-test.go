@@ -38,9 +38,12 @@ import (
 )
 
 type testResult struct {
-	context     *gin.Context
-	localErr    error
-	newAPIError *types.NewAPIError
+	context           *gin.Context
+	localErr          error
+	newAPIError       *types.NewAPIError
+	responseBody      []byte
+	modelName         string
+	intelligenceCheck *model.ChannelIntelligenceCheck
 }
 
 func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointType string) string {
@@ -74,7 +77,7 @@ func resolveChannelTestUserID(c *gin.Context) (int, error) {
 	return rootUser.Id, nil
 }
 
-func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) testResult {
+func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool, intelligenceCheck ...bool) testResult {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -239,6 +242,12 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	}
 
 	request := buildTestRequest(testModel, endpointType, channel, isStream)
+	if len(intelligenceCheck) > 0 && intelligenceCheck[0] {
+		request, err = buildIntelligenceCheckRequest(request)
+		if err != nil {
+			return testResult{context: c, localErr: err}
+		}
+	}
 
 	info, err := relaycommon.GenRelayInfo(c, relayFormat, request, nil)
 
@@ -252,6 +261,13 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 
 	info.IsChannelTest = true
 	info.InitChannelMeta(c)
+	if len(intelligenceCheck) > 0 && intelligenceCheck[0] {
+		// A diagnostic must contain only its fixed question, without injected
+		// channel prompts, tools or prior conversation parameters.
+		info.ParamOverride = nil
+		info.ChannelSetting.SystemPrompt = ""
+		info.ChannelSetting.SystemPromptOverride = false
+	}
 
 	err = attachTestBillingRequestInput(info, request)
 	if err != nil {
@@ -521,9 +537,11 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	})
 	common.SysLog(fmt.Sprintf("testing channel #%d, response: \n%s", channel.Id, string(respBody)))
 	return testResult{
-		context:     c,
-		localErr:    nil,
-		newAPIError: nil,
+		context:      c,
+		localErr:     nil,
+		newAPIError:  nil,
+		responseBody: respBody,
+		modelName:    info.OriginModelName,
 	}
 }
 
@@ -605,7 +623,7 @@ func coerceTestUsage(usageAny any, isStream bool, estimatePromptTokens int) (*dt
 
 func readTestResponseBody(body io.ReadCloser, isStream bool) ([]byte, error) {
 	defer func() { _ = body.Close() }()
-	const maxStreamLogBytes = 8 << 10
+	const maxStreamLogBytes = 1 << 20
 	if isStream {
 		return io.ReadAll(io.LimitReader(body, maxStreamLogBytes))
 	}
@@ -890,7 +908,12 @@ func TestChannel(c *gin.Context) {
 	if c.Request != nil {
 		requestCtx = c.Request.Context()
 	}
-	result := testChannel(requestCtx, channel, testUserID, testModel, endpointType, isStream)
+	var result testResult
+	if c.Query("intelligence") == "true" {
+		result = testChannelIntelligence(requestCtx, channel, testUserID, testModel, endpointType, isStream, true)
+	} else {
+		result = testChannel(requestCtx, channel, testUserID, testModel, endpointType, isStream)
+	}
 	if _, delegated := middleware.GetOAuthPrincipal(c); delegated && (result.localErr != nil || result.newAPIError != nil) {
 		// Parameter overrides can control both error text and error codes.
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "渠道测试失败，请在本站查看渠道诊断", "error_code": "channel_operation_failed", "time": time.Since(tik).Seconds()})
@@ -898,9 +921,10 @@ func TestChannel(c *gin.Context) {
 	}
 	if result.localErr != nil {
 		resp := gin.H{
-			"success": false,
-			"message": result.localErr.Error(),
-			"time":    0.0,
+			"success":            false,
+			"message":            result.localErr.Error(),
+			"time":               0.0,
+			"intelligence_check": result.intelligenceCheck,
 		}
 		if result.newAPIError != nil {
 			resp["error_code"] = result.newAPIError.GetErrorCode()
@@ -922,9 +946,10 @@ func TestChannel(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"time":    consumedTime,
+		"success":            true,
+		"message":            "",
+		"time":               consumedTime,
+		"intelligence_check": result.intelligenceCheck,
 	})
 }
 
@@ -939,6 +964,9 @@ type channelTestSummary struct {
 }
 
 func testChannelForHealthCheck(ctx context.Context, channel *model.Channel, testUserID int, allowDisable bool, disableThreshold int64) channelTestSummary {
+	if channel.GetOtherSettings().IntelligenceCheckEnabled {
+		return checkChannelIntelligenceHealth(ctx, channel, testUserID, allowDisable)
+	}
 	summary := channelTestSummary{}
 	isChannelEnabled := channel.Status == common.ChannelStatusEnabled
 	tik := time.Now()
@@ -1117,7 +1145,11 @@ func runChannelTestTask(ctx context.Context, mode string, notify bool, report fu
 		return channelTestSummary{}, err
 	}
 	if strings.TrimSpace(mode) == "" {
-		mode = operation_setting.GetMonitorSetting().ChannelTestMode
+		monitor := operation_setting.GetMonitorSetting()
+		mode = monitor.ChannelTestMode
+		if !monitor.AutoTestChannelEnabled {
+			mode = "intelligence_only"
+		}
 	}
 	selected := selectChannelsForAutomaticTest(channels, mode)
 	allowDisable := mode != operation_setting.ChannelTestModePassiveRecovery
@@ -1135,7 +1167,11 @@ func selectChannelsForAutomaticTest(channels []*model.Channel, mode string) []*m
 		if channel.Status == common.ChannelStatusManuallyDisabled {
 			continue
 		}
-		if mode == operation_setting.ChannelTestModeAutoBanOnly && !channel.GetAutoBan() {
+		intelligenceEnabled := channel.GetOtherSettings().IntelligenceCheckEnabled
+		if mode == "intelligence_only" && !intelligenceEnabled {
+			continue
+		}
+		if mode == operation_setting.ChannelTestModeAutoBanOnly && !channel.GetAutoBan() && !intelligenceEnabled {
 			continue
 		}
 		if mode == operation_setting.ChannelTestModePassiveRecovery && channel.Status != common.ChannelStatusAutoDisabled {

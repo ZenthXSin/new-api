@@ -7265,5 +7265,17 @@
     "Refresh repositories": "Actualiser les dépôts",
     "To access all your repositories, install this GitHub App on your account and choose All repositories.": "Pour accéder à tous vos dépôts, installez cette GitHub App sur votre compte et choisissez All repositories.",
     "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes.": "Le suivi des modifications n’est pas disponible pour le répertoire personnel de l’hôte. Choisissez un répertoire de projet pour voir les différences entre les fichiers."
-  }
+  },
+  "Automatic intelligence check": "Détection automatique de dégradation",
+  "Uses the fixed question and Test Model at the channel testing interval. Results only reflect this question.": "Envoie la question fixe au modèle de test selon la fréquence des tests de canal. Le résultat reflète uniquement cette réponse.",
+  "Automatically disable degraded channels": "Désactiver automatiquement en cas de dégradation",
+  "Only an explicit degraded answer disables the tested channel or key. Errors and inconclusive replies do not disable it.": "Seule une réponse explicitement dégradée désactive le canal ou la clé testée. Les erreurs et résultats indéterminés ne le désactivent pas.",
+  "Run intelligence check": "Lancer la détection",
+  "Save the channel before running an intelligence check.": "Enregistrez le canal avant de lancer la détection.",
+  "Intelligence check passed": "Sans dégradation",
+  "Intelligence degraded": "Dégradé",
+  "Intelligence check inconclusive": "Indéterminé",
+  "Intelligence check request failed": "Échec de la détection",
+  "Automatically disabled by intelligence check": "Désactivé automatiquement après détection",
+  "Start parallel task": "Lancer une tâche parallèle"
 }

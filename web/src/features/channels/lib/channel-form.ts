@@ -303,6 +303,8 @@ export const channelFormSchema = z
     allow_speed: z.boolean().optional(), // Anthropic: speed mode control
     claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
     disable_task_polling_sleep: z.boolean().optional(),
+    intelligence_check_enabled: z.boolean().optional(),
+    intelligence_check_auto_disable: z.boolean().optional(),
     text_polling_enabled: z.boolean().optional(),
     text_polling_timeout_tier1_seconds: textPollingTimeoutSchema,
     text_polling_timeout_tier2_seconds: textPollingTimeoutSchema,
@@ -502,6 +504,8 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_speed: false,
   claude_beta_query: false,
   disable_task_polling_sleep: false,
+  intelligence_check_enabled: false,
+  intelligence_check_auto_disable: false,
   text_polling_enabled: false,
   text_polling_timeout_tier1_seconds: TEXT_POLLING_TIMEOUT_DEFAULTS[0],
   text_polling_timeout_tier2_seconds: TEXT_POLLING_TIMEOUT_DEFAULTS[1],
@@ -570,6 +574,8 @@ export function transformChannelToFormDefaults(
   let allowSpeed = false
   let claudeBetaQuery = false
   let disableTaskPollingSleep = false
+  let intelligenceCheckEnabled = false
+  let intelligenceCheckAutoDisable = false
   let textPollingEnabled = false
   let textPollingTimeoutTier1Seconds = TEXT_POLLING_TIMEOUT_DEFAULTS[0]
   let textPollingTimeoutTier2Seconds = TEXT_POLLING_TIMEOUT_DEFAULTS[1]
@@ -594,6 +600,9 @@ export function transformChannelToFormDefaults(
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
       disableTaskPollingSleep = parsed.disable_task_polling_sleep === true
+      intelligenceCheckEnabled = parsed.intelligence_check_enabled === true
+      intelligenceCheckAutoDisable =
+        parsed.intelligence_check_auto_disable === true
       textPollingEnabled = parsed.text_polling_enabled === true
       textPollingTimeoutTier1Seconds =
         parsed.text_polling_timeout_tier1_seconds ||
@@ -664,6 +673,8 @@ export function transformChannelToFormDefaults(
     allow_speed: allowSpeed,
     claude_beta_query: claudeBetaQuery,
     disable_task_polling_sleep: disableTaskPollingSleep,
+    intelligence_check_enabled: intelligenceCheckEnabled,
+    intelligence_check_auto_disable: intelligenceCheckAutoDisable,
     text_polling_enabled: textPollingEnabled,
     text_polling_timeout_tier1_seconds: textPollingTimeoutTier1Seconds,
     text_polling_timeout_tier2_seconds: textPollingTimeoutTier2Seconds,
@@ -801,6 +812,11 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
 
   settingsObj.disable_task_polling_sleep =
     formData.disable_task_polling_sleep === true
+  settingsObj.intelligence_check_enabled =
+    formData.intelligence_check_enabled === true
+  settingsObj.intelligence_check_auto_disable =
+    settingsObj.intelligence_check_enabled &&
+    formData.intelligence_check_auto_disable === true
   settingsObj.text_polling_enabled = formData.text_polling_enabled === true
   settingsObj.text_polling_timeout_tier1_seconds =
     formData.text_polling_timeout_tier1_seconds

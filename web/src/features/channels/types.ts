@@ -73,6 +73,7 @@ export const channelSchema = z.object({
     multi_key_polling_index: 0,
     multi_key_mode: 'random',
   }),
+  intelligence_check: z.string().optional(),
   settings: z.string().default('{}'), // other_settings JSON
 })
 
@@ -93,7 +94,17 @@ export interface ChannelSettings {
   http2_connection_shards?: number
 }
 
+export interface ChannelIntelligenceCheck {
+  status: 'passed' | 'degraded' | 'inconclusive' | 'error'
+  model: string
+  response: string
+  checked_at: number
+  auto_disabled: boolean
+}
+
 export interface ChannelOtherSettings {
+  intelligence_check_enabled?: boolean
+  intelligence_check_auto_disable?: boolean
   azure_responses_version?: string
   vertex_key_type?: 'json' | 'api_key'
   openrouter_enterprise?: boolean
@@ -189,6 +200,7 @@ export interface ChannelOpsResponse {
 }
 
 export interface ChannelTestResponse {
+  intelligence_check?: ChannelIntelligenceCheck | null
   success: boolean
   message?: string
   error_code?: string

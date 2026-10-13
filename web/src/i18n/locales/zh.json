@@ -7265,5 +7265,17 @@
     "Refresh repositories": "刷新仓库",
     "To access all your repositories, install this GitHub App on your account and choose All repositories.": "要访问你的全部仓库，请将此 GitHub App 安装到你的账号，并选择 All repositories（全部仓库）。",
     "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes.": "主机主目录不提供变更追踪。请选择具体项目目录以查看文件差异。"
-  }
+  },
+  "Automatic intelligence check": "自动检测降智",
+  "Uses the fixed question and Test Model at the channel testing interval. Results only reflect this question.": "按渠道检测间隔，用测试模型独立回答固定题目。结果仅反映此题的回复。",
+  "Automatically disable degraded channels": "降智时自动停用",
+  "Only an explicit degraded answer disables the tested channel or key. Errors and inconclusive replies do not disable it.": "仅明确回答“降智”才停用本次检测的渠道或密钥；请求失败和无法判定不会触发停用。",
+  "Run intelligence check": "立即检测降智",
+  "Save the channel before running an intelligence check.": "保存渠道后即可立即检测。",
+  "Intelligence check passed": "不降智",
+  "Intelligence degraded": "降智",
+  "Intelligence check inconclusive": "无法判定",
+  "Intelligence check request failed": "检测请求失败",
+  "Automatically disabled by intelligence check": "已因降智检测自动停用",
+  "Start parallel task": "并行新任务"
 }

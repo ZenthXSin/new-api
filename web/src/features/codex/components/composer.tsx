@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   ArrowUp,
   CornerUpLeft,
+  GitBranch,
   LoaderCircle,
   Paperclip,
   Plus,
@@ -76,6 +77,7 @@ type ComposerProps = {
   onEffort: (effort: string) => void
   onMode: (mode: CodexMode) => void
   onSubmit: (input: CodexTurnInput) => Promise<void>
+  onParallel?: (input: CodexTurnInput) => Promise<void>
   onStop?: () => void | Promise<void>
   running?: boolean
   busy?: boolean
@@ -191,7 +193,9 @@ export function CodexComposer(props: ComposerProps) {
       setStopping(false)
     }
   }
-  async function submit(busyAction: 'queue' | 'interrupt' = 'queue') {
+  async function submit(
+    busyAction: 'queue' | 'interrupt' | 'parallel' = 'queue'
+  ) {
     if (!enabled || locked.current) return
     locked.current = true
     restoreFocus.current = document.activeElement === textarea.current
@@ -203,6 +207,7 @@ export function CodexComposer(props: ComposerProps) {
       props.effort,
       props.mode,
       props.group,
+      busy ? busyAction : 'send',
       ...(props.uploadedFiles?.length ? [props.uploadedFiles] : []),
     ])
     if (retry.current?.signature !== signature) {
@@ -212,15 +217,20 @@ export function CodexComposer(props: ComposerProps) {
     const submittedScope = draftScope.current
     const submittedRequestId = retry.current.id
     try {
-      await props.onSubmit({
+      const input: CodexTurnInput = {
         prompt: draft.trim(),
         requestId: retry.current.id,
         model: props.model,
         group: props.group,
         effort: props.effort,
         mode: props.mode,
-        ...(busy ? { busyAction } : {}),
-      })
+        ...(busy && busyAction !== 'parallel' ? { busyAction } : {}),
+      }
+      if (busyAction === 'parallel' && props.onParallel) {
+        await props.onParallel(input)
+      } else {
+        await props.onSubmit(input)
+      }
       if (draftScope.current === submittedScope) {
         setDraft((current) => (current === draft ? '' : current))
         if (retry.current?.id === submittedRequestId) retry.current = null
@@ -410,6 +420,20 @@ export function CodexComposer(props: ComposerProps) {
   )
   const sendControls = (
     <>
+      {busy && hasDraft && props.onParallel && (
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon-md'
+          className='size-11 rounded-full sm:size-9'
+          aria-label={t('Start parallel task')}
+          title={t('Start parallel task')}
+          disabled={!enabled || stopping || props.finishing}
+          onClick={() => void submit('parallel')}
+        >
+          <GitBranch className='size-4' aria-hidden />
+        </Button>
+      )}
       {busy && hasDraft && (
         <Button
           type='button'

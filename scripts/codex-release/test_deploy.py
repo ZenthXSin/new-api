@@ -83,10 +83,11 @@ class DeploymentTransactionTests(unittest.TestCase):
             deploy.apply(self.bundle)
 
     def test_reasoning_and_parallel_capacity_are_applied_and_rolled_back_with_the_release(self):
-        self.manifest['runner_environment'] = {'CODEX_EFFORTS': 'low,medium,high,xhigh,max,ultra', 'CODEX_MAX_ACTIVE': '8', 'CODEX_WORKER_MEMORY_MB': '799'}
+        self.manifest['runner_environment'] = {'CODEX_EFFORTS': 'low,medium,high,xhigh,max,ultra', 'CODEX_MAX_ACTIVE': '8', 'CODEX_MAX_ACTIVE_TASKS': '16', 'CODEX_WORKER_MEMORY_MB': '799'}
         self.apply()
         environment = (self.bundle / 'transaction/worker.env').read_text()
         self.assertIn('CODEX_MAX_ACTIVE=8\n', environment)
+        self.assertIn('CODEX_MAX_ACTIVE_TASKS=16\n', environment)
         self.assertIn('CODEX_WORKER_MEMORY_MB=799\n', environment)
         self.assertIn('CODEX_EFFORTS=low,medium,high,xhigh,max,ultra\n', environment)
         with contextlib.redirect_stdout(io.StringIO()):
@@ -227,6 +228,15 @@ class ReleaseConfigurationTests(unittest.TestCase):
             with self.subTest(value=value):
                 manifest = self.validate({'CODEX_WORKER_MEMORY_MB': value})
                 self.assertEqual(manifest['runner_environment']['CODEX_WORKER_MEMORY_MB'], value)
+
+    def test_task_capacity_is_validated_independently_of_environment_capacity(self):
+        for value in ['1', '8', '64']:
+            with self.subTest(value=value):
+                manifest = self.validate({'CODEX_MAX_ACTIVE_TASKS': value})
+                self.assertEqual(manifest['runner_environment']['CODEX_MAX_ACTIVE_TASKS'], value)
+        for value in ['0', '65', '2.5', 'NaN', '', 8, '8\nCODEX_MAX_ACTIVE=99']:
+            with self.subTest(value=value), self.assertRaisesRegex(RuntimeError, 'Unsupported runner environment override'):
+                self.validate({'CODEX_MAX_ACTIVE_TASKS': value})
 
     def test_invalid_memory_and_percentage_overrides_are_rejected_before_deployment(self):
         for value in ['0', '255', '1048577', '256.5', 'NaN', '', 799, '799\nCODEX_MAX_ACTIVE=99']:

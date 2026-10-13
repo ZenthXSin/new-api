@@ -178,6 +178,7 @@ import {
   collectNewDisallowedStatusCodeRedirects,
 } from '../../lib/status-code-risk-guard'
 import type { Channel } from '../../types'
+import { ChannelIntelligenceSettings } from '../channel-intelligence-settings'
 import { useChannels } from '../channels-provider'
 import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
 import { FetchModelsDialog } from '../dialogs/fetch-models-dialog'
@@ -303,6 +304,8 @@ const SENSITIVE_FORM_FIELDS = [
   'allow_speed',
   'claude_beta_query',
   'disable_task_polling_sleep',
+  'intelligence_check_enabled',
+  'intelligence_check_auto_disable',
   'text_polling_enabled',
   'text_polling_timeout_tier1_seconds',
   'text_polling_timeout_tier2_seconds',
@@ -3796,6 +3799,8 @@ export function ChannelMutateDrawer({
                                 </FormItem>
                               )}
                             />
+
+                            <ChannelIntelligenceSettings channel={currentRow} />
 
                             <FormField
                               control={form.control}

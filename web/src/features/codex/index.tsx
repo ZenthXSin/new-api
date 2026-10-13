@@ -667,7 +667,9 @@ function CodexSession(props: CodexProps & { actor: string }) {
     change.error.response?.data?.code === 'environment_workspace_in_use'
   async function create(input: CodexCreateInput) {
     const result = await codexApi.create(input)
-    await client.invalidateQueries({ queryKey: ['codex', props.actor, 'list'] })
+    await client.invalidateQueries({
+      queryKey: ['codex', props.actor, 'list'],
+    })
     void client.invalidateQueries({
       queryKey: ['codex', props.actor, 'environment'],
     })
@@ -768,6 +770,64 @@ function CodexSession(props: CodexProps & { actor: string }) {
     } catch (error) {
       if (currentActor()) toast.error(t(codexError(error)))
     }
+  }
+  const parallelRequests = useRef(
+    new Map<string, ReturnType<typeof codexApi.createConversation>>()
+  )
+  async function submitParallel(input: CodexTurnInput) {
+    if (
+      !currentActor() ||
+      currentSelection.current !== selectionKey ||
+      !props.workspaceId
+    ) {
+      throw new Error(
+        t(
+          'The session or project changed. Please open the project to continue.'
+        )
+      )
+    }
+    const key = `${props.actor}:${input.requestId}`
+    let creating = parallelRequests.current.get(key)
+    if (!creating) {
+      creating = codexApi.createConversation(props.workspaceId)
+      parallelRequests.current.set(key, creating)
+      void creating.catch(() => {
+        if (parallelRequests.current.get(key) === creating) {
+          parallelRequests.current.delete(key)
+        }
+      })
+    }
+    const target = await creating
+    if (!currentActor() || currentSelection.current !== selectionKey) {
+      throw new Error(
+        t(
+          'The session or project changed. Please open the project to continue.'
+        )
+      )
+    }
+    await codexApi.turn(target.workspace.id, input, target.conversationId)
+    parallelRequests.current.delete(key)
+    await client.invalidateQueries({ queryKey: ['codex', props.actor] })
+    if (currentActor() && currentSelection.current === selectionKey) {
+      props.onSelect(target.workspace.id, target.conversationId)
+    }
+  }
+  async function submitWithAttachments(
+    input: CodexTurnInput,
+    parallel = false
+  ) {
+    const paths = attachments.uploadedFiles
+    const prompt = paths.length
+      ? `${input.prompt}\n\nUploaded project files:\n${paths.map((path) => `- ${JSON.stringify(path)}`).join('\n')}`
+      : input.prompt
+    if (prompt.length > 100_000) {
+      throw new Error(
+        t('The message and file references exceed the task limit.')
+      )
+    }
+    if (parallel) await submitParallel({ ...input, prompt })
+    else await submit({ ...input, prompt })
+    attachments.clearSubmitted(paths)
   }
   async function submit(input: CodexTurnInput) {
     if (!currentActor() || currentSelection.current !== selectionKey) {
@@ -1114,19 +1174,12 @@ function CodexSession(props: CodexProps & { actor: string }) {
       onModel={chooseModel}
       onEffort={chooseEffort}
       onMode={chooseMode}
-      onSubmit={async (input) => {
-        const paths = attachments.uploadedFiles
-        const prompt = paths.length
-          ? `${input.prompt}\n\nUploaded project files:\n${paths.map((path) => `- ${JSON.stringify(path)}`).join('\n')}`
-          : input.prompt
-        if (prompt.length > 100_000) {
-          throw new Error(
-            t('The message and file references exceed the task limit.')
-          )
-        }
-        await submit({ ...input, prompt })
-        attachments.clearSubmitted(paths)
-      }}
+      onSubmit={submitWithAttachments}
+      onParallel={
+        props.workspaceId
+          ? (input) => submitWithAttachments(input, true)
+          : undefined
+      }
       busy={environmentBusy}
       queuedTurns={detail.data?.queuedTurns}
       onCancelQueued={async (requestId) => {
@@ -1345,7 +1398,11 @@ function CodexSession(props: CodexProps & { actor: string }) {
             props.workspaceId === workspaceId &&
             workspace?.conversationId === conversation.id
           if (!selected || canDiscard()) {
-            setConversationDialog({ type: 'delete', workspaceId, conversation })
+            setConversationDialog({
+              type: 'delete',
+              workspaceId,
+              conversation,
+            })
           }
         }}
         conversationId={workspace?.conversationId}

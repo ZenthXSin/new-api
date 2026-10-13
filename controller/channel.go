@@ -501,6 +501,7 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 	if channel == nil {
 		return fmt.Errorf("channel cannot be empty")
 	}
+	channel.IntelligenceCheck = ""
 	if channel.CostMultiplier == 0 && isAdd {
 		channel.CostMultiplier = model.DefaultChannelCostMultiplier
 	} else if channel.CostMultiplier != 0 && model.NormalizeChannelCostMultiplier(channel.CostMultiplier) == 0 {

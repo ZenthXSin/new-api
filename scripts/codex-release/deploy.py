@@ -117,6 +117,8 @@ def load_release(path):
     for key, value in manifest.get('runner_environment', {}).items():
         if key == 'CODEX_MAX_ACTIVE' and value in [str(i) for i in range(1, 9)]:
             continue
+        if key == 'CODEX_MAX_ACTIVE_TASKS' and value in [str(i) for i in range(1, 65)]:
+            continue
         if key == 'CODEX_EFFORTS' and isinstance(value, str) and value and all(effort in {'low', 'medium', 'high', 'xhigh', 'max', 'ultra'} for effort in value.split(',')):
             continue
         if key == 'CODEX_WORKER_MEMORY_MB' and isinstance(value, str) and re.fullmatch(r'[1-9][0-9]{2,6}', value) and 256 <= int(value) <= 1048576:

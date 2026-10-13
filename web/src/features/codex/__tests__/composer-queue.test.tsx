@@ -265,3 +265,62 @@ test('changing attachments after a failed send creates a new request identity', 
     submit.mock.calls[1][0].requestId
   )
 })
+
+test('parallel task sends the draft through its own action while the current task stays running', async () => {
+  const parallel = vi.fn().mockResolvedValue(undefined)
+  const submit = vi.fn()
+  const stop = vi.fn()
+  render(
+    <CodexComposer
+      {...props}
+      running
+      onSubmit={submit}
+      onParallel={parallel}
+      onStop={stop}
+    />
+  )
+  fireEvent.change(screen.getByRole('textbox'), {
+    target: { value: 'Independent task' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Start parallel task' }))
+  await waitFor(() =>
+    expect(parallel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'Independent task',
+        model: 'codex-test',
+      })
+    )
+  )
+  expect(parallel.mock.calls[0][0]).not.toHaveProperty('busyAction')
+  expect(submit).not.toHaveBeenCalled()
+  expect(stop).not.toHaveBeenCalled()
+  await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue(''))
+  expect(screen.getByRole('button', { name: 'Stop task' })).toBeEnabled()
+})
+
+test('a failed parallel submission keeps its draft and reuses its request identity on retry', async () => {
+  const parallel = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('Connection lost'))
+    .mockResolvedValueOnce(undefined)
+  render(
+    <CodexComposer
+      {...props}
+      running
+      onSubmit={vi.fn()}
+      onParallel={parallel}
+      onStop={vi.fn()}
+    />
+  )
+  fireEvent.change(screen.getByRole('textbox'), {
+    target: { value: 'Keep parallel draft' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Start parallel task' }))
+  await screen.findByRole('alert')
+  expect(screen.getByRole('textbox')).toHaveValue('Keep parallel draft')
+  const first = parallel.mock.calls[0][0]
+  fireEvent.click(screen.getByRole('button', { name: 'Start parallel task' }))
+  await waitFor(() => expect(parallel).toHaveBeenCalledTimes(2))
+  expect(parallel.mock.calls[1][0].requestId).toBe(first.requestId)
+  await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue(''))
+})

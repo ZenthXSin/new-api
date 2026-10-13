@@ -32,6 +32,7 @@ def main():
     parser.add_argument('--api-base-image', default='debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a')
     parser.add_argument('--worker-base-image', help='Optional compatible prebuilt worker image; by default build Dockerfile.workspace')
     parser.add_argument('--max-active', type=int)
+    parser.add_argument('--max-active-tasks', type=int)
     parser.add_argument('--efforts', default='low,medium,high,xhigh,max,ultra')
     parser.add_argument('--memory-mb', type=int)
     args = parser.parse_args()
@@ -42,6 +43,10 @@ def main():
         if args.max_active < 1 or args.max_active > 8:
             parser.error('max-active must be between 1 and 8')
         runner_environment['CODEX_MAX_ACTIVE'] = str(args.max_active)
+    if args.max_active_tasks is not None:
+        if args.max_active_tasks < 1 or args.max_active_tasks > 64:
+            parser.error('max-active-tasks must be between 1 and 64')
+        runner_environment['CODEX_MAX_ACTIVE_TASKS'] = str(args.max_active_tasks)
     if args.memory_mb is not None:
         if args.memory_mb < 256 or args.memory_mb > 1048576:
             parser.error('memory-mb must be between 256 and 1048576')

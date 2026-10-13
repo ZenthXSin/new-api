@@ -35,7 +35,10 @@ type channelTestHandler struct{}
 func (channelTestHandler) Type() string { return model.SystemTaskTypeChannelTest }
 
 func (channelTestHandler) Enabled() bool {
-	return operation_setting.GetMonitorSetting().AutoTestChannelEnabled
+	if operation_setting.GetMonitorSetting().AutoTestChannelEnabled {
+		return true
+	}
+	return model.HasChannelIntelligenceChecks()
 }
 
 func (channelTestHandler) Interval() time.Duration {

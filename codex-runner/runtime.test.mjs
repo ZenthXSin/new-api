@@ -1207,3 +1207,35 @@ test('native account tools stay outside workspace credentials and preserve appro
  assert.equal(calls.length,2);assert.ok(!JSON.stringify(state).includes('unsupported-secret'));
  assert.equal((await context.request(`/workspaces/${id}`)).status,200);
 });
+
+
+test('one environment can run four parallel conversations and cancellation frees only one task slot', async (t) => {
+  const f = await fixture(t, { maxActive: 1, maxActiveTasks: 4 });
+  const id = await newWorkspace(f);
+  const states = [f.store.get(1, id)];
+  for (let i = 0; i < 4; i++) {
+    const created = await f.manager.createConversation(1, id, { name: `Parallel ${i + 1}` });
+    states.push(f.store.get(1, id, created.conversationId));
+  }
+  await Promise.all(states.slice(0, 4).map(state => f.manager.turn(1, id, turnInput(), undefined, state.conversation.id)));
+  assert.equal(f.runtime.turns, 4);
+  assert.equal(states.filter(state => state.workspace.status === 'running').length, 4);
+  await assert.rejects(f.manager.turn(1, id, turnInput(), undefined, states[4].conversation.id), { code: 'active_limit' });
+  await f.manager.interrupt(1, id, states[1].conversation.id);
+  assert.equal(states[0].workspace.status, 'running');
+  assert.equal(states[2].workspace.status, 'running');
+  assert.equal(states[3].workspace.status, 'running');
+  await f.manager.turn(1, id, turnInput(), undefined, states[4].conversation.id);
+  assert.equal(f.runtime.turns, 5);
+  assert.equal(states.filter(state => state.workspace.status === 'running').length, 4);
+});
+
+test('task concurrency has an independent default and rejects invalid configured bounds', async () => {
+  const env = { CODEX_RUNNER_KEY: 'fixture-runner-key-12345678901234567890', CODEX_MAX_ACTIVE: '1' };
+  const config = await loadConfig(env);
+  assert.equal(config.maxActive, 1);
+  assert.equal(config.maxActiveTasks, 8);
+  for (const value of ['0', '65', '2.5']) {
+    await assert.rejects(loadConfig({ ...env, CODEX_MAX_ACTIVE_TASKS: value }), /Invalid maxActiveTasks/);
+  }
+});

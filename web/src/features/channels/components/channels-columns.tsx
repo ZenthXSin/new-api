@@ -77,6 +77,7 @@ import {
 } from '../lib'
 import { parseUpstreamUpdateMeta } from '../lib/upstream-update-utils'
 import type { Channel } from '../types'
+import { ChannelIntelligenceResultBadge } from './channel-intelligence-settings'
 import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
 import { useChannels } from './channels-provider'
 import { DataTableRowActions } from './data-table-row-actions'
@@ -735,6 +736,9 @@ export function useChannelsColumns(
                       </Tooltip>
                     </TooltipProvider>
                   )}
+                  <ChannelIntelligenceResultBadge
+                    value={channel.intelligence_check}
+                  />
                   <UpstreamUpdateTags channel={channel} />
                 </div>
                 {channel.remark && (

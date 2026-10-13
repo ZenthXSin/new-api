@@ -255,7 +255,7 @@ export async function loadConfig(env = process.env) {
     image: env.CODEX_WORKER_IMAGE || 'new-api:codex-user-environment-0.160.0', network: env.CODEX_WORKER_NETWORK || 'new-api-codex-workers',
     cpuPercent: Number(env.CODEX_WORKER_CPU_PERCENT || 5), memoryMB: Number(env.CODEX_WORKER_MEMORY_MB || 2048),
     frpConfigFile: env.CODEX_FRP_CONFIG_FILE || '',
-    maxActive: Number(env.CODEX_MAX_ACTIVE || 2), maxWorkspaces: Number(env.CODEX_MAX_WORKSPACES || 40),
+    maxActive: Number(env.CODEX_MAX_ACTIVE || 2), maxActiveTasks: Number(env.CODEX_MAX_ACTIVE_TASKS || 8), maxWorkspaces: Number(env.CODEX_MAX_WORKSPACES || 40),
     idleSeconds: Number(env.CODEX_IDLE_SECONDS || 600), models, efforts,
     defaultModel: env.CODEX_DEFAULT_MODEL || models[0] || '', defaultEffort: env.CODEX_DEFAULT_EFFORT || 'medium',
     version: '0.160.0',
@@ -268,7 +268,7 @@ export async function loadConfig(env = process.env) {
     const endpoint = new URL(config.apiBaseUrl);
     if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('Invalid CODEX_API_BASE_URL');
   }
-  for (const [name, min, max] of [['port', 1, 65535], ['maxActive', 1, 8], ['maxWorkspaces', 1, 1000], ['idleSeconds', 30, 86400]]) {
+  for (const [name, min, max] of [['port', 1, 65535], ['maxActive', 1, 8], ['maxActiveTasks', 1, 64], ['maxWorkspaces', 1, 1000], ['idleSeconds', 30, 86400]]) {
     if (!Number.isInteger(config[name]) || config[name] < min || config[name] > max) throw new Error(`Invalid ${name}`);
   }
   if (!Number.isFinite(config.cpuPercent) || config.cpuPercent <= 0 || config.cpuPercent > 100) throw new Error('Invalid cpuPercent');

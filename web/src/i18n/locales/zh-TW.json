@@ -7265,5 +7265,17 @@
     "Refresh repositories": "重新整理儲存庫",
     "To access all your repositories, install this GitHub App on your account and choose All repositories.": "若要存取你的全部儲存庫，請將此 GitHub App 安裝到你的帳號，並選擇 All repositories（全部儲存庫）。",
     "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes.": "主機主目錄不提供變更追蹤。請選擇具體專案目錄以檢視檔案差異。"
-  }
+  },
+  "Automatic intelligence check": "自動檢測降智",
+  "Uses the fixed question and Test Model at the channel testing interval. Results only reflect this question.": "按渠道檢測間隔，使用測試模型獨立回答固定題目。結果僅反映此題的回覆。",
+  "Automatically disable degraded channels": "降智時自動停用",
+  "Only an explicit degraded answer disables the tested channel or key. Errors and inconclusive replies do not disable it.": "僅明確回答「降智」才停用本次檢測的渠道或金鑰；請求失敗和無法判定不會觸發停用。",
+  "Run intelligence check": "立即檢測降智",
+  "Save the channel before running an intelligence check.": "儲存渠道後即可立即檢測。",
+  "Intelligence check passed": "不降智",
+  "Intelligence degraded": "降智",
+  "Intelligence check inconclusive": "無法判定",
+  "Intelligence check request failed": "檢測請求失敗",
+  "Automatically disabled by intelligence check": "已因降智檢測自動停用",
+  "Start parallel task": "平行新任務"
 }

@@ -7265,5 +7265,17 @@
     "Refresh repositories": "リポジトリを更新",
     "To access all your repositories, install this GitHub App on your account and choose All repositories.": "すべてのリポジトリにアクセスするには、この GitHub App をアカウントにインストールし、All repositories を選択してください。",
     "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes.": "ホストのホームディレクトリでは変更を追跡できません。ファイルの差分を確認するには、プロジェクトのディレクトリを選択してください。"
-  }
+  },
+  "Automatic intelligence check": "性能低下を自動検査",
+  "Uses the fixed question and Test Model at the channel testing interval. Results only reflect this question.": "チャンネルの検査間隔で、テストモデルに固定の質問を単独送信します。結果はこの質問への回答のみを反映します。",
+  "Automatically disable degraded channels": "性能低下時に自動停止",
+  "Only an explicit degraded answer disables the tested channel or key. Errors and inconclusive replies do not disable it.": "明確な性能低下の回答のみ、検査したチャンネルまたはキーを停止します。リクエスト失敗や判定不能では停止しません。",
+  "Run intelligence check": "今すぐ検査",
+  "Save the channel before running an intelligence check.": "検査を実行するにはチャンネルを保存してください。",
+  "Intelligence check passed": "低下なし",
+  "Intelligence degraded": "性能低下",
+  "Intelligence check inconclusive": "判定不能",
+  "Intelligence check request failed": "検査リクエスト失敗",
+  "Automatically disabled by intelligence check": "性能低下の検査により自動停止",
+  "Start parallel task": "並列タスクを開始"
 }
