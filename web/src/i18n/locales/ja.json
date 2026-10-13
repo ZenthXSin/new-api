@@ -7263,6 +7263,7 @@
     "GitHub repository access": "GitHub リポジトリへのアクセス",
     "Grant repository access": "リポジトリへのアクセスを許可",
     "Refresh repositories": "リポジトリを更新",
-    "To access all your repositories, install this GitHub App on your account and choose All repositories.": "すべてのリポジトリにアクセスするには、この GitHub App をアカウントにインストールし、All repositories を選択してください。"
+    "To access all your repositories, install this GitHub App on your account and choose All repositories.": "すべてのリポジトリにアクセスするには、この GitHub App をアカウントにインストールし、All repositories を選択してください。",
+    "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes.": "ホストのホームディレクトリでは変更を追跡できません。ファイルの差分を確認するには、プロジェクトのディレクトリを選択してください。"
   }
 }

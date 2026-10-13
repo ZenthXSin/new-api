@@ -86,6 +86,33 @@ async function newWorkspace(context, owner = '1') {
 }
 const turnInput = () => ({ prompt: 'Update the website', model: 'fixture-model', effort: 'high', mode: 'code', requestId: randomUUID() });
 
+test('a startup failure before submitting to Codex can retry the same retained draft exactly once', async (t) => {
+  const context = await fixture(t);
+  const id = await newWorkspace(context);
+  const input = turnInput();
+  context.runtime.baseline = async () => { throw Object.assign(new Error('Host directory snapshot failed'), {code:'remote_operation_failed',statusCode:409}); };
+  const failed = await context.request(`/workspaces/${id}/turns`, {method:'POST',body:input});
+  assert.equal(failed.status,409);assert.equal(context.runtime.turns,0);
+  context.runtime.baseline = async () => {};
+  const retry = await context.request(`/workspaces/${id}/turns`, {method:'POST',body:input});
+  assert.equal(retry.status,200);assert.equal(context.runtime.turns,1);
+  const duplicate = await context.request(`/workspaces/${id}/turns`, {method:'POST',body:input});
+  assert.equal(duplicate.status,200);assert.equal(duplicate.data.turnId,retry.data.turnId);assert.equal(context.runtime.turns,1);
+});
+
+test('a rejection after submitting to Codex never resubmits the same request', async (t) => {
+  const context = await fixture(t);
+  const id = await newWorkspace(context);
+  const input = turnInput();
+  context.runtime.rpcFailures = new Map([['turn/start',{code:-32000,message:'Upstream rejected task'}]]);
+  const failed = await context.request(`/workspaces/${id}/turns`, {method:'POST',body:input});
+  assert.equal(failed.success,false);
+  context.runtime.rpcFailures.clear();
+  const retry = await context.request(`/workspaces/${id}/turns`, {method:'POST',body:input});
+  assert.equal(retry.success,false);assert.equal(retry.code,failed.code);
+  assert.equal(context.runtime.requests.filter(request=>request.method==='turn/start').length,1);
+});
+
 test('disconnecting during task startup leaves server execution, persistence and explicit stop independent', { timeout: 15000 }, async (t) => {
   const context = await fixture(t);
   const id = await newWorkspace(context);

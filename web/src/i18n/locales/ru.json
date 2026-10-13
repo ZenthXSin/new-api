@@ -7263,6 +7263,7 @@
     "GitHub repository access": "Доступ к репозиториям GitHub",
     "Grant repository access": "Разрешить доступ к репозиториям",
     "Refresh repositories": "Обновить репозитории",
-    "To access all your repositories, install this GitHub App on your account and choose All repositories.": "Для доступа ко всем вашим репозиториям установите это приложение GitHub в своей учётной записи и выберите All repositories."
+    "To access all your repositories, install this GitHub App on your account and choose All repositories.": "Для доступа ко всем вашим репозиториям установите это приложение GitHub в своей учётной записи и выберите All repositories.",
+    "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes.": "Отслеживание изменений недоступно для домашнего каталога хоста. Выберите каталог проекта, чтобы просматривать изменения файлов."
   }
 }

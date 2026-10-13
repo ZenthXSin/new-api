@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import os from 'node:os';
+import path from 'node:path';
 import { RemoteRuntime } from './remote-runtime.mjs';
 import { runCommand } from './workspace-files.mjs';
+import { workspaceError } from './user-layout.mjs';
 
 // Keep credentials in stdin, never in systemd unit arguments or environment
 // properties. The launcher consumes precisely one line before handing the
@@ -67,5 +69,17 @@ export class HostRuntime extends RemoteRuntime {
     // Check the chosen existing directory before recording a project.
     await this.list(id);
     return { id, host: { path: this.cwd(id) } };
+  }
+  async baseline(id) {
+    const prepared = await this.prepare(id);
+    // A host home is a server entry point, not one source repository. An eager
+    // snapshot scans unrelated repositories, credentials and large caches.
+    if (prepared.home && path.resolve(this.cwd(id)) === path.resolve(prepared.home)) return { ready: true, tracked: false };
+    return super.baseline(id);
+  }
+  async diff(id) {
+    const prepared = await this.prepare(id);
+    if (prepared.home && path.resolve(this.cwd(id)) === path.resolve(prepared.home)) throw workspaceError('Change tracking is unavailable for the host home directory. Choose a project directory to view file changes.', 'host_home_diff_unavailable', 409);
+    return super.diff(id);
   }
 }

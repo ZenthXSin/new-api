@@ -7263,6 +7263,7 @@
     "GitHub repository access": "GitHub 儲存庫授權",
     "Grant repository access": "授權儲存庫",
     "Refresh repositories": "重新整理儲存庫",
-    "To access all your repositories, install this GitHub App on your account and choose All repositories.": "若要存取你的全部儲存庫，請將此 GitHub App 安裝到你的帳號，並選擇 All repositories（全部儲存庫）。"
+    "To access all your repositories, install this GitHub App on your account and choose All repositories.": "若要存取你的全部儲存庫，請將此 GitHub App 安裝到你的帳號，並選擇 All repositories（全部儲存庫）。",
+    "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes.": "主機主目錄不提供變更追蹤。請選擇具體專案目錄以檢視檔案差異。"
   }
 }

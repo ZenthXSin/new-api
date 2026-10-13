@@ -770,13 +770,18 @@ export class WorkspaceManager {
       const previous = state.requests[input.requestId];
       if (previous) {
         if (previous.fingerprint !== fingerprint) throw apiError(409, 'idempotency_conflict', 'This request ID was already used for different input');
-        if (previous.status === 'failed') throw apiError(previous.statusCode || 409, previous.code || 'task_not_started', previous.message || 'The prior request failed; create a new request to retry');
-        if (queued && queuedExecution) {
-          if (previous.status === 'pending') throw apiError(409, 'queue_state_uncertain', 'The previous start result is unknown. Check the conversation, then cancel this queued message before sending again.');
-          this.clearQueuedTurn(state, input.requestId);
-          await this.store.persist(state);
+        if (previous.status === 'failed') {
+          // The browser keeps this ID with its draft. Initialization can be
+          // retried after fixing the environment only when no task was sent.
+          if (previous.code !== 'remote_operation_failed' || previous.sent || previous.turnId || replayTurnId) throw apiError(previous.statusCode || 409, previous.code || 'task_not_started', previous.message || 'The prior request failed; create a new request to retry');
+        } else {
+          if (queued && queuedExecution) {
+            if (previous.status === 'pending') throw apiError(409, 'queue_state_uncertain', 'The previous start result is unknown. Check the conversation, then cancel this queued message before sending again.');
+            this.clearQueuedTurn(state, input.requestId);
+            await this.store.persist(state);
+          }
+          return { workspace: this.store.publicWorkspace(state), turnId: previous.turnId || null, duplicate: true };
         }
-        return { workspace: this.store.publicWorkspace(state), turnId: previous.turnId || null, duplicate: true };
       }
       if (queued && !queuedExecution || body.busyAction === 'queue') {
         if (state.workspace.archived) throw apiError(409, 'workspace_archived', 'Restore the workspace before starting a task');

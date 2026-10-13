@@ -7263,6 +7263,7 @@
     "GitHub repository access": "Quyền truy cập kho GitHub",
     "Grant repository access": "Cấp quyền truy cập kho",
     "Refresh repositories": "Làm mới kho",
-    "To access all your repositories, install this GitHub App on your account and choose All repositories.": "Để truy cập tất cả kho của bạn, hãy cài GitHub App này vào tài khoản và chọn All repositories."
+    "To access all your repositories, install this GitHub App on your account and choose All repositories.": "Để truy cập tất cả kho của bạn, hãy cài GitHub App này vào tài khoản và chọn All repositories.",
+    "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes.": "Không thể theo dõi thay đổi trong thư mục chính của máy chủ. Hãy chọn thư mục dự án để xem khác biệt giữa các tệp."
   }
 }

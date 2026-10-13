@@ -7263,6 +7263,7 @@
     "GitHub repository access": "GitHub repository access",
     "Grant repository access": "Grant repository access",
     "Refresh repositories": "Refresh repositories",
-    "To access all your repositories, install this GitHub App on your account and choose All repositories.": "To access all your repositories, install this GitHub App on your account and choose All repositories."
+    "To access all your repositories, install this GitHub App on your account and choose All repositories.": "To access all your repositories, install this GitHub App on your account and choose All repositories.",
+    "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes.": "Change tracking is unavailable for the host home directory. Choose a project directory to view file changes."
   }
 }
