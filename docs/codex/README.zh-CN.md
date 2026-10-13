@@ -80,6 +80,17 @@ Code 允许修改当前用户的项目文件与运行命令；Ask 将当前用�
 
 ## GitHub 与 SSH 连接
 
+### 一次授权访问全部仓库
+
+如果希望用户首次连接时一次申请全部公开和私有仓库的开发权限，请为 Codex 配置独立的 **GitHub OAuth App**。连接请求会同时申请 `repo read:org workflow`：仓库代码、提交、Issue、Pull Request 和工作流权限在同一个 GitHub 授权页确认，不需要逐个选择个人仓库。组织仓库仍受组织的第三方应用与 SSO 策略约束。权限范围见 [GitHub OAuth scopes](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps)。
+
+1. 在 [GitHub 注册 OAuth App](https://github.com/settings/applications/new)，回调地址填写本站的 `https://<网站域名>/codex?github_oauth=1`。当前连接实现尚未管理 OAuth App 的刷新令牌；按 [GitHub 注册文档](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app) 的兼容要求，注册时取消勾选 `Expire user access tokens`。
+2. 如果此前已用另一个 App 连接 Codex，先在旧配置生效期间断开旧连接并完成凭据撤销，再切换配置。断开连接会停止该用户相关执行进程，请等任务结束后操作。
+3. 将新 App 的 `CODEX_GITHUB_CLIENT_ID` 和 `CODEX_GITHUB_CLIENT_SECRET_FILE` 配置给 **New API 服务**。Secret 文件需要以只读方式挂载到 API 容器，文件路径填写容器内路径；也支持服务端的 `CODEX_GITHUB_CLIENT_SECRET`。若使用 `CODEX_GITHUB_REDIRECT_URI`，其值必须与注册回调地址一致。这些配置独立于网站登录使用的 GitHub App。
+4. 更新 API 服务配置后，用户点击“连接 GitHub”，在同一授权页确认权限即可。凭据保留在服务端，仓库列表按用户自身权限加载。
+
+### GitHub App 的仓库安装授权
+
 GitHub App 的登录授权与仓库安装授权分开进行。连接成功只代表身份授权完成；要访问私有仓库，还需将同一个 App 安装到仓库所属的个人或组织账号，并在 GitHub 安装页选择这些仓库。连接页、新建项目和云端环境仓库选择器提供“授权仓库”和“刷新仓库”入口，刷新会重新获取当前账号的连接及仓库列表，并保留已选择的仓库。
 
 管理员可设置 `CODEX_GITHUB_APP_SLUG`（GitHub App 页面 `/apps/<slug>` 中的 slug），让授权按钮直接打开该 App 的安装页。未设置时使用 GitHub 的授权应用设置页。组织的安装或权限变更可能需要组织管理员批准；App 本身还需配置读取仓库内容的权限，才能克隆私有仓库。OAuth App 使用 `repo` scope，仍按其已授予的权限读取列表。
